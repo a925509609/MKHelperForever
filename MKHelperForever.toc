@@ -1,0 +1,299 @@
+## Interface: 11500,11501,11502,11503,11504,11505,11506,11507,11508,11509,16000,16001,16002,16003
+# ============================================================
+# MKHelperForever —— 《魔兽世界：无限》(World of Warcraft: Forever) 适配版
+# ------------------------------------------------------------
+# ★ 关于 Interface 版本号：
+#   上方列出的是「多版本容错列表」，覆盖两条分支：
+#     11500-11509  探索赛季 / 经典系（1.15.x）
+#     16000-16003  《魔兽世界：无限》——客户端版本 1.60.x，
+#                  beta 期开发者实际使用的接口号为 16001
+#   客户端只要匹配到任一即视为最新，不会弹出「过期插件」。游戏内可用：
+#       /run print(select(4,GetBuildInfo()))
+#   查看本机实际接口号。若仍未匹配（客户端判为过期），请在插件列表勾选
+#   「加载过期插件 / Load out of date AddOns」。
+#
+# ★ 架构说明（2026-10-02 更正）：无限并非 1.15.x 经典客户端分支，而是
+#   与正式服 Mainline 12.1.5 同源的 UI 架构（版本 1.60.1），并继承
+#   Midnight 的插件限制：COMBAT_LOG_EVENT_UNFILTERED 对插件禁用、
+#   战斗中部分数值为受保护值(secret value)、经典期 UnitBuff/UnitDebuff
+#   等旧 API 已不可用；经典天赋 API（GetTalentTabInfo / GetNumTalentTabs /
+#   GetNumTalents / GetTalentInfo）亦被移除，均由 Core/Forever_Compat.lua
+#   提供同名兜底实现（仅在原生缺失时安装，可用 /mkfspec 诊断与手工指定专精）。
+#
+# ★ 1.60.1 游戏内实测（2026-11-05，/mkfspells + /mkfspellscan）：
+#   已暴露：C_Spell.* / C_SpellBook.* / C_UnitAuras.* / C_SpecializationInfo /
+#           C_ClassTalents + C_Traits / issecretvalue / canaccessvalue /
+#           UnitHealthPercent / C_CurveUtil
+#   已移除：GetNumSpellTabs / GetSpellBookItemName / GetSpecialization /
+#           GetPrimaryTalentTree / CombatLogGetCurrentEventInfo
+#   ★ 法术 ID 分两段：经典段 1..130000（实测 16470 条），无限新增段为
+#     7 位 spellID（法术书已见 1260189 / 1293657 / 1293712）。技能名反查
+#     必须同时覆盖两段，否则会把 WotLK 后续技能误判为「已移除」：
+#       /mkfspellscan          经典段（覆盖式）
+#       /mkfspellscan high     补扫 1200000..1400000 并合并（推荐）
+#     采集结果写入 PigSet.MKFSpellScan，/reload 后落盘到角色级存档。
+#
+# ★ 客户端模式识别：/mkfclient
+#   若自动识别不符，可手工指定：/mkfmode forever   （或 sod / auto）
+# ★ 专精识别诊断：/mkfspec
+#   自动探测失败时手工指定：/mkfspec 冰霜   （/mkfspec auto 恢复自动）
+#
+# ★ 与探索赛季版的差异：本版在原 MKHelperSoD 基础上新增
+#     Data\Forever_Content.lua    无限首发区域/地下城/团本/战场
+#     Data\Forever_Racials.lua    10 种族 40 项种族特长（含天裔）
+#     Data\Forever_Abilities.lua  9 职业天赋主动技能 + SoD 符文存活对照
+#     Data\Forever_SkillRegistry.lua  技能存在性注册表(WR_Forever_SkillAbsent 闸门) + 每职业无限技能集(WR_Forever_ClassKit)
+#     Core\Forever_Compat.lua     客户端识别 / 专精树名归一 / 光环与天赋 API 兜底 / 法术 API 归一
+#     Core\Forever_SecretGuard.lua 受限数值安全层(secret value) / CLEU 注册闸门
+#     Core\Forever_Hooks.lua      符文守卫 / 种族爆发注入 / 符文短路
+#     Boss\Forever_BossMechanics.lua  无限副本注册表与机制框架
+#   详见根目录 README_Forever.md 与 Forever_Adaptation_Plan.md
+#
+# ★ 死亡骑士：无限首发 9 职业（无 DK），相关加载项已移出。
+#   文件仍保留在 DeathKnight\ 目录下，待暴雪后续开放可直接恢复。
+# ============================================================
+
+## Title:|cffFF69B4MKHelperForever|r
+## Title-zhCN: |cffFF69B4 MKHelperForever|cff00ff00[魔兽世界：无限]v1.0
+## Notes: Rotation helper adapted for World of Warcraft: Forever (Classic+).
+## Notes-zhCN: 面向《魔兽世界：无限》(Forever / Classic+) 的循环助手；含首发副本、种族特长与天赋技能数据层。
+## Author: miao
+## Version: 1.0-forever.20260913
+## IconTexture: Interface\AddOns\MKHelperForever\MKHelperForever.tga
+## SavedVariablesPerCharacter: PigSet
+## SavedVariables: MyAddon_SaveData, MKHelperForeverBridgeGrid
+## Category: Auto & Helper
+## OptionalDeps: NDui,WeakAuras
+## X-Client: forever
+
+# ============================================================
+# 0. 运行时状态
+# ============================================================
+Runtime\State.lua
+Runtime\Manifest.lua
+
+# ============================================================
+# 1. 无限数据层 + 兼容层（必须先于 Core 加载）
+# ============================================================
+Data\Forever_Content.lua
+Data\Forever_Racials.lua
+Data\Forever_Abilities.lua
+Data\Forever_SkillRegistry.lua
+Core\Forever_Compat.lua
+Core\Forever_SecretGuard.lua
+
+# ============================================================
+# 2. 核心
+# ============================================================
+Core\MainLoop.lua
+Core\Core_Functions.lua
+Core\SoD_Runes.lua
+Core\InterruptController.lua
+Core\BLACKLIST.lua
+Core\UI_Config.lua
+Core\UI_TalentFrame.lua
+Core\UI_ColorFrame.lua
+Core\UI_ColorFrame_1.lua
+Core\Global_Macros.lua
+Core\GX.lua
+Core\UI_CommandList.lua
+Libs\LibRangeCheck-3.0.lua
+Core\Utils_HealerWeight.lua
+Core\Utils_DeathTime.lua
+Core\Utils_UnitAura_Dispatcher.lua
+Core\ZZ_Features_Migration.lua
+Core\Forever_APIShim.lua
+Core\AOE_Count.lua
+Core\SmartAOE.lua
+Core\Combat_Tools.lua
+
+# ============================================================
+# 3. BOSS 特化框架与职业模块
+# ============================================================
+Boss\WR_BossMechanics.lua
+Boss\Forever_BossMechanics.lua
+Boss\WR_Warrior_BossSpecials.lua
+Boss\WR_Rogue_BossSpecials.lua
+Boss\WR_Mage_BossSpecials.lua
+Boss\WR_Warlock_BossSpecials.lua
+Boss\WR_Paladin_BossSpecials.lua
+Boss\WR_Druid_BossSpecials.lua
+Boss\WR_Hunter_BossSpecials.lua
+Boss\WR_Shaman_BossSpecials.lua
+Boss\WR_Priest_BossSpecials.lua
+
+Core\Trinket_Burst.lua
+Core\Potion_Cooldown_Full.lua
+Core\TIP.lua
+
+# ============================================================
+# 4. 职业模块
+# ============================================================
+Paladin\Paladin_Menu.lua
+Paladin\Paladin_Macros.lua
+Paladin\Paladin_P1Enhancement.lua
+Paladin\Paladin_Holy.lua
+Paladin\Paladin_Holy_ShieldFreedom.lua
+Paladin\Paladin_Protection.lua
+Paladin\Paladin_Retribution.lua
+Paladin\Paladin_Forever.lua
+Paladin\Paladin_Forever_Ret.lua
+Paladin\Paladin_Forever_Prot.lua
+Paladin\Paladin_Forever_Holy.lua
+Paladin\Paladin_Retribution_Check.lua
+
+Druid\Druid_Menu.lua
+Druid\Druid_Macros.lua
+Druid\DRUID_EssenceOptimization.lua
+Druid\DRUID_RestorationHealing.lua
+Druid\DRUID_AOE_Optimization.lua
+# Druid\DRUID_EclipseSystem.lua   ★ 已移出：日月蚀是 WLK 机制，无限为 60 级无此系统（文件保留，7 个 WR_DR_* 函数确认无跨文件引用）
+Druid\Druid_Balance.lua
+Druid\Druid_Feral.lua
+Druid\Druid_Restoration.lua
+Druid\Druid-Restoration-Extra.lua
+Druid\Druid_Guardian.lua
+Druid\Druid_Forever.lua
+Druid\Druid_Forever_Balance.lua
+Druid\Druid_Forever_Feral.lua
+Druid\Druid_Forever_Guardian.lua
+Druid\Druid_Forever_Restoration.lua
+
+Mage\Mage_Menu.lua
+Mage\Mage_Macros.lua
+Mage\Mage_Arcane.lua
+Mage\Mage_Fire.lua
+Mage\Mage_Frost.lua
+Mage\Mage_Forever.lua
+Mage\Mage_Forever_Arcane.lua
+Mage\Mage_Forever_Fire.lua
+Mage\Mage_Forever_Frost.lua
+
+Warrior\Warrior_Menu.lua
+Warrior\Warrior_Macros.lua
+Warrior\Warrior_Arms.lua
+Warrior\Warrior_Fury.lua
+Warrior\Warrior_Protection.lua
+Warrior\Warrior_Forever.lua
+Warrior\Warrior_Forever_Arms.lua
+Warrior\Warrior_Forever_Fury.lua
+Warrior\Warrior_Forever_Protection.lua
+
+Priest\Priest_Menu.lua
+Priest\Priest_Macros.lua
+Priest\Priest_Discipline.lua
+Priest\Priest_Holy.lua
+Priest\Priest_Shadow.lua
+Priest\Priest_Forever.lua
+Priest\Priest_Forever_Discipline.lua
+Priest\Priest_Forever_Holy.lua
+Priest\Priest_Forever_Shadow.lua
+
+Hunter\Hunter_Menu.lua
+Hunter\Hunter_Macros.lua
+Hunter\Hunter_BeastMastery.lua
+Hunter\Hunter_Marksmanship.lua
+Hunter\Hunter_Survival.lua
+Hunter\Hunter_Forever.lua
+Hunter\Hunter_Forever_BM.lua
+Hunter\Hunter_Forever_MM.lua
+Hunter\Hunter_Forever_SV.lua
+Hunter\Hunter_EagleShot.lua
+
+Rogue\Rogue_Menu.lua
+Rogue\Rogue_Macros.lua
+Rogue\Rogue_Assassination.lua
+Rogue\Rogue_Combat.lua
+Rogue\Rogue_Subtlety.lua
+Rogue\Rogue_ComboPoints_Tracker.lua
+Rogue\Rogue_Forever.lua
+Rogue\Rogue_Forever_Assassination.lua
+Rogue\Rogue_Forever_Combat.lua
+Rogue\Rogue_Forever_Subtlety.lua
+
+Shaman\Shaman_Menu.lua
+Shaman\Shaman_Macros.lua
+Shaman\Shaman_Elemental.lua
+Shaman\Shaman_Enhancement.lua
+Shaman\Shaman_Restoration.lua
+Shaman\Shaman_Restoration_Extra.lua
+Shaman\Shaman_Forever.lua
+Shaman\Shaman_Forever_Elemental.lua
+Shaman\Shaman_Forever_Enhancement.lua
+Shaman\Shaman_Forever_Restoration.lua
+
+Warlock\Warlock_Menu.lua
+Warlock\Warlock_Macros.lua
+Warlock\Warlock_Affliction.lua
+Warlock\Warlock_Demonology.lua
+Warlock\Warlock_Destruction.lua
+Warlock\Warlock_OOC_Summon_BExt.lua
+Warlock\Warlock_Corruption_Refresh.lua
+Warlock\Warlock_Forever.lua
+Warlock\Warlock_Forever_Affliction.lua
+Warlock\Warlock_Forever_Demonology.lua
+Warlock\Warlock_Forever_Destruction.lua
+
+Core\Menu_Healer_TOC.lua
+Core\Menu_PetOwner_TOC.lua
+
+# ============================================================
+# 5. 战斗辅助与监控
+# ============================================================
+Core\Trinket_Monitor.lua
+Core\Utils_Interrupt_Target.lua
+Core\TargetDeathTime_Advanced.lua
+Core\Mouseover_DeathTime.lua
+Core\Focus_DeathTime.lua
+Core\DebugHUD.lua
+Core\Healer_FocusWeight.lua
+Core\Target_Whitelist.lua
+Core\AOE_SingleTarget_Blacklist.lua
+Core\Burst_Whitelist.lua
+Core\PetAttack_Status.lua
+Core\CastInfo_Monitor.lua
+Core\Utils_Interrupt_Focus.lua
+Core\RaidTarget_DeathTime.lua
+Core\RaidTarget_Validity.lua
+Core\Engineering_Check.lua
+# Core\ProfessorPutricide_Special.lua   ★ 已移出：ICC(WLK) 团本 BOSS，无限首发无此副本（文件保留，确认无跨文件引用）
+Core\Combat_ResurrectPotion.lua
+
+Warlock\Warlock_ShadowBolt_CastTime.lua
+Warlock\Warlock_CorruptionSnapshot_All.lua
+Warlock\Warlock_FocusCorruption_Snapshot.lua
+Warlock\Warlock_FocusShadowBolt_Switch.lua
+Warlock\Warlock_TargetCorruption_Snapshot.lua
+Warlock\Warlock_PetFocusTarget_Switch.lua
+Warlock\Warlock_PseudoExecute_Switch.lua
+Warlock\Warlock_Incinerate_Switch.lua
+Warlock\Warlock_DrainSoul_Calc.lua
+Warlock\Warlock_DrainSoul_SnapshotSave.lua
+Warlock\Warlock_DrainSoul_Hit.lua
+Warlock\Warlock_Immolate_CastSwitch.lua
+Warlock\Warlock_Mouseover_Cast.lua
+Warlock\Warlock_Mouseover_Immolate.lua
+
+Warrior\Warrior_SwingTimer_Advanced.lua
+
+Shaman\Shaman_SwingTimer.lua
+Shaman\Shaman_ElementalMastery.lua
+Shaman\Shaman_FlameShock_Timer.lua
+
+Paladin\Paladin_SwingTimer.lua
+
+Priest\Priest_MindFlay_Segment.lua
+Priest\Priest_Mouseover_Cast.lua
+Priest\Priest_SWPain_Snapshot.lua
+Priest\Priest_SelfDebuffs_Tracker.lua
+
+# Mage\Mage_ArcaneCharge.lua   ★ 已移出：奥术充能是正式服机制，60 级无限无此资源（文件保留，确认无跨文件引用）
+Mage\Mage_Fire_BurningCount.lua
+Mage\Mage_Pyroblast_Fly.lua
+
+Core\CombatTimer_Advanced.lua
+
+# ============================================================
+# 6. 无限适配挂钩层（必须最后：依赖前面所有函数已定义）
+# ============================================================
+Core\Forever_Hooks.lua

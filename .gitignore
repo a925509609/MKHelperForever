@@ -1,0 +1,16 @@
+# 开发/构建产物与本地状态，不进仓库
+.workbuddy/
+outputs/
+*.bak
+
+# 过时的阶段性计划文档（非代码）
+UpdatePlan_*.md
+Forever_SpellScan_Report.html
+
+# 临时文件
+*.tmp
+~*
+
+# WorkBuddy 应用标记文件（非插件代码）
+.wbapp_*.genie
+*.genie
