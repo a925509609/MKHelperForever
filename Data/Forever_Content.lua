@@ -13,7 +13,7 @@
 --   1. WR_ForeverContent.IsForeverZone(zoneName)  —— 判断当前是否处于无限的新区域
 --   2. WR_ForeverContent.FindInstanceByZone(zone) —— 由区域名反查地下城/团本条目
 --   3. WR_ForeverContent.GetLevelBracket(level)   —— 由等级反推适合的地下城
---   4. 主面板「内容」页 / 命令清单直接遍历本表渲染
+--   4. 主面板「内容」页直接遍历本表渲染
 -- ============================================================
 
 WR_ForeverContent = {

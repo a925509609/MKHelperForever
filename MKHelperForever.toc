@@ -96,7 +96,6 @@ Core\UI_ColorFrame.lua
 Core\UI_ColorFrame_1.lua
 Core\Global_Macros.lua
 Core\GX.lua
-Core\UI_CommandList.lua
 Libs\LibRangeCheck-3.0.lua
 Core\Utils_HealerWeight.lua
 Core\Utils_DeathTime.lua
@@ -104,7 +103,6 @@ Core\Utils_UnitAura_Dispatcher.lua
 Core\ZZ_Features_Migration.lua
 Core\Forever_APIShim.lua
 Core\AOE_Count.lua
-Core\SmartAOE.lua
 Core\Combat_Tools.lua
 
 # ============================================================

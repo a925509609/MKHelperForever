@@ -163,6 +163,10 @@ Paladin_Menu = {
                 saveVariable = "FANG_ADD_FQ",
                 defaultID = 1
             },
+            -- ★ 2026-11-11：圣印选择已从下拉框改为「圣印」专区的按钮（见 CB 列表末尾）。
+            --   顺序必须与 Paladin_Forever.lua 的 WR_PaladinForever_SealOptions 严格一致：
+            --   1=十字军圣印(30) 2=正义圣印(47) 3=愤怒圣印(11)
+            --   4=光明圣印·回血(54) 5=智慧圣印·回蓝(108) 6=公正圣印(9)
             -- ★ 祝福选择（防护专精）
             {
                 text = "|cffF58CBA祝福|r",
@@ -230,7 +234,7 @@ Paladin_Menu = {
             { row = 1, column = 5, IconID = 133712, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0通用热力工程炸药|r或|cff00adf0萨隆邪铁炸弹|r\n", saveVariable = "FH_ZD", defaultState = false },
 
             -- 第2行            { row = 2, column = 2, IconID = 135962, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0正义之怒|r\n", saveVariable = "FH_ZYZN", defaultState = true },
-            { row = 2, column = 4, IconID = 135926, text = "|cffF58CBA自动|r", tooltipText = "奉献", saveVariable = "FH_FX", defaultState = true },
+            { row = 2, column = 4, IconID = 135926, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0奉献|r\n\n|cffaaffaa多目标循环（8 码内目标 ≥2 个）|r：\n审判 → 神圣打击 → 驱邪术（可用就打）→ 神圣之盾\n|cffaaffaa奉献仅在 8 码内目标 ≥3 个时使用|r，作为第一优先，需要蓝量 ≥30%（低于 30% 不施放）且目标在近战 5 码内。\n\n|cffaaffaa目标 ≤1 个|r：奉献降到最后一档，需目标 ≥3 个、蓝量 ≥30%（低于 30% 不施放）。", saveVariable = "FH_FX", defaultState = true },
             -- 第3行
             { row = 3, column = 2, IconID = 135963, text = "|cffF58CBA中虫|r", tooltipText = "TOC的中虫打断以及ICC巫妖王P1的大怪|cff00adf0制裁之锤|r\n", saveVariable = "FH_CRZCZC_DG", defaultState = false },
             { row = 3, column = 3, IconID = 135902, text = "|cff00adf0自动|r", tooltipText = "自动对亡灵/恶魔释放|cff00adf0神圣愤怒|r", saveVariable = "FH_SSFN_Auto", defaultState = false },
@@ -248,8 +252,12 @@ Paladin_Menu = {
             { row = 5, column = 1, IconID = 135968, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0自由之手|r\n", saveVariable = "FH_CRZYZS", section = "插入", defaultState = false },
             { row = 5, column = 4, IconID = 135928, text = "|cff00adf0插入|r", tooltipText = "插入|cff00adf0圣疗术|r（对自己）\n", saveVariable = "FH_CRSLS", section = "插入", defaultState = false },
             { row = 5, column = 5, IconID = 135896, text = "|cff00adf0插入|r", tooltipText = "插入|cff00adf0圣盾术|r（对自己）\n", saveVariable = "FH_CRSDS", section = "插入", defaultState = false },
-            -- ★ 2026-11-07：插入 光明圣印（防骑已学会；宏 CTRL-F11 / 颜色槽 54）
-            { row = 5, column = 2, IconID = 135893, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0光明圣印|r（一次性）\n\n|cffaaffaa勾选后，等「审判」CD 转好时执行一次：|r\n1. 提示切到|cff00adf0光明圣印|r（槽位 54，宏 CTRL-F11）\n2. 切印完成后提示|cff00adf0审判|r，让这一发审判挂上「圣光审判」\n3. 目标出现|cff00adf0圣光审判|r后，自动提示切回当前循环的常驻圣印（正义/愤怒圣印）\n4. 确认切回后|cffaaffaa自动取消勾选|r，本次插入结束\n\n|cffff5040注意|r：圣印同一时间只能有一个，切光明会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n所以只在需要光明审判回血时用；平时保持关闭。\n切印后 10 秒内没打出审判会自动放弃；审判后 15 秒内未切回也会自动收尾，不会卡住。\n未学会光明圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_CRGMSY", section = "插入", defaultState = false },
+            -- ==========================================================
+            -- ★★ 2026-11-11：审判buff 专区（三个 buff 维持开关，可折叠；位于「圣印」专区上方）
+            --   光明圣印 / 十字军审判 / 智慧审判，三者互斥（PAL_PROT_JUDGEMENT_SEAL）。
+            -- ==========================================================
+            -- ★★ 2026-11-11：原「插入 光明圣印」一次性流程改为「光明圣印」常驻开关
+            { row = 1, column = 1, IconID = 135917, text = "|cffF58CBA光明圣印|r", tooltipText = "光明圣印|cff00adf0 buff 常驻开关|r（原「插入光明圣印」改造，宏 CTRL-F11 / 颜色槽 54）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 优先维持自己身上的|cff00adf0光明圣印|r（30 秒 Buff，掉了会自动补）\n2. 目标没有「光明审判」debuff 时，审判就绪即提示|cff00adf0审判|r，给目标挂上 debuff\n3. 目标已有|cff00adf0光明审判|r（光明圣印的审判效果）时，自动提示切回当前常驻圣印（面板「圣印」专区所选，默认愤怒圣印）\n4. 光明审判持续 40 秒，到期后自动重复上述流程\n\n|cffff5040注意|r：圣印同一时间只能有一个，切光明会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n仅建议需要光明审判回血时开启；与「十字军审判」「智慧审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选光明圣印时同样有效）。\n未学会光明圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_CRGMSY", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
             -- ★ 2026-11-09：插入 智慧圣印（回复法力；宏 ALT-SHIFT-F8 / 颜色槽 108）
             { row = 5, column = 3, IconID = 135970, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0智慧圣印|r（一次性）\n\n|cffaaffaa勾选后，等「审判」CD 转好时执行一次：|r\n1. 提示切到|cff00adf0智慧圣印|r（槽位 108，宏 ALT-SHIFT-F8）\n2. 切印完成后提示|cff00adf0审判|r，让这一发审判带上智慧圣印效果（回蓝）\n3. 审判打出后|cffaaffaa自动取消勾选|r，本次插入结束\n\n|cffff5040注意|r：圣印同一时间只能有一个，切智慧会暂时顶掉常驻圣印（仇恨来源），\n所以只在缺蓝时用；平时保持关闭。\n切印后 10 秒内没打出审判会自动放弃并取消勾选，不会卡住。\n未学会智慧圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_CRZHSY", section = "插入", defaultState = false },
             -- ★ 自动切目标开关
@@ -258,12 +266,29 @@ Paladin_Menu = {
             { row = 6, column = 2, IconID = 135964, text = "|cff00adf0指向保护|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0保护之手|r（优先级最高）\n战斗内外均可：脱战也可鼠标指向|cff00adf0预读保护|r（开怪前先套）\n|cffaaffaa施放成功后自动取消勾选（一次性），悬停不再反复触发|r\n（本复选框仅控制鼠标指向直接插入；团血自动补由上方「全局保护」下拉独立控制，不受本复选框影响）", saveVariable = "FH_ZZBH", section = "插入", defaultState = false },
             { row = 6, column = 3, IconID = 135966, text = "|cff00adf0指向牺牲|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0牺牲之手|r（优先级最高）\n战斗内外均可：脱战也可鼠标指向|cff00adf0预读牺牲|r（开怪前先套）\n|cffaaffaa施放成功后自动取消勾选（一次性），悬停不再反复触发|r\n（本复选框仅控制鼠标指向直接插入；团血自动补由上方「全局牺牲」下拉独立控制，不受本复选框影响）", saveVariable = "FH_ZZXS", section = "插入", defaultState = false },
             { row = 6, column = 4, IconID = 135967, text = "|cff00adf0指向拯救|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0拯救之手|r（减威胁，优先级最高）\n战斗内外均可：脱战也可鼠标指向|cff00adf0预读拯救|r（开怪前先套）\n|cffaaffaa施放成功后自动取消勾选（一次性），悬停不再反复触发|r\n（拯救为减威胁技能，仅鼠标指向直接插入，无团血自动补）", saveVariable = "FH_ZZJZ", section = "插入", defaultState = false },
-            -- ★ 2026-11-08：单体循环模式（勾选=开，一直生效；不同于上述「插入」类一次性开关）
-            { row = 6, column = 5, IconID = 135993, text = "|cffF58CBA单体|r", tooltipText = "开启后，防护循环切换为|cff00adf0单体循环|r模式：\n1. 先用|cff00adf0十字军圣印|r，打出|cff00adf0审判|r挂上十字军审判 debuff（提升神圣伤害）\n2. 然后切回|cff00adf0愤怒圣印|r常驻，维持仇恨\n3. 之后按常规优先级：神圣打击 / 审判 / 神圣之盾 / 驱邪术 / 奉献 / 愤怒之锤\n\n|cffaaffaa本开关常驻生效（勾选即一直用），不是一次性插入|r\n未学会十字军圣印或审判时自动跳过该前置，直接按常规循环。", saveVariable = "FH_DT", defaultState = false },
+            -- ★★ 2026-11-11：删除「单体」循环开关（FH_DT）。原「十字军圣印 → 审判 → 切回」起手
+            --   由下方「十字军审判」buff 维持开关取代（常驻维持，不再是一次性起手）。
+            -- ★★ 2026-11-11：十字军审判 buff 维持开关（与「光明圣印」常驻开关同款状态机）
+            { row = 1, column = 2, IconID = 135924, text = "|cffF58CBA十字军审判|r", tooltipText = "十字军审判|cff00adf0 buff 维持开关|r（十字军圣印，宏 ALT-NUMPAD0 / 颜色槽 30）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 优先维持自己身上的|cff00adf0十字军圣印|r（30 秒 Buff，掉了会自动补）\n2. 目标没有「十字军审判」debuff 时，审判就绪即提示|cff00adf0审判|r，给目标挂上 debuff\n3. 目标已有「十字军审判」debuff 时，自动提示切回当前常驻圣印（面板「圣印」专区所选，默认愤怒圣印）\n4. 十字军审判持续 40 秒，到期后自动重复上述流程\n\n|cffff5040注意|r：圣印同一时间只能有一个，切十字军会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n建议需要提升神圣伤害时开启；与「光明圣印」「智慧审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选十字军圣印时同样有效）。\n未学会十字军圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_SZJSP", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
+            -- ★★ 2026-11-11：智慧审判 buff 维持开关（与「光明圣印」「十字军审判」同款状态机）
+            { row = 1, column = 3, IconID = 135970, text = "|cffF58CBA智慧审判|r", tooltipText = "智慧审判|cff00adf0 buff 维持开关|r（智慧圣印，宏 ALT-SHIFT-F8 / 颜色槽 108）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 优先维持自己身上的|cff00adf0智慧圣印|r（30 秒 Buff，掉了会自动补）\n2. 目标没有「智慧审判」debuff 时，审判就绪即提示|cff00adf0审判|r，给目标挂上 debuff（攻击/法术有几率回蓝）\n3. 目标已有「智慧审判」debuff 时，自动提示切回当前常驻圣印（面板「圣印」专区所选，默认愤怒圣印）\n4. 智慧审判持续 40 秒，到期后自动重复上述流程\n\n|cffff5040注意|r：圣印同一时间只能有一个，切智慧会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n建议需要回蓝时开启；与「光明圣印」「十字军审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选智慧圣印时同样有效）。\n未学会智慧圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_ZHSP", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
             -- ★ 2026-11-08：神圣之盾开关（常驻；默认开 = 保持原有行为）
             { row = 7, column = 1, IconID = 135880, text = "|cffF58CBA神圣之盾|r", tooltipText = "开启后，防护循环会在|cff00adf0神圣之盾|r冷却好时提示施放（防护核心减伤/仇恨）。\n\n|cffaaffaa默认勾选|r，与加入此开关之前的行为一致。\n关闭后循环不再提示神圣之盾，适合想手动控制、或该技能浪费蓝量时。\n未学会神圣之盾时不会提示（与开关无关）。", saveVariable = "FH_SZS", defaultState = true },
-            -- ★ 2026-11-08：正义圣印循环（替代愤怒圣印作为常驻圣印）
-            { row = 7, column = 2, IconID = 135969, text = "|cffF58CBA正义圣印|r", tooltipText = "开启后，防护循环的|cff00adf0常驻圣印|r由|cff00adf0愤怒圣印|r改为|cff00adf0正义圣印|r。\n\n|cffff5040注意|r：\n· 愤怒圣印的审判带|cffff0000嘲讽|r，换成正义圣印后|cffff0000审判不再嘲讽|r，需自己用别的办法拉怪；\n· 正义圣印每次命中附加额外神圣伤害，适合快速武器 / 单拉稳定输出；\n· 与「单体」开关可同时使用：起手仍是 十字军圣印 → 审判 → 切回正义圣印。\n\n未学会正义圣印时不会补印（其余循环照常），也不会误用愤怒圣印。", saveVariable = "FH_ZYSY", defaultState = false },
+
+            -- ==========================================================
+            -- ★★ 2026-11-11：圣印专区（按钮，可折叠；位于「审判buff」专区下方）
+            -- ----------------------------------------------------------
+            -- 用户口径：「圣印我不喜欢下拉框的，给我设置成按钮，单独弄一个
+            -- 圣印专区，此专区在爆发区下，可以折叠」。
+            -- 单选按钮：点击即写 PigSet.FH_SEAL = 序号（1十字军30/2正义47/3愤怒11/
+            -- 4光明54/5智慧108/6公正9），同组其它按钮自动取消勾选；默认 3=愤怒圣印。
+            -- ==========================================================
+            { row = 1, column = 1, IconID = 135924, text = "|cffF58CBA十字军|r", tooltipText = "选择|cff00adf0十字军圣印|r作为常驻圣印（槽 30）。\n\n|cffaaffaa点击即选中，同一时间只能选一个；掉了会自动补。|r\n|cffaaffaa可与「十字军审判」buff 维持开关同时生效（两者共存）。|r", radioVariable = "FH_SEAL", radioValue = 1, radioDefault = 3, section = "圣印" },
+            { row = 1, column = 2, IconID = 132325, text = "|cffF58CBA正义|r", tooltipText = "选择|cff00adf0正义圣印|r作为常驻圣印（槽 47）。\n\n|cffaaffaa点击即选中，同一时间只能选一个；掉了会自动补。|r", radioVariable = "FH_SEAL", radioValue = 2, radioDefault = 3, section = "圣印" },
+            { row = 1, column = 3, IconID = 135957, text = "|cffF58CBA愤怒|r", tooltipText = "选择|cff00adf0愤怒圣印|r作为常驻圣印（槽 11，默认）。\n\n|cffaaffaa点击即选中，同一时间只能选一个；掉了会自动补。|r\n|cffffdf00审判带嘲讽，是防护坦克的仇恨来源。|r", radioVariable = "FH_SEAL", radioValue = 3, radioDefault = 3, section = "圣印" },
+            { row = 1, column = 4, IconID = 135917, text = "|cffF58CBA光明|r", tooltipText = "选择|cff00adf0光明圣印|r作为常驻圣印（槽 54，回血）。\n\n|cffaaffaa点击即选中，同一时间只能选一个；掉了会自动补。|r\n|cffaaffaa可与「光明圣印」buff 常驻开关同时生效（两者共存）。|r", radioVariable = "FH_SEAL", radioValue = 4, radioDefault = 3, section = "圣印" },
+            { row = 1, column = 5, IconID = "Interface\\Icons\\Spell_Holy_SealOfWisdom", text = "|cffF58CBA智慧|r", tooltipText = "选择|cff00adf0智慧圣印|r作为常驻圣印（槽 108，回蓝）。\n\n|cffaaffaa点击即选中，同一时间只能选一个；掉了会自动补。|r\n|cffaaffaa可与「智慧审判」buff 维持开关同时生效（两者共存）。|r\n|cffff5040选它时「插入智慧圣印」会自动取消（常驻已经是智慧圣印）。|r", radioVariable = "FH_SEAL", radioValue = 5, radioDefault = 3, section = "圣印" },
+            { row = 1, column = 6, IconID = "Interface\\Icons\\Spell_Holy_SealOfJustice", text = "|cffF58CBA公正|r", tooltipText = "选择|cff00adf0公正圣印|r作为常驻圣印（槽 9）。\n\n|cffaaffaa点击即选中，同一时间只能选一个；掉了会自动补。|r", radioVariable = "FH_SEAL", radioValue = 6, radioDefault = 3, section = "圣印" },
         },
     },
 

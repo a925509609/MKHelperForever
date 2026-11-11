@@ -70,6 +70,38 @@ function WR_PaladinForever_AutoAttackActive()
     return false
 end
 
+-- ★★ 2026-11-10 用户口径：「战斗中加入自动平砍」
+-- ------------------------------------------------------------
+-- 旧行为（也是旧 bug 的来源）：
+--   WR_PaladinForever_AutoAttackActive() 在战斗中恒返回 true —— 无限 1.60.x
+--   读不到真实的「自动攻击进行中」状态，兼容层只能按 UnitAffectingCombat 兜底。
+--   于是循环里唯一的「攻击」提示（Prot 第 4 段）只在脱战出现。
+--   平砍一旦在战斗中停下（切目标 / 目标死亡后换目标 / /startattack 被打断 /
+--   被控制后恢复），插件再也不会提示，玩家白丢整场平砍输出。
+--
+-- 现在改为「事件优先 + 限频兜底」：
+--   · PLAYER_ENTER_COMBAT / PLAYER_LEAVE_COMBAT 可用时按真实事件维护状态，
+--     一收到 ENTER 就立刻停止提示（真实状态优先，不浪费色块）；
+--   · 事件不可用（无限可能不派发这两个事件）时，退化为「每 2 秒最多提示一次」——
+--     一次 /startattack 就能重开平砍，重复按无害，2 秒限频保证不会饿死技能循环；
+--   · 提示位置放在【所有技能环节之后】，所以即使状态判不准也绝不会抢占技能优先级。
+--   为什么用「固定 2 秒限频 + 事件优先停止」而不是「状态常亮」：
+--     · 色块常亮 = AHK 每 ~60ms 按一次 /startattack，虽然无 GCD 无害，但会长期
+--       占着色块；一旦将来有人把它挪到技能之前，就会立刻复现「某环节饿死全循环」。
+--     · 固定 2 秒限频 + 1.5 秒保持 = 亮 1.5 秒、暗 0.5 秒，永远不会常亮；
+--       而一次 /startattack 就足以把平砍接上，2 秒内必然恢复。
+--     · 事件可用时（PLAYER_ENTER_COMBAT）会立刻停止提示，比限频更快。
+WR_PaladinForever_AUTOATTACK_RETRY = 2.0   -- 战斗中平砍重开提示的最小间隔（秒）
+WR_PaladinForever_AutoAttackOn = false     -- 事件维护的「平砍是否在跑」
+WR_PaladinForever_AutoAttackEventKnown = false  -- 是否收到过任何 enter/leave 事件
+
+function WR_PaladinForever_AutoAttackNeedsRestart()
+    -- 明确知道平砍在跑（收到 PLAYER_ENTER_COMBAT）→ 不需要重开
+    if WR_PaladinForever_AutoAttackOn then return false end
+    -- 其余情况统一走限频，避免色块常亮被 AHK 连按
+    return WR_PaladinForever_CanPrompt("攻击", WR_PaladinForever_AUTOATTACK_RETRY or 2.0)
+end
+
 -- ★ 本地技能冷却计时（无限 12.x 战斗中 GetSpellCooldown 是 secret，
 --   WR_GetGCD 会被收敛成 0 → WR_SpellUsable 恒 true → 色块一直卡在第一个技能）。
 --   本地记账分两张表：
@@ -136,12 +168,17 @@ end
 --   但客户端明确说「还在 CD 中」，就直接判为未就绪，避免退化成「每 1.1 秒亮一次」。
 function WR_PaladinForever_ClientCooldownLeft(spell)
     if type(WR_SpellCooldownInfo) ~= "function" then return nil end
-    local ids = WR_PaladinForever_SpellRankIDs and WR_PaladinForever_SpellRankIDs[spell]
+    -- ★★ 2026-11-10：优先查「当前 rank」的 ID（WR_ResolveSpellID 已能从法术书基础名解析），
+    --   旧写法固定取 ids[#ids]（最高 rank），角色未满级时查的是没学会的 rank，结果不可靠。
     local sid
-    if ids and #ids > 0 then
-        sid = ids[#ids] -- 取最高 rank 的 ID 作为查询代表
-    elseif type(WR_ResolveSpellID) == "function" then
+    if type(WR_ResolveSpellID) == "function" then
         sid = WR_ResolveSpellID(spell)
+    end
+    if not sid then
+        local ids = WR_PaladinForever_SpellRankIDs and WR_PaladinForever_SpellRankIDs[spell]
+        if ids and #ids > 0 then
+            sid = ids[#ids] -- 兜底：取最高 rank ID 作为查询代表
+        end
     end
     if not sid then return nil end
     local ok, start, dur = pcall(WR_SpellCooldownInfo, sid)
@@ -205,9 +242,20 @@ function WR_PaladinForever_ShowSkillCD(spell, slot, cd)
             -- ③ 保守兜底：
             --    · 短 CD 循环技能（<=15 秒）只按提示保持窗口防连刷 ——
             --      提示≠施放，漏看一次不能整段 CD 不再提示；
-            --    · 长 CD 技能（圣佑/圣疗/制裁）仍按完整 CD 防刷屏。
+            --    · 中长 CD 技能：按「有限次重试」而不是完整 CD 屏蔽。
+            --   ★★ 2026-11-10 修复「一次漏按锁死整个 CD」：
+            --     旧写法长 CD 一律 guard = cd，而 圣疗术 传 1200 秒、圣佑术 传 300 秒。
+            --     一旦「施放成功事件」没记上账（战斗中 spellName 可能是 secret）且客户端
+            --     冷却也不可读（同为 secret），第一次点亮后 20 分钟 / 5 分钟内不再提示，
+            --     即使玩家完全没按 —— 表现为「圣疗术再也没亮过」。
+            --     现在：<=15 秒按保持窗口重试；<=300 秒最多每 20 秒重试一次；
+            --     更长的（真正的长 CD 大招）才沿用完整 CD 防刷屏。
             local guard = cd
-            if cd <= 15 then guard = WR_PaladinForever_PROMPT_HOLD or 1.5 end
+            if cd <= 15 then
+                guard = WR_PaladinForever_PROMPT_HOLD or 1.5
+            elseif cd <= 300 then
+                guard = math.min(cd, 20)
+            end
             if lastPrompt and (now - lastPrompt) < guard then return false end
         end
     end
@@ -249,7 +297,10 @@ end
 
 -- ★ 各技能本地冷却（秒）。审判会被「强化审判」天赋缩短，改用 GetJudgeCooldown 探测。
 WR_PaladinForever_SkillCD = {
-    ["神圣打击"] = 10, -- 本服：等级3 / SpellID 1866 / 10 秒（已用截图核实）
+    -- ★★ 2026-11-11：本服神圣打击实际为 6 秒 CD（等级5 / SpellID 2495 截图实测），
+    --   旧值误写 10 秒 → 每次施放后本地多锁 4 秒，6~10 秒这段已经转好却不亮，
+    --   表现就是「CD 好了没有第一时间打出」。
+    ["神圣打击"] = 6,
     ["审判"]     = 10, -- 基础 10 秒；强化审判 2/2 后 8 秒（见 GetJudgeCooldown）
 }
 
@@ -262,7 +313,13 @@ WR_PaladinForever_SkillCastAt = WR_PaladinForever_SkillCastAt or {}
 WR_PaladinForever_SkillCastAtByID = WR_PaladinForever_SkillCastAtByID or {}
 -- ★ 每个技能在无限里的全部 rank spellID（施放时上报的是「当前 rank」的 ID）
 WR_PaladinForever_SpellRankIDs = {
-    ["神圣打击"] = { 678, 679, 1866, 10332, 10333 },
+    -- ★★ 2026-11-10：补齐神圣打击全部 8 个 rank（ForeverDB build 1.60.1.70862）：
+    --   678=R1(6级) / 679=R2(12级) / 1866=R3(20级) / 680=R4(28级) /
+    --   2495=R5(36级) / 5569=R6(44级) / 10332=R7(52级) / 10333=R8(60级)
+    --   旧表缺 680/2495/5569：角色升到 28 级后当前 rank 不在表里，
+    --   写死的 1866（R3）又不是当前 rank → 施放事件按 ID 认不出、WR_SpellUsable 判不可用，
+    --   表现就是「神圣打击 CD 好了也不打」。
+    ["神圣打击"] = { 678, 679, 1866, 680, 2495, 5569, 10332, 10333 },
     ["审判"]     = { 20271 },
     ["愤怒圣印"] = { 1311656, 20423 },
     ["正义之怒"] = { 25780 },
@@ -583,6 +640,12 @@ function WR_PaladinForever_HideSkillLater(spell, slot, delay)
         --   都是 secret 认不出时，用它兜底判断「这次事件就是按了圣印」→ 记 30 秒窗口，
         --   避免 30 秒记账断档导致下一 tick 又亮、AHK 反复上印。
         WR_PaladinForever_SealPromptLitAt = GetTime()
+        -- ★★ 2026-11-11：同时记住「点亮的是哪条圣印」。只记通用时间不够——
+        --   十字军审判/光明/智慧 buff 维持状态机判断「目标圣印是否在身上」时，
+        --   光环读不到就只能靠各自专用的 CastAt + LastSealAppliedName 兜底；
+        --   只写 LastSealCastAt 会让状态机永远判「不在身上」→ 每一两个 tick
+        --   重新点亮同一条圣印色块 → AHK 反复施放同一条圣印。
+        WR_PaladinForever_SealPromptLitName = spell
         -- ★★ 2026-11-09 第十一次修正：记录「圣印提示保护窗口」的截止时刻。
         --   窗口内由 WR_PaladinForever_RefreshSealPrompt 每 tick 重亮该色块，
         --   不允许其他技能提示把它顶掉（否则 AHK 读不到 → 战斗中一直不上印）。
@@ -623,7 +686,7 @@ end
 --   本函数把「点亮圣印色块」收敛为唯一出口：
 --     · 默认必须通过 WR_PaladinForever_SealNeedsRefresh（身上有任意圣印 / 30 秒
 --       硬锁内一律 false）；
---     · 显式切印（单体起手 十字军→常驻、插入 光明/智慧圣印）由调用方设置
+--     · 显式切印（光明 / 十字军审判 / 智慧圣印等流程）由调用方设置
 --       WR_PaladinForever_SealSwitchAllowUntil 一次性放行；
 --     · 被拦截时立刻强制隐藏该槽位色块，并记录诊断计数，便于 /mkseal 排查。
 -- ============================================================
@@ -681,7 +744,7 @@ function WR_PaladinForever_RefreshSealPrompt()
     end
     local needed
     if WR_PaladinForever_ActiveSealPromptBypass then
-        -- 显式切印（单体起手 / 光明 / 智慧插入）：窗口内无条件保持
+        -- 显式切印（光明 / 十字军审判 / 智慧插入）：窗口内无条件保持
         needed = true
     else
         needed = WR_PaladinForever_SealNeedsRefresh(name)
@@ -790,7 +853,30 @@ do
     f:RegisterEvent("PLAYER_TALENT_UPDATE")
     f:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
     f:RegisterEvent("CHARACTER_POINTS_CHANGED")
+    -- ★★ 2026-11-10 用户口径「战斗中加入自动平砍」：
+    --   用真实事件维护「平砍是否在跑」，事件缺失时靠限频兜底（见
+    --   WR_PaladinForever_AutoAttackNeedsRestart）。事件不存在也不会报错。
+    f:RegisterEvent("PLAYER_ENTER_COMBAT")
+    f:RegisterEvent("PLAYER_LEAVE_COMBAT")
     f:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_ENTER_COMBAT" then
+            -- 平砍已开 → 不再需要提示；同时清掉已亮标记，让「停下后」能立刻重提示
+            WR_PaladinForever_AutoAttackOn = true
+            WR_PaladinForever_AutoAttackEventKnown = true
+            WR_PaladinForever_HideNow("攻击", 15)
+            return
+        elseif event == "PLAYER_LEAVE_COMBAT" then
+            -- 平砍停了（切目标未接上 / 被打断 / 手动停）→ 允许下一 tick 重新提示
+            WR_PaladinForever_AutoAttackOn = false
+            WR_PaladinForever_AutoAttackEventKnown = true
+            -- ★ 同时清掉「已亮标记」与「提示防抖」，否则 2 秒限频会继续挡住，
+            --   玩家要白等 2 秒才看到「攻击」色块，平砍空窗被无谓拉长。
+            WR_PaladinForever_ClearPromptShown("攻击")
+            if WR_PaladinForever_PromptCD then
+                WR_PaladinForever_PromptCD["攻击"] = nil
+            end
+            return
+        end
         if event == "PLAYER_REGEN_DISABLED" then
             WR_PaladinForever_ForceSealAtCombat = true
             WR_PaladinForever_WasInCombat = true
@@ -807,9 +893,12 @@ do
                 WR_PaladinForever_ScanJudgeTalent()
             end
         elseif event == "PLAYER_DEAD" then
-            -- ★ 死亡会移除圣印：清空两种常驻圣印计时与扫描缓存，复活后重新提示补印
+            -- ★ 死亡会移除圣印：清空三种常驻圣印计时与扫描缓存，复活后重新提示补印
             WR_PaladinForever_ProtSealCastAt = nil
             WR_PaladinForever_JusticeSealCastAt = nil
+            WR_PaladinForever_LightSealCastAt = nil
+            WR_PaladinForever_CrusaderSealCastAt = nil
+            WR_PaladinForever_WisdomSealCastAt = nil
             WR_PaladinForever_LastSealCastAt = nil
             WR_PaladinForever_SealBuffKnownUntil = nil
             WR_PaladinForever_SealScanAt = nil
@@ -818,6 +907,8 @@ do
             WR_PaladinForever_ActiveSealPromptSlot = nil
             WR_PaladinForever_ActiveSealPromptUntil = nil
             WR_PaladinForever_ActiveSealPromptBypass = nil
+            WR_PaladinForever_SealPromptLitAt = nil
+            WR_PaladinForever_SealPromptLitName = nil
             WR_PaladinForever_ForceSealAtCombat = false
             WR_PaladinForever_CombatStartAt = nil
             -- 清掉玩家光环缓存旧值，避免死亡前「圣印还在」的缓存被当成当前状态
@@ -967,7 +1058,7 @@ SlashCmdList["MKSEAL"] = function()
         .. " lastSealCastAt=" .. tostring(WR_PaladinForever_LastSealCastAt)
         .. " now=" .. tostring(GetTime()))
     -- ★ 2026-11-09：排查「所有圣印都不打」时的关键判据（开关 / 真实 Buff / 补印保持窗口）
-    print("|cff00ff00[MKSEAL]|r 开关 FH_ZYSY=" .. tostring(PigSet and PigSet.FH_ZYSY)
+    print("|cff00ff00[MKSEAL]|r 常驻圣印=" .. tostring(sealName)
         .. " 身上任意圣印=" .. tostring(WR_PaladinForever_BaseSealUp())
         .. " 战斗中=" .. tostring(UnitAffectingCombat("player"))
         .. " 补印保持至=" .. tostring(WR_PaladinForever_PromptHold
@@ -1056,10 +1147,34 @@ WR_PaladinForever_SEAL_BUFF_SECONDS = 30
 --     · 光环可读且确有圣印 → 仍在身，不补（尊重玩家手动续的印）；
 --     · 光环可读且确认没有 / 光环不可读 → 视为真的掉了，补一次（并重新开始硬锁）。
 --   这样一场战斗通常只会上 1~2 次印，彻底消除每 ~28 秒的连按爆发。
-WR_PaladinForever_SEAL_LOCK_GRACE = 3   -- 硬锁 = Buff 时长 + 缓冲，覆盖读屏/按键/GCD 与计时抖动
+--
+--   ★★ 2026-11-10 用户口径演变（同一件事，两次收紧）：
+--     ① 「五秒太久了改2秒」→ 缓冲 3 秒收到 1 秒，掉印后 2 秒重新亮；
+--     ② 「圣印空档期太久，我想更快点补圣印」→ 缓冲再收到 0.2 秒。
+--   本常量只负责「硬锁缓冲」，完整空窗 = 缓冲 + Prot 第 3 段那道「缺印确认」：
+--     · 缓冲 3 秒（旧）   → 掉印后 3 + 1 = 4 秒才重新亮（体感约 5 秒）；
+--     · 缓冲 1 秒（上一版）→ 掉印后 1 + 1 = 2 秒重新亮；
+--     · 缓冲 0.2 秒（现）  → 掉印后 0.2 + 0.1 = 0.3 秒重新亮。
+--
+--   为什么 0.2 秒仍然不会「提前补」也不会「反复上印」：
+--     · 硬锁下限 = 30（真实 Buff 时长）+ 0.2 = 30.2 秒，**严格大于** Buff 本身，
+--       所以一个 Buff 周期最多点亮一次色块，理论补印频率不变（每 ~30.2 秒一次）；
+--     · 0.2 秒的余量只用来吸收「客户端 Buff 到期时刻 vs 本地记账时刻」的偏差
+--       （施放成功事件延迟 + 主循环 0.1 秒 tick 量化）；
+--     · 真正的防洪闸不是这个缓冲，而是：
+--       ① 光环可读时以客户端为准（SealBuffState == "up" 一律不补）；
+--       ② Prot 第 3 段的 CanPrompt(mainSeal, 3) —— 色块亮过之后 3 秒内不重亮，
+--          专治「施放成功事件丢失导致记账不推进」的洪水。
+--   所以缓冲收到 0.2 只是把「掉印到补印」的等待缩短，不会放大连按。
+WR_PaladinForever_SEAL_LOCK_GRACE = 0.2   -- 硬锁 = Buff 时长 + 0.2 秒缓冲；+0.1 秒缺印确认 = 掉印后 0.3 秒重新亮
 -- ★ 保留旧名（供旧调用点 / 诊断引用），语义改为「硬锁时长」
 WR_PaladinForever_SEAL_REFRESH_LEAD = 0
 -- ★ 事件全丢导致本地记录异常久远时的极宽兜底（正常永不命中）
+--   ★★ 2026-11-10：本常量已【不再参与补印判定】。旧实现让 SEAL_NO_AURA 名单内的
+--   愤怒圣印走这个 300 秒兜底，与「30 秒真实 Buff 时效」冲突：31 秒后
+--   SealNeedsRefresh=false（不许补）而 ProtSealState=missing（认为没圣印），
+--   审判门控 `sealState ~= "missing" or SealActive()` 两条同时不成立 →
+--   审判 300 秒点不亮。现在两种圣印统一走「Buff + 硬锁缓冲」硬锁。保留常量仅为兼容旧引用。
 WR_PaladinForever_SEAL_MISSING_FALLBACK = 300
 -- ★ 本服「不挂可读 HELPFUL 光环」的圣印名单（愤怒圣印 Seal of Fury 1311656：
 --   audit 实读确认施放后不产生可被 C_UnitAuras 枚举的具名自增益光环）。
@@ -1199,12 +1314,48 @@ local function WR_PaladinForever_NoteSealBuffRemain(remain)
     --   把 SealBuffKnownUntil 推到 now+32 → 永远假 up → 整场战斗允许补印恒 false。
     --   这里拒绝一切明显是哨兵/异常的剩余值（圣印 Buff 只有 30 秒，>120 秒必是哨兵）。
     if remain > 120 then return end
-    local cap = (WR_PaladinForever_SEAL_BUFF_SECONDS or 30) + 2
+    -- ★★ 2026-11-10：cap 由「Buff + 2 秒」收窄到「Buff + 硬锁缓冲」，与硬锁口径对齐。
+    --   旧 cap=32 秒比硬锁（30+缓冲）更宽松，会在「可读光环读到 30~32 秒剩余」时
+    --   把 SealBuffKnownUntil 推到 now+32 → 盖过硬锁 → 可读圣印（正义圣印）仍要
+    --   等到 31~32 秒才补，缓冲收紧就白做了。收窄后两类圣印走同一时序。
+    --   注意：这里只影响「可读光环的上限」，光环明确 up 时仍然一律不补
+    --   （SealNeedsRefresh 第 ① 步先 return false），不会因此提前上印。
+    local cap = (WR_PaladinForever_SEAL_BUFF_SECONDS or 30)
+        + (WR_PaladinForever_SEAL_LOCK_GRACE or 0)
     if remain > cap then remain = cap end
     local untilAt = GetTime() + remain
     local cur = WR_PaladinForever_SealBuffKnownUntil
     if type(cur) ~= "number" or untilAt > cur then
         WR_PaladinForever_SealBuffKnownUntil = untilAt
+    end
+end
+
+-- ★★ 2026-11-10 新增：记录「最后一次【可读地】读到圣印光环」的时刻与名字。
+--   用途见下方 WR_PaladinForever_SealLostEarly：只有「上印之后确实读到过这条圣印，
+--   随后又权威读到没有」才算「被提前驱散」，否则一律按未知处理（继续等硬锁）。
+WR_PaladinForever_SealAuraLastUpAt = WR_PaladinForever_SealAuraLastUpAt or nil
+WR_PaladinForever_SealAuraLastUpName = WR_PaladinForever_SealAuraLastUpName or nil
+-- 圣印/技能名归一：去掉「（等级 2）」这类后缀，便于和 MainSeal 的名字比较
+-- ★★ 2026-11-10：Lua 5.1 字符类按字节匹配，[（(] 这种写法匹配不了多字节全角括号，
+--   之前所有「去掉等级后缀」的地方实际都没生效。这里分两步用字面量匹配：
+--   先全角「（等级 N）」，再半角「(等级 N)」。
+local function WR_PaladinForever_StripRankSuffix(nm)
+    if type(nm) ~= "string" then return nil end
+    local s = string.gsub(nm, "%s*（等级%s*%d+）%s*$", "")
+    if s == nm then
+        s = string.gsub(nm, "%s*%(等级%s*%d+%)%s*$", "")
+    end
+    return s
+end
+local function WR_PaladinForever_BaseSealName(nm)
+    if type(nm) ~= "string" then return nil end
+    return WR_PaladinForever_StripRankSuffix(nm)
+end
+local function WR_PaladinForever_NoteSealAuraReadUp(name)
+    WR_PaladinForever_SealAuraLastUpAt = GetTime()
+    local base = WR_PaladinForever_BaseSealName(name)
+    if base and base ~= "" then
+        WR_PaladinForever_SealAuraLastUpName = base
     end
 end
 -- ★★ 2026-11-09 第七次修正：区分「两种圣印」——
@@ -1271,10 +1422,11 @@ function WR_PaladinForever_SealBuffState()
                 if left and left > 0 and left < 900 then
                     c.state, c.name = "up", nm
                     WR_PaladinForever_NoteSealBuffRemain(left)
+                    WR_PaladinForever_NoteSealAuraReadUp(nm)
                     if type(nm) == "string" then
                         WR_PaladinForever_SealAuraSeenUp[nm] = true
                         -- 兼容「正义圣印（等级 2）」：同时按去后缀基名记一次
-                        local base = (string.gsub(nm, "%s*[（(]等级%s*%d+[）)]%s*$", ""))
+                        local base = WR_PaladinForever_StripRankSuffix(nm)
                         if base ~= nm then
                             WR_PaladinForever_SealAuraSeenUp[base] = true
                         end
@@ -1303,6 +1455,7 @@ function WR_PaladinForever_SealBuffState()
             -- 只确知「此刻在」：给 2 秒桥接，避免下一帧缓存抖动误判 missing
             WR_PaladinForever_NoteSealBuffRemain(2)
         end
+        WR_PaladinForever_NoteSealAuraReadUp(nm)
         WR_PaladinForever_SealAuraSeenUp["*"] = true
         if type(nm) == "string" then
             WR_PaladinForever_SealAuraSeenUp[nm] = true
@@ -1331,6 +1484,45 @@ function WR_PaladinForever_NoteSealApplied(at)
     if type(cur) ~= "number" or untilAt > cur then
         WR_PaladinForever_SealBuffKnownUntil = untilAt
     end
+end
+
+-- ★★ 2026-11-11：记录「某条具体圣印刚刚成功施放」。
+--   背景：无限战斗中 UNIT_SPELLCAST_SUCCEEDED 的 spellName / spellID 可能都是
+--   secret，事件认不出是哪条圣印。旧逻辑的终极兜底只调用 NoteSealApplied 记录
+--   通用时间，没有写 LastSealAppliedName 与各圣印专用的 CastAt 字段。
+--   而「十字军审判 / 光明圣印 / 智慧审判」三个 buff 维持状态机判断
+--   「目标圣印是否在身上」时，在该圣印光环不可读的战斗场景只能靠这两个字段兜底：
+--     · 十字军审判开 → CrusaderSealOnPlayer() 恒 false
+--     · 状态机 phase0 每 1.5 秒重新点亮十字军圣印色块
+--     · AHK「同色常亮就一直按」→ 反复施放十字军圣印（用户 2026-11-11 反馈）
+--   因此这里用「刚刚点亮过的圣印色块名」反推这次按的是哪条圣印，把名字与
+--   专用计时一起补上，状态机下一 tick 即可确认切印成功，不再重复提示。
+function WR_PaladinForever_RecordSealAppliedByName(sealName, at)
+    if type(sealName) ~= "string" or sealName == "" then return false end
+    if not string.find(sealName, "圣印", 1, true) then return false end
+    -- 去掉「（等级 N）」后缀再和状态机常量比较（1.60.x 客户端可能带后缀）
+    local base = WR_PaladinForever_StripRankSuffix(sealName)
+    if type(base) == "string" and base ~= "" then sealName = base end
+    local t = at or GetTime()
+    WR_PaladinForever_LastSealAppliedName = sealName
+    WR_PaladinForever_NoteSealApplied(t)
+    WR_PaladinForever_SealScanAt = nil
+    WR_PaladinForever_SealScanState = nil
+    if WR_PaladinForever_SealBuffStateCache then
+        WR_PaladinForever_SealBuffStateCache.at = nil
+    end
+    if sealName == "十字军圣印" then
+        WR_PaladinForever_CrusaderSealCastAt = t
+    elseif sealName == "光明圣印" then
+        WR_PaladinForever_LightSealCastAt = t
+    elseif sealName == "智慧圣印" then
+        WR_PaladinForever_WisdomSealCastAt = t
+    elseif sealName == "正义圣印" then
+        WR_PaladinForever_JusticeSealCastAt = t
+    elseif sealName == "愤怒圣印" then
+        WR_PaladinForever_ProtSealCastAt = t
+    end
+    return true
 end
 
 -- 身上是否有任意圣印（光环不可读 / 读不准时按 30 秒 Buff 时效兜底）
@@ -1369,6 +1561,75 @@ function WR_PaladinForever_SealActive()
     return WR_PaladinForever_AnySealUp()
 end
 
+-- ★★ 2026-11-10 新增：判断「圣印是否被提前驱散/顶掉」（早于 30 秒 Buff 到期）。
+-- ------------------------------------------------------------
+-- 用户报的问题：圣印被驱散或被别的圣印顶掉时，仍要等满硬锁（30.2 秒）。
+--   例：第 10 秒被驱散 → 要等到第 31 秒才补 → 21 秒空窗。
+--
+-- 为什么不能简单地「读到 missing 就立刻补」：
+--   ① 默认愤怒圣印在本服根本不挂可读光环（SEAL_NO_AURA），「读不到」是常态，
+--      按 missing 补会立刻回到用户反复反馈的「每 2~3 秒反复上印」老 bug；
+--   ② 战斗中玩家光环可能是 secret → 直扫返回 unknown，也不是「真没了」。
+--
+-- 判据（全部成立才算「真被提前驱散」，宁可不补也不误补）：
+--   ① 光环扫描是【权威 missing】（不是 unknown / 缓存不可信）；
+--   ② 本次上印之后，确实【可读地读到过】这条圣印光环 —— 证明它本来是可见的，
+--      不是 SEAL_NO_AURA 那类天然读不到的圣印；
+--   ③ 已过一个小缓冲（SEAL_EARLY_LOST_GRACE），吸收施放成功事件与光环缓存的
+--      刷新延迟（UNIT_AURA → 缓存失效 → 下一 tick 重扫），避免刚上印就误判。
+--   命中后允许补印，并把本地 30 秒记账一并作废（否则 SealBuffKnownUntil 还会
+--   拦住下一次判定）。补印频率上限仍由 CanPrompt(mainSeal, 3) 兜住。
+--   ★ 判据 ② 只看「读到过圣印」而不强求名字一致：圣印名可能带等级后缀、
+--     也可能是玩家手动切了别的圣印（那也是「被顶掉」，同样该补回常驻圣印）。
+--   ★★ 防「提前补印变连按」：额外加一道 10 秒闩锁。万一光环出现「读到 up →
+--     下一帧 missing」的瞬时误读（缓存被清 / secret 抖动），没有这道闩锁就会
+--     每 ~1 秒补一次 → 正是用户当年反馈的「反复上印」。真实被驱散不可能 10 秒内
+--     连续发生多次，所以闩锁不影响正常补印的响应速度。
+WR_PaladinForever_SEAL_EARLY_LOST_GRACE = 1.0
+WR_PaladinForever_SEAL_EARLY_LOST_COOLDOWN = 10.0
+WR_PaladinForever_SealEarlyLossAt = WR_PaladinForever_SealEarlyLossAt or nil
+
+function WR_PaladinForever_SealLostEarly()
+    -- ① 必须权威 missing
+    local s = WR_PaladinForever_SealBuffState()
+    if s ~= "missing" then return false end
+    -- ② 本次上印之后确实读到过光环（天然读不到的圣印永远不满足这条）
+    local seenAt = WR_PaladinForever_SealAuraLastUpAt
+    local last = WR_PaladinForever_LastSealAppliedAt()
+    if type(seenAt) ~= "number" then return false end
+    if type(last) == "number" and seenAt < last then return false end
+    -- ③ 缓冲：吸收事件/缓存刷新延迟
+    local grace = WR_PaladinForever_SEAL_EARLY_LOST_GRACE or 1.0
+    if type(last) == "number" and (GetTime() - last) < grace then return false end
+    -- ④ 闩锁：上一次「提前掉印补印」之后 10 秒内不再走这条路（防瞬时误读连按）
+    local prev = WR_PaladinForever_SealEarlyLossAt
+    local cool = WR_PaladinForever_SEAL_EARLY_LOST_COOLDOWN or 10.0
+    if type(prev) == "number" and (GetTime() - prev) < cool then return false end
+    return true
+end
+
+-- 提前掉印后作废本地 30 秒记账，让补印立刻可以发生（否则 knownUntil 会拦住）
+function WR_PaladinForever_ClearSealLockOnEarlyLoss()
+    WR_PaladinForever_LastSealCastAt = nil
+    WR_PaladinForever_ProtSealCastAt = nil
+    WR_PaladinForever_JusticeSealCastAt = nil
+    WR_PaladinForever_LightSealCastAt = nil
+    WR_PaladinForever_CrusaderSealCastAt = nil
+    WR_PaladinForever_WisdomSealCastAt = nil
+    WR_PaladinForever_LastSealAppliedName = nil
+    WR_PaladinForever_SealPromptLitAt = nil
+    WR_PaladinForever_SealPromptLitName = nil
+    WR_PaladinForever_SealBuffKnownUntil = nil
+    WR_PaladinForever_SealAuraLastUpAt = nil
+    WR_PaladinForever_SealAuraLastUpName = nil
+    -- 光环缓存已由事件失效；这里再清一次圣印状态缓存，保证下一 tick 重新判定
+    if WR_PaladinForever_SealBuffStateCache then
+        WR_PaladinForever_SealBuffStateCache.at = nil
+    end
+    WR_PaladinForever_SealScanAt = nil
+    WR_PaladinForever_SealScanState = nil
+end
+
 -- ★★ 防「反复上印」总闸：这一刻是否允许点亮补/切圣印色块
 --   mainSeal 参数保留给诊断；判定与「当前常驻是哪个圣印」无关：
 --   只要身上有【任意】圣印（含玩家手动切的别的圣印 / 带等级后缀名），
@@ -1394,6 +1655,20 @@ function WR_PaladinForever_SealNeedsRefresh(mainSeal)
     -- ① 光环明确读到任意圣印在身上 → 绝不再补（第一优先，任何圣印都算）
     if s == "up" then return false end
 
+    -- ★★★ 2026-11-10 新增（用户口径：「圣印被提前驱散或顶掉时，仍要等满硬锁」）：
+    --   圣印在第 10 秒被驱散 / 被别的圣印顶掉时，旧逻辑仍要等满 30.2 秒硬锁
+    --   → 最长 21 秒空窗。这里在「权威 missing + 上印后确实读到过光环」时
+    --   提前放行，并作废本地记账，让第 3 段的 0.1 秒缺印确认立刻生效。
+    --   ★ 放在 knownUntil 判定【之前】：提前掉印必须能覆盖掉本地 30 秒记账，
+    --     否则 knownUntil 会一直拦到硬锁结束，等于没修。
+    --   ★ 天然读不到光环的圣印（愤怒圣印）永远不满足「读到过」这条，
+    --     仍走下面的硬锁，所以不会回到「反复上印」。
+    if WR_PaladinForever_SealLostEarly() then
+        WR_PaladinForever_SealEarlyLossAt = GetTime()
+        WR_PaladinForever_ClearSealLockOnEarlyLoss()
+        return true
+    end
+
     -- ★★ 2026-11-09 第十一次修正：之前真实读到过圣印、且其 Buff 尚未到期 →
     --   此刻的 missing/unknown 只是缓存被清空/战斗 secret 的瞬时假象，绝不补印。
     --   这同时修复「挂了圣印打一次审判后又补一次圣印」：审判不再导致误判缺印。
@@ -1404,35 +1679,32 @@ function WR_PaladinForever_SealNeedsRefresh(mainSeal)
 
     local last = WR_PaladinForever_LastSealAppliedAt()
 
-    -- 区分两种圣印（以 SEAL_NO_AURA 显式名单为准 —— 本服已 audit 的「不挂可读光环」
-    -- 圣印才会进这个名字表，目前仅愤怒圣印 Seal of Fury）：
-    --   · SEAL_NO_AURA 名单内 = 读不到光环是常态：「读不到」≠「没了」，绝不能按计时补，
-    --     否则每 33 秒重上一次印（用户反复反馈的「反复上圣印」）。只认记录为空
-    --     （切印 / 死亡）或极宽漏事件兜底。
-    --   · 名单外 = 经典可读光环圣印（正义/命令/十字军…）：战斗中可能暂时 secret，
-    --     走硬锁「Buff 时长 + 缓冲」；硬锁走完仍读不到 → 视为已掉，补一次。
-    local noAura = WR_PaladinForever_SEAL_NO_AURA or {}
-    local isNoAuraSeal = (type(mainSeal) == "string") and noAura[mainSeal] == true
-
-    -- ★★ 2026-11-09 第十次修正：绝对防抖 —— 刚成功施放圣印的 3 秒内一律不允许再点亮
-    --   色块。覆盖「施放成功事件已到、光环数据尚未刷新」的时序差，防止同一次上印
-    --   被判定两次而连闪（AHK 同色连按会把连闪放大成反复施放）。
-    if type(last) == "number" and (GetTime() - last) < 3 then return false end
-
-    if isNoAuraSeal then
-        -- 不可读光环圣印：只认成功施放记录 / 审判切印清空 / 极宽兜底
-        if type(last) ~= "number" then return true end   -- 无记录（切印/死亡后）→ 补一次
-        return (GetTime() - last) >= (WR_PaladinForever_SEAL_MISSING_FALLBACK or 300)
-    end
-
-    -- ★★ 2026-11-09 第十次修正：本服审判不消耗圣印，因此「可读光环 missing」通常
-    --   只会在 Buff 真正到期 / 被驱散时出现；此时本地记录也已超过 30 秒 Buff 时长，
-    --   下面的 33 秒硬锁会自然放行补一次（最多晚 3 秒），无需额外提前补。
-    --   绝不再按「读到 missing」立即补 —— 战斗中的光环缓存可能是空表/假 missing，
-    --   那会退化成每 3 秒点亮一次色块（AHK 同色连按 → 反复上印）。
+    -- ★★ 2026-11-10 修正（用户口径：默认愤怒圣印 300 秒不补导致审判连带饿死）：
+    --   旧实现把 SEAL_NO_AURA 名单内的圣印（目前仅愤怒圣印 Seal of Fury）单独走
+    --   「极宽兜底 300 秒」，理由是「光环读不到 ≠ 没了，别按计时补」。
+    --   但本服圣印真实时效就是 30 秒，于是 31 秒后出现一个自相矛盾的状态：
+    --     · SealNeedsRefresh  → false（300 秒兜底未到）→ 不允许补印；
+    --     · ProtSealState / AnySealUp → missing（30 秒记账已到期）→ 认为身上没圣印。
+    --   而审判门控是 `sealState ~= "missing" or SealActive()`，两条同时不成立
+    --   → 审判整整 300 秒点不亮，主循环只剩神圣打击/神圣之盾。
+    --   实测（模拟 AHK 成功按键）：愤怒圣印仅 t=1s 点亮一次，审判 t=1.5/11.5/21.5
+    --   之后 180 秒内再无一次；对照正义圣印每 10 秒一发正常。
+    --
+    --   现在两种圣印统一走「Buff 时长 + 缓冲」硬锁（30 + 0.2 = 30.2 秒）：
+    --     · 一个 Buff 周期最多点亮一次色块 —— 这是理论最小补印频率，
+    --       不会回到用户反复反馈的「每 2~3 秒反复上印」（那是旧版 2 秒提前补的锅）；
+    --     · 硬锁走完仍读不到光环 → 视为真的掉了，补一次并重新开始硬锁；
+    --     · 光环若可读且确有圣印（玩家手动续的印）→ 前面第 ① 步已 return false。
+    --   SEAL_NO_AURA 名单保留，但只用于诊断，不再改变补印节奏。
+    --   ★★ 2026-11-10 用户口径两次收紧：
+    --     ① 「五秒太久了改2秒」→ 缓冲 3 → 1 秒，掉印后 2 秒重新亮；
+    --     ② 「圣印空档期太久，我想更快点补圣印」→ 缓冲 1 → 0.2 秒，
+    --        完整空窗 = 0.2 秒缓冲 + 第 3 段 0.1 秒缺印确认 = 掉印后 0.3 秒重新亮。
+    --   30.2 秒仍严格 > 30 秒真实 Buff，一个 Buff 周期最多亮一次色块，
+    --   补印频率不变，所以「反复上印」不会回来。
     if type(last) ~= "number" then return true end
     local lockSeconds = (WR_PaladinForever_SEAL_BUFF_SECONDS or 30)
-        + (WR_PaladinForever_SEAL_LOCK_GRACE or 3)
+        + (WR_PaladinForever_SEAL_LOCK_GRACE or 0.2)
     return (GetTime() - last) >= lockSeconds
 end
 
@@ -1469,6 +1741,68 @@ function WR_PaladinForever_CanApplySeal()
     if type(range) == "number" and range < 999 and range > 8 then
         return false
     end
+    return true
+end
+
+-- ============================================================
+-- ★★ 2026-11-10 用户口径（硬规则）：
+--     「循环中任意一个环节，不符合条件就不亮色块，进行下一个循环」
+-- ------------------------------------------------------------
+--   为什么这条规则是必须的（不是洁癖）：
+--     AHK 是「同色常亮就一直按」（约每 60ms 一次）。色块一亮，AHK 就会按键；
+--     如果这一发因为「目标太远 / 目标没了 / 目标不可攻击」根本打不出去，
+--     客户端就不会回 UNIT_SPELLCAST_SUCCEEDED → 本地 CD 记账不推进 →
+--     ShowSkillCD 的 ③ 保守兜底会按 PROMPT_HOLD（1.5 秒）重新点亮 →
+--     该环节每 1.5 秒又亮一次，永远排在调度最前面，
+--     把后面所有环节全部饿死。真机表现就是「循环卡在一个技能上、别的都不出」。
+--
+--   所以：凡是需要敌方目标的环节，点亮色块前必须先过本门；
+--   过不了就 return false，让主循环继续判断下一个环节（而不是亮了再失败）。
+-- ============================================================
+-- 各技能有效射程（码）。未登记 = 自身/Buff 类技能，不判射程。
+--   ★ 只登记「本服法术书里确有射程限制」的进攻技能；值取经典/TBC 上限，
+--     宁宽勿窄：射程判太紧会让技能永远不亮（比亮了打不出去更难排查）。
+WR_PaladinForever_SPELL_RANGE = {
+    ["攻击"]     = 8,   -- 近战平砍（/startattack）
+    ["审判"]     = 10,  -- 神圣伤害审判
+    ["神圣打击"] = 8,   -- 近战
+    ["制裁之锤"] = 10,  -- 眩晕
+    ["愤怒之锤"] = 30,  -- 斩杀
+    ["驱邪术"]   = 30,
+    ["奉献"]     = 5,   -- 以自身为中心
+}
+
+-- 目标是否「存在 + 可攻击 + 活着」（射程之外的另一半门）
+--   ★ 与 CanApplySeal 一致：UnitExists / UnitCanAttack / UnitIsDead 都是客户端标准 API，
+--     主循环本来就裸调用，这里不做 type() 防御（否则 mock/兼容层下会被误判成不可用）。
+function WR_PaladinForever_TargetCastable(unit)
+    unit = unit or "target"
+    if not UnitExists(unit) then return false end
+    if not UnitCanAttack("player", unit) then return false end
+    if UnitIsDead(unit) then return false end
+    return true
+end
+
+-- 目标是否在某技能射程内。
+--   ★ 距离读不到（WR_UnitRange 返回 999/nil）时【放行】：
+--     无限 1.60.x 战斗中 unit GUID 可能是 secret，LibRangeCheck 偶尔算不出距离；
+--     若据此一律拦截，会退化成「永远不出技能」。口径与 CanApplySeal / hsRangeOK 一致。
+function WR_PaladinForever_InSpellRange(spell, unit)
+    local maxRange = WR_PaladinForever_SPELL_RANGE and WR_PaladinForever_SPELL_RANGE[spell]
+    if not maxRange then return true end          -- 自身/Buff 技能不判射程
+    -- ★ 与 CanApplySeal 同一写法：WR_UnitRange 是工程内 Lua 函数，直接按真值调用
+    --   （不要用 type()=="function" 判，兼容层下它是 userdata，会被误判成不可用而放行）。
+    local range = WR_UnitRange and WR_UnitRange(unit or "target")
+    range = tonumber(range) or 999
+    if range >= 999 then return true end          -- 读不到 → 放行
+    return range <= maxRange
+end
+
+-- 统一门：这一刻这一发「真能打出去」吗？
+--   返回 false 时，调用方必须【不点亮色块】，并让主循环继续判断下一个环节。
+function WR_PaladinForever_CanHitTarget(spell, unit)
+    if not WR_PaladinForever_TargetCastable(unit) then return false end
+    if not WR_PaladinForever_InSpellRange(spell, unit) then return false end
     return true
 end
 
@@ -1518,10 +1852,19 @@ end
 --     因此以数字 spellID 为主通道（按 ID 反查技能名，再写名字+全部 rank ID），
 --     事件自带 spellName 可读时作为补充。
 WR_PaladinForever_ProtSealCastAt = WR_PaladinForever_ProtSealCastAt or nil
--- ★ 2026-11-08：正义圣印施放计时（常驻圣印可切换为正义圣印时使用）
+-- ★ 2026-11-08：正义圣印施放计时（旧版常驻圣印兼容回退使用）
 WR_PaladinForever_JusticeSealCastAt = WR_PaladinForever_JusticeSealCastAt or nil
+-- ★ 2026-11-10：光明圣印施放计时（光明圣印常驻开关使用）
+WR_PaladinForever_LightSealCastAt = WR_PaladinForever_LightSealCastAt or nil
+-- ★ 2026-11-11：十字军圣印施放计时（十字军审判 buff 维持开关使用）
+WR_PaladinForever_CrusaderSealCastAt = WR_PaladinForever_CrusaderSealCastAt or nil
+-- ★ 2026-11-11：智慧圣印施放计时（智慧审判 buff 维持开关使用）
+WR_PaladinForever_WisdomSealCastAt = WR_PaladinForever_WisdomSealCastAt or nil
 -- ★ 2026-11-09：任意圣印最近一次成功施放（审判只要求「有任意圣印」）
 WR_PaladinForever_LastSealCastAt = WR_PaladinForever_LastSealCastAt or nil
+-- ★★ 2026-11-11：最后一次成功施放的圣印名（「光明圣印」常驻开关判断
+--   当前身上是不是光明圣印用；光环不可读时只能靠这条本地记账兜底）
+WR_PaladinForever_LastSealAppliedName = WR_PaladinForever_LastSealAppliedName or nil
 WR_PaladinForever_FuryCastAt = WR_PaladinForever_FuryCastAt or nil
 do
     -- spellID → 技能名（覆盖所有已知 rank；未知 ID 走 C_Spell.GetSpellInfo 兜底）
@@ -1537,10 +1880,22 @@ do
         --   而无限战斗中事件自带的 spellName 可能是 secret（读不到）。
         --   这里用 WR_ResolveSpellID 动态反查当前已学 rank ID，保证本地施放计时不断档。
         --   只在「玩家成功施放」事件里调用，不在每 tick 热路径上，开销可忽略。
+        --
+        -- ★★ 2026-11-10：补上防护循环的其余技能（奉献 / 驱邪术 / 愤怒之锤 /
+        --   制裁之锤 / 圣疗术 / 圣佑术）。
+        --   这些技能不在 WR_PaladinForever_SpellRankIDs 静态表里（那里只有 5 项），
+        --   一旦战斗中事件自带 spellName 是 secret，本地就完全记不上账：
+        --     · ShowSkillCD 的 ① 施放记录通道恒空 → 落到 ③ 保守兜底
+        --       （guard = PROMPT_HOLD = 1.5 秒）→ 每次施放成功后仍每 1.5 秒重亮一次
+        --       → AHK 同色连按 → 奉献(8s CD)/驱邪术(15s CD) 被明显过量施放；
+        --     · 长 CD 的圣疗术(1200s)/圣佑术(300s) 反而反向锁死：一次漏按就整段 CD 不再提示。
+        --   这里按「名字→当前 rank ID」动态反查，不写死任何 rank（升级换 rank 也不会失效）。
         if type(WR_ResolveSpellID) == "function" then
             local dynNames = { "正义圣印", "愤怒圣印", "十字军圣印", "命令圣印",
                                "公正圣印", "光明圣印", "智慧圣印", "殉难圣印",
-                               "腐蚀圣印", "复仇圣印", "审判", "神圣打击" }
+                               "腐蚀圣印", "复仇圣印", "审判", "神圣打击",
+                               "奉献", "驱邪术", "愤怒之锤", "制裁之锤",
+                               "圣疗术", "圣佑术" }
             for i = 1, #dynNames do
                 local nm = dynNames[i]
                 local ok, id = pcall(WR_ResolveSpellID, nm)
@@ -1562,7 +1917,7 @@ do
             name = nil
         end
         if name then
-            name = (string.gsub(name, "%s*[（(]等级%s*%d+[）)]%s*$", ""))
+            name = WR_PaladinForever_StripRankSuffix(name)
         end
         return name
     end
@@ -1570,7 +1925,7 @@ do
     local function WR_PaladinForever_NormalizeName(nm)
         if type(nm) ~= "string" or nm == "" then return nil end
         if type(WR_IsSecretValue) == "function" and WR_IsSecretValue(nm) then return nil end
-        return (string.gsub(nm, "%s*[（(]等级%s*%d+[）)]%s*$", ""))
+        return WR_PaladinForever_StripRankSuffix(nm)
     end
 
     -- ★★ 2026-11-09：事件自带 spellName 是 secret、且 NameFromID 静态表没覆盖时，
@@ -1609,12 +1964,28 @@ do
         if not name and sid and WR_PaladinForever_IsSealSpellID(sid) then
             name = WR_PaladinForever_SealNameByID(sid) or "圣印"
         end
+        -- ★★ 2026-11-11：若只能认出「这是圣印」但认不出具体哪条
+        --   （SealNameByID 反查失败），用刚刚点亮过的圣印色块名补全。
+        --   否则 LastSealAppliedName 会被写成泛化的「圣印」，十字军审判 /
+        --   光明 / 智慧 buff 维持状态机将永远判「目标圣印不在身上」→ 反复
+        --   点亮同一条圣印色块 → AHK 反复施放（用户反馈的「反复使用」）。
+        if name == "圣印" then
+            local promptedSeal = WR_PaladinForever_ActiveSealPromptName
+            if type(promptedSeal) ~= "string" then
+                promptedSeal = WR_PaladinForever_SealPromptLitName
+            end
+            if type(promptedSeal) == "string"
+               and string.find(promptedSeal, "圣印", 1, true) then
+                name = promptedSeal
+            end
+        end
 
         if name then
             WR_PaladinForever_MarkCastAt(name, now)
             -- ★★ 任意圣印成功施放（愤怒/正义/十字军/光明/命令…）都记一笔，
             --   并按 30 秒 Buff 时效阻止重复补印。
             if string.find(name, "圣印", 1, true) then
+                WR_PaladinForever_LastSealAppliedName = name
                 WR_PaladinForever_NoteSealApplied(now)
                 -- ★★ 关键：AHK 是「同色常亮就一直按」（每 ~60ms 一次），
                 --   所以打出圣印后必须立刻熄灭【所有】圣印色块，而不是等 3 秒保持到期。
@@ -1655,7 +2026,7 @@ do
                 end
             end
             if cd then WR_PaladinForever_TouchCooldown(name, cd) end
-            -- ★ 圣印施放成功：愤怒圣印 / 正义圣印都记到各自的计时字段，
+            -- ★ 圣印施放成功：愤怒圣印 / 正义圣印 / 光明圣印都记到各自的计时字段，
             --   ProtSealState() 才能正确判断「当前常驻圣印是否在身上」。
             if name == "愤怒圣印" then
                 WR_PaladinForever_ProtSealCastAt = now
@@ -1663,6 +2034,18 @@ do
                 WR_PaladinForever_SealScanState = nil
             elseif name == "正义圣印" then
                 WR_PaladinForever_JusticeSealCastAt = now
+                WR_PaladinForever_SealScanAt = nil
+                WR_PaladinForever_SealScanState = nil
+            elseif name == "光明圣印" then
+                WR_PaladinForever_LightSealCastAt = now
+                WR_PaladinForever_SealScanAt = nil
+                WR_PaladinForever_SealScanState = nil
+            elseif name == "十字军圣印" then
+                WR_PaladinForever_CrusaderSealCastAt = now
+                WR_PaladinForever_SealScanAt = nil
+                WR_PaladinForever_SealScanState = nil
+            elseif name == "智慧圣印" then
+                WR_PaladinForever_WisdomSealCastAt = now
                 WR_PaladinForever_SealScanAt = nil
                 WR_PaladinForever_SealScanState = nil
             elseif name == "正义之怒" then
@@ -1673,6 +2056,7 @@ do
             --   祝福是否还在，只由 WR_PaladinForever_BlessingUp() 读 Buff 判定。
         elseif sid == 1311656 or sid == 20423 then
             WR_PaladinForever_ProtSealCastAt = now
+            WR_PaladinForever_LastSealAppliedName = "愤怒圣印"
             WR_PaladinForever_NoteSealApplied(now)
             WR_PaladinForever_HideNow("愤怒圣印")
         elseif sid == 25780 then
@@ -1681,7 +2065,13 @@ do
         elseif sid and WR_PaladinForever_IsSealSpellID(sid) then
             -- 只剩数字 ID、名字完全读不到：仍要记一笔并熄灭圣印色块，
             -- 否则本地 30 秒窗口断档 → 下一 tick 又亮 → AHK 反复上印。
-            WR_PaladinForever_NoteSealApplied(now)
+            -- ★★ 2026-11-11：按 spellID 反查出具体圣印名（能反查到时），
+            --   同时写该圣印的专用计时与 LastSealAppliedName；否则十字军审判等
+            --   buff 维持状态机会一直判「圣印不在身上」→ 反复点亮同一条圣印。
+            local byID = WR_PaladinForever_SealNameByID(sid)
+            if not WR_PaladinForever_RecordSealAppliedByName(byID, now) then
+                WR_PaladinForever_NoteSealApplied(now)
+            end
             for i = 1, #WR_PaladinForever_SealNames do
                 WR_PaladinForever_HideNow(WR_PaladinForever_SealNames[i])
             end
@@ -1703,7 +2093,18 @@ do
                 end
             end
             if holdHot or litRecently then
-                WR_PaladinForever_NoteSealApplied(now)
+                -- ★★ 2026-11-11：用「刚刚点亮过的圣印色块名」反推这次事件按的是
+                --   哪条圣印，写进它专用的 CastAt 与 LastSealAppliedName。
+                --   否则十字军审判/光明/智慧 buff 维持状态机在光环不可读时
+                --   永远判「圣印不在身上」→ 每 1~2 秒重新点亮同一条圣印
+                --   → AHK 反复施放同一条圣印（用户反馈的「反复使用十字军圣印」）。
+                local promptedSeal = WR_PaladinForever_ActiveSealPromptName
+                if type(promptedSeal) ~= "string" then
+                    promptedSeal = WR_PaladinForever_SealPromptLitName
+                end
+                if not WR_PaladinForever_RecordSealAppliedByName(promptedSeal, now) then
+                    WR_PaladinForever_NoteSealApplied(now)
+                end
                 for j = 1, #WR_PaladinForever_SealNames do
                     WR_PaladinForever_HideNow(WR_PaladinForever_SealNames[j])
                 end
@@ -1744,9 +2145,9 @@ end
 
 -- ★ 防护：常驻圣印状态（供主调度审判门控 / /mkseal 诊断使用）
 --   返回 "up"=有任意圣印 / "missing"=缺印或 Buff 到期。
---   ★ 2026-11-08：常驻圣印按面板 FH_ZYSY 在「愤怒 / 正义」间切换；
---     两个计时字段是全局变量（WR_PaladinForever_ProtSealCastAt /
---     JusticeSealCastAt），由 WR_PaladinForever_LastSealAppliedAt() 统一取最晚者。
+--   ★★ 2026-11-11：常驻圣印由面板「圣印」专区按钮（FH_SEAL，6 个单选按钮）统一选择；
+--     旧的 FH_GMSY / FH_ZYSY 两个复选框已移除（仍保留读取回退，兼容旧存档/夹具）。
+--     施放计时由 WR_PaladinForever_LastSealAppliedAt() 统一取最晚者。
 --   ★★ 2026-11-09 第四次修正：本服圣印是 30 秒短 Buff（截图剩余25秒），
 --     旧版按 1800 秒(30 分钟)记账是错的：要么 Buff 已到期还判 up 不补，
 --     要么光环 secret 读不到时靠 1/8 秒防抖反复补印。现按 30 秒时效重写。
@@ -1777,24 +2178,64 @@ function WR_PaladinForever_ProtSealUp()
     return WR_PaladinForever_ProtSealState() == "up"
 end
 
--- ★★ 2026-11-08：防护常驻圣印可选（愤怒圣印 / 正义圣印）
---   面板「正义圣印」开关 PigSet.FH_ZYSY 打开时，常驻圣印改为正义圣印。
+-- ★★ 2026-11-11：防护常驻圣印由面板「圣印」专区的 6 个按钮选择，默认 3=愤怒圣印。
+--   用户口径：「圣印我不喜欢下拉框的，给我设置成按钮，单独弄一个圣印专区，
+--   此专区在爆发区下，可以折叠」。按钮为单选：点击某个按钮即把 FH_SEAL 写成对应序号。
+--   顺序必须与 Paladin_Menu.lua 的 FH_SEAL 六项严格一致：
+--   1=十字军圣印(30) 2=正义圣印(47) 3=愤怒圣印(11)
+--   4=光明圣印·回血(54) 5=智慧圣印·回蓝(108) 6=公正圣印(9)
 --   返回：圣印名, 颜色槽位, 施放成功时间字段名
---   注意：愤怒圣印的审判带嘲讽；换正义圣印后审判不再嘲讽（面板 tooltip 已注明）。
--- ★★ 2026-11-09 修复「正义圣印循环按钮开启后，正义圣印不使用」：
---   旧实现把 WR_PaladinForever_SpellKnown("正义圣印") 当作开关生效的前置条件，
---   但无限 1.60.x 的 IsPlayerSpell 只认数字 ID，中文名→ID 解析经常误判（本文件
---   多处注释已记录）。一旦误判为 false，且玩家身上还没挂上正义圣印（正是刚勾开关、
---   等循环去上印的状态），MainSeal 会静默回退成「愤怒圣印」→ 循环永远不提示正义圣印。
---   开关代表玩家的明确意图，不该被客户端 API 的单点判定否决：
---     · 「是否真的学会」由补印分支的 WR_SpellUsable / SpellKnown 兜底；
---     · 「身上有该圣印」自然会让 ProtSealState 判 up。
---   因此这里只认开关本身。
+--   注意：愤怒圣印的审判带嘲讽（坦克仇恨来源）；换正义/光明等后审判不再嘲讽。
+--   兼容：旧存档 FH_GMSY / FH_ZYSY 仍作为只读回退（供未走迁移的夹具/旧环境）；
+--   正常客户端由 ZZ_Features_Migration 先迁移到 FH_SEAL 并清空旧字段。
+WR_PaladinForever_SealOptions = {
+    [1] = { "十字军圣印", 30, "CrusaderSealCastAt" },
+    [2] = { "正义圣印", 47, "JusticeSealCastAt" },
+    [3] = { "愤怒圣印", 11, "ProtSealCastAt" },
+    [4] = { "光明圣印", 54, "LightSealCastAt" },
+    [5] = { "智慧圣印", 108, "WisdomSealCastAt" },
+    [6] = { "公正圣印", 9, "LastSealCastAt" },
+}
+
 function WR_PaladinForever_MainSeal()
-    if PigSet and PigSet.FH_ZYSY then
-        return "正义圣印", 47, "JusticeSealCastAt"
+    local idx = tonumber(PigSet and PigSet.FH_SEAL)
+    if not idx then
+        -- 兼容旧存档 / 离线夹具：FH_GMSY=true → 4（光明·回血）；FH_ZYSY=true → 2（正义）；否则 3。
+        if PigSet and PigSet.FH_GMSY == true then
+            idx = 4
+        elseif PigSet and PigSet.FH_ZYSY == true then
+            idx = 2
+        else
+            idx = 3
+        end
     end
-    return "愤怒圣印", 11, "ProtSealCastAt"
+    local opt = WR_PaladinForever_SealOptions[idx]
+    if not opt then opt = WR_PaladinForever_SealOptions[3] end
+    return opt[1], opt[2], opt[3]
+end
+
+-- ★★ 2026-11-11：圣印选择从下拉框改为「圣印」专区按钮后，/FH_SEAL 不再由
+--   下拉框控件自动注册，这里保留同名命令（旧宏继续可用）。
+--   用法：/FH_SEAL 1..6（1=十字军 2=正义 3=愤怒 4=光明 5=智慧 6=公正）
+SLASH_FH_SEAL1 = "/FH_SEAL"
+SlashCmdList["FH_SEAL"] = function(msg)
+    local n = tonumber(msg or "")
+    if n == nil then
+        -- 兼容旧下拉命令：不带数字时循环到下一项
+        n = (tonumber(PigSet and PigSet.FH_SEAL) or 3) + 1
+        if n > #WR_PaladinForever_SealOptions then n = 1 end
+    end
+    local opt = WR_PaladinForever_SealOptions[n]
+    if not opt then
+        print("|cff00ff00[圣印]|r 用法：/FH_SEAL 1-6（1=十字军 2=正义 3=愤怒 4=光明 5=智慧 6=公正）")
+        return
+    end
+    PigSet = PigSet or {}
+    PigSet.FH_SEAL = n
+    if type(WR_ConfigRadio_Refresh) == "function" then
+        WR_ConfigRadio_Refresh("FH_SEAL")
+    end
+    print("|cff00ff00[圣印]|r 已选择常驻圣印：" .. opt[1] .. "（槽 " .. tostring(opt[2]) .. "）")
 end
 
 -- ★ 目标是否为亡灵/恶魔（驱邪术仅对这两类有效）
@@ -1932,6 +2373,41 @@ function WR_PaladinForever_SpellKnown(spellName)
             local ok, res = pcall(IsSpellKnown, sid)
             if ok and res then return true end
         end
+        -- ★★ 2026-11-10：单 ID 查不到时，按该技能的全部 rank 再问一遍。
+        --   有些技能（神圣打击 8 个 rank）解析到的 ID 可能不是角色当前 rank；
+        --   只要任意一个 rank 已学会，就不能把整个技能判死。
+        local ids = WR_PaladinForever_SpellRankIDs and WR_PaladinForever_SpellRankIDs[spellName]
+        if ids then
+            for i = #ids, 1, -1 do
+                local id = ids[i]
+                if type(IsPlayerSpell) == "function" then
+                    local ok, res = pcall(IsPlayerSpell, id)
+                    if ok and res then return true end
+                end
+                if type(IsSpellKnown) == "function" then
+                    local ok, res = pcall(IsSpellKnown, id)
+                    if ok and res then return true end
+                end
+            end
+        end
+        -- ★★ 2026-11-10：最后兜底——法术书里确实存在这个 spellID 就视为已学会。
+        --   无限客户端的 IsPlayerSpell / IsSpellKnown 对部分 rank 可能返回不可靠的 false，
+        --   但法术书索引来自客户端真实数据，存在即已学（尤其用于神圣打击换 rank 后的识别）。
+        if type(WR_Forever_SpellBookList) == "table" then
+            local knownIDs = {}
+            for i = 1, #WR_Forever_SpellBookList do
+                local e = WR_Forever_SpellBookList[i]
+                if type(e) == "table" and type(e.id) == "number" then
+                    knownIDs[e.id] = true
+                end
+            end
+            if knownIDs[sid] then return true end
+            if ids then
+                for i = 1, #ids do
+                    if knownIDs[ids[i]] then return true end
+                end
+            end
+        end
         return false
     end
 
@@ -1980,7 +2456,9 @@ SlashCmdList["MKPAL"] = function()
             string.format("%.0f秒前", now - WR_PaladinForever_GetLastCastAt("审判")) or "无"))
     local hsAt = WR_PaladinForever_GetLastCastAt("神圣打击")
     print("|cff00ff00[MKPAL]|r 神圣打击：上次施放=" .. (hsAt and string.format("%.0f秒前", now - hsAt) or "无")
-        .. " 客户端剩余=" .. tostring(WR_PaladinForever_ClientCooldownLeft("神圣打击")))
+        .. " 客户端剩余=" .. tostring(WR_PaladinForever_ClientCooldownLeft("神圣打击"))
+        .. " 解析ID=" .. tostring(type(WR_ResolveSpellID) == "function" and WR_ResolveSpellID("神圣打击") or "?")
+        .. " 已学会=" .. tostring(WR_PaladinForever_SpellKnown("神圣打击")))
     -- ★ 2026-11-09：常驻圣印诊断（排查「进战斗第一轮不打审判」）
     local sealName, sealSlot, sealField = WR_PaladinForever_MainSeal()
     local sealState = WR_PaladinForever_ProtSealState()
@@ -1999,21 +2477,28 @@ SlashCmdList["MKPAL"] = function()
             .. " 判定已上=" .. tostring(WR_PaladinForever_BlessingUp(rec.name))
             .. " Buff剩余=" .. tostring(WR_GetUnitBuffTime("player", rec.name)))
     end
-    -- ★ 单体循环诊断（排查「勾了没反应」用）
+    -- ★ 2026-11-11：十字军审判 buff 维持开关诊断（原单体循环诊断已随功能删除）
     local crusaderID
     if type(WR_ResolveSpellID) == "function" then
         local ok1, v1 = pcall(WR_ResolveSpellID, "十字军圣印")
         if ok1 then crusaderID = v1 end
     end
-    print("|cff00ff00[MKPAL]|r 单体：FH_DT=" .. tostring(PigSet and PigSet.FH_DT)
-        .. " 阶段=" .. tostring(WR_PaladinForever_SinglePhase)
-        .. " 阶段起始=" .. (WR_PaladinForever_SingleStageAt and
-            string.format("%.1f秒前", now - WR_PaladinForever_SingleStageAt) or "无"))
-    print("|cff00ff00[MKPAL]|r 前置：十字军圣印 ID=" .. tostring(crusaderID)
+    print("|cff00ff00[MKPAL]|r 十字军审判：开关=" .. tostring(PigSet and PigSet.FH_SZJSP)
+        .. " 阶段=" .. tostring(WR_PaladinForever_CrusaderSealPhase)
+        .. " 十字军圣印ID=" .. tostring(crusaderID)
         .. " 已学=" .. tostring(WR_PaladinForever_SpellKnown("十字军圣印"))
-        .. " 审判已学=" .. tostring(WR_PaladinForever_SpellKnown("审判"))
-        .. " 战斗中=" .. tostring(UnitAffectingCombat("player"))
-        .. " 目标在战斗=" .. tostring(TargetInCombat))
+        .. " 审判已学=" .. tostring(WR_PaladinForever_SpellKnown("审判")))
+    -- ★★ 2026-11-11：智慧审判 buff 维持开关诊断
+    local wisdomID
+    if type(WR_ResolveSpellID) == "function" then
+        local ok2, v2 = pcall(WR_ResolveSpellID, "智慧圣印")
+        if ok2 then wisdomID = v2 end
+    end
+    print("|cff00ff00[MKPAL]|r 智慧审判：开关=" .. tostring(PigSet and PigSet.FH_ZHSP)
+        .. " 阶段=" .. tostring(WR_PaladinForever_WisdomJudgementPhase)
+        .. " 智慧圣印ID=" .. tostring(wisdomID)
+        .. " 已学=" .. tostring(WR_PaladinForever_SpellKnown("智慧圣印"))
+        .. " 审判已学=" .. tostring(WR_PaladinForever_SpellKnown("审判")))
     -- ★ 2026-11-08：焦点异常诊断（排查「战斗中自动设焦点」）
     local focusName = UnitExists("focus") and (UnitName("focus") or "?") or "无"
     local focusIsPlayer = UnitExists("focus") and UnitIsPlayer("focus") or false

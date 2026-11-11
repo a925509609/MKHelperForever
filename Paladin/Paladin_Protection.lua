@@ -19,7 +19,6 @@ function WR_PaladinProtection()
     -- 生存优先级
     if WR_PaladinProtection_SZ() then return true end       -- 圣盾术
     if WR_PaladinProtection_QJ() then return true end       -- 清洁术
-    if WR_PaladinProtection_SYTX() then return true end     -- 光环提醒（虔诚/荆棘等）
 
     -- 自动攻击
     if WR_PaladinProtection_GongJi() then return true end    -- 自动攻击
@@ -54,13 +53,7 @@ function WR_PaladinProtection_QJ()
     return false
 end
 
-function WR_PaladinProtection_SYTX()
-    if WR_GetUnitBuffTime("player", "虔诚光环") == 0 and WR_GetUnitBuffTime("player", "荆棘光环") == 0
-       and WR_SpellUsable("虔诚光环") then
-        PigAlert("开启防御光环", 1, 0.8, 0, 1.2)
-    end
-    return false
-end
+-- ★ 2026-11-10 用户要求：删除「开启防御光环」文字提示（原 WR_PaladinProtection_SYTX 整体移除）。
 
 function WR_PaladinProtection_GongJi()
     if not PlayerMove and UnitCanAttack("player", "target") and not UnitIsDead("target")

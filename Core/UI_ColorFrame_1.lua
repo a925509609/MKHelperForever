@@ -4,6 +4,16 @@
 --       以及 WR_ColorFrame_Show 入口函数
 -- ============================================================
 
+-- ★ 2026-11-11：屏幕文字提示总闸（PigSet.ScreenTextNotice，默认关闭）。
+-- 只隐藏「文字」，色块颜色框架本身照常 Show（AHK 取色依赖，不能关）。
+-- 技能名仍写入 FontString（SetText 保留），只做 Hide/Show，避免影响
+-- Paladin_Forever.lua 里读取 GetText 判断「当前是否亮着该技能」的逻辑。
+-- 不覆盖：色块本身的颜色显示（AHK 取色依赖，必须保留）。
+local function WR_ColorTextVisible()
+    if type(WR_ScreenTextNoticeEnabled) ~= "function" then return false end
+    return WR_ScreenTextNoticeEnabled() == true
+end
+
 -- ★ 2026-08-30：技能提示图标框兜底映射（描述/拼接型 text → 真实技能名）
 --   WotLK(3.3.5) 下 GetSpellInfo 只认技能名；WR_ColorFrame_Show 传入的 text 多为技能名，
 --   但「指向保护」「填充奉献」等描述/拼接型需此处映射成真实技能名才能取到图标。
@@ -84,14 +94,19 @@ function WR_MaxColorFrame()
     for _, frame in pairs(ColorFrameArrayTopLeft) do
         frame:SetSize(42, 42)
     end
-    for _, text in pairs(ColorTextArrayTopLeft) do
-        text:Show()
+    -- 总闸关闭时不要把技能名文字重新 Show 出来
+    if WR_ColorTextVisible() then
+        for _, text in pairs(ColorTextArrayTopLeft) do
+            text:Show()
+        end
     end
     for _, frame in pairs(ColorFrameArrayTopRight) do
         frame:SetSize(42, 42)
     end
-    for _, text in pairs(ColorTextArrayTopRight) do
-        text:Show()
+    if WR_ColorTextVisible() then
+        for _, text in pairs(ColorTextArrayTopRight) do
+            text:Show()
+        end
     end
 end
 
@@ -118,7 +133,11 @@ function WR_ShowColorFrame(name, text, Point)
                 WR_SkillIconFrame.Icon:Hide()
             end
             WR_SkillIconFrame.Text:SetText(text)
-            WR_SkillIconFrame.Text:Show()
+            if WR_ColorTextVisible() then
+                WR_SkillIconFrame.Text:Show()
+            else
+                WR_SkillIconFrame.Text:Hide()
+            end
             WR_SkillIconFrame:Show()
         else
             -- 开关开启但当前无提示文字：保留框体常驻可见（空边框占位，可拖动）
@@ -132,7 +151,9 @@ function WR_ShowColorFrame(name, text, Point)
         WR_EnsureColorSlot(name, "Left")
         if ColorFrameArrayTopLeft[name] then
             ColorFrameArrayTopLeft[name]:Show()
-            ColorTextArrayTopLeft[name]:SetText("|cffffffff" .. text .. "\n" .. name)
+            local fs = ColorTextArrayTopLeft[name]
+            fs:SetText("|cffffffff" .. text .. "\n" .. name)
+            if WR_ColorTextVisible() then fs:Show() else fs:Hide() end
         else
             print("错误：[" .. name .. "]" .. text)
         end
@@ -140,7 +161,9 @@ function WR_ShowColorFrame(name, text, Point)
         WR_EnsureColorSlot(name, "Right")
         if ColorFrameArrayTopRight[name] then
             ColorFrameArrayTopRight[name]:Show()
-            ColorTextArrayTopRight[name]:SetText("|cffffffff" .. text .. "\n" .. name)
+            local fs = ColorTextArrayTopRight[name]
+            fs:SetText("|cffffffff" .. text .. "\n" .. name)
+            if WR_ColorTextVisible() then fs:Show() else fs:Hide() end
         else
             print("错误：[" .. name .. "]" .. text)
         end

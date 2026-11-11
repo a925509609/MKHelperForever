@@ -9,7 +9,7 @@
 -- ============================================================
 
 -- ★ 2026-08-21：把任意 ScrollFrame（UIPanelScrollFrameTemplate）的滚动条底色统一设为黑色
---   用于各弹窗（爆发列表/怪物屏蔽/命令清单/更新公告等右侧框架）的滚动条，
+--   用于各弹窗（爆发列表/怪物屏蔽/更新公告等右侧框架）的滚动条，
 --   使其与左区自定义滑块的深色风格一致。调用时机：ScrollFrame 创建后。
 function WR_StyleScrollBarBlack(scrollFrame)
     if not scrollFrame then return end
@@ -2692,6 +2692,9 @@ end
 -- ★ 消息窗口
 -- ============================================================
 function WR_MessageWindows(Message)
+    -- ★★ 2026-11-11：屏幕文字提示总闸（默认关闭），不再弹屏幕中央的消息文字框。
+    if type(WR_ScreenTextNoticeEnabled) ~= "function"
+        or not WR_ScreenTextNoticeEnabled() then return end
     local messageFrame = CreateFrame("Frame", "WR_MessageFrame", UIParent, "BackdropTemplate")
     messageFrame:SetSize(300, 110)
     messageFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 400)

@@ -9,7 +9,7 @@
       - 主框架（可拖拽、缩放、调整透明度）
       - 每个天赋（如惩戒、防护、神圣等）独立的面板
       - 复选框（图标+开关）用于启用/禁用功能
-      - 下拉菜单用于选择选项（如圣印、祝福等）
+      - 下拉菜单用于选择选项（如祝福等）
       - 滑块用于调节数值（如阈值、缩放等）
       - 自动跟随功能（通过宏实现）
     所有配置保存在全局表 PigSet 中。
@@ -64,6 +64,19 @@ local ICON_REGION_MIN_H = 40   -- 图标区最小高度（与 cellH 兜底一致
 local SECTION_HEADER_H = 22    -- 分类标题条高度（如「爆发」）
 local SECTION_HEADER_GAP = 10  -- 分类标题条上下留白（10：与复选框图标-文字间距 5px 略宽，留视觉呼吸；原 0 太贴脸）
 
+-- ★ 2026-11-11：可折叠分类标题条。键 = 分类名，值 = PigSet 持久化字段。
+--   用户口径：「单独弄一个圣印专区，此专区在爆发区下，可以折叠」；
+--   后续追加：「维持buff的功能按钮，设置审判buff专区并且可以折叠，位置放在圣印上面」；
+--   再追加：「将圣印区的折叠方案，同步到其他区中」→ 所有分区统一可折叠。
+--   每个分区独立保存展开/收起状态，重载后保持。
+local SECTION_COLLAPSE_KEYS = {
+    ["自动"] = "FH_AUTO_SECTION_COLLAPSED",
+    ["爆发"] = "FH_BURST_SECTION_COLLAPSED",
+    ["审判buff"] = "FH_JUDGEMENT_BUFF_SECTION_COLLAPSED",
+    ["圣印"] = "FH_SEAL_SECTION_COLLAPSED",
+    ["插入"] = "FH_INSERT_SECTION_COLLAPSED",
+}
+
 -- ★ 宏索引缓存（避免重复查找）
 local FOLLOW_MACRO_INDEX = nil
 local FOCUS_MACRO_INDEX = nil
@@ -71,6 +84,10 @@ local FOCUS_MACRO_INDEX = nil
 -- ★ 切换提示信息输出（统一供下拉菜单/复选框切换调用，与6冰触提示方式一致）
 --    ChatNoticeMode：0=关闭 1=默认窗口 2=所有可见窗口
 local function PrintToVisible(msg)
+    -- ★★ 2026-11-11：屏幕文字提示总闸（默认关闭）。关闭时聊天框切换提示也不输出。
+    -- 兼容：总闸函数未定义时按「关闭」处理，避免加载顺序异常导致报错。
+    if type(WR_ScreenTextNoticeEnabled) ~= "function"
+        or not WR_ScreenTextNoticeEnabled() then return end
     local mode = PigSet["ChatNoticeMode"]
     if mode == 0 then return end
     if mode == 1 then print(msg); return end
@@ -259,6 +276,86 @@ local function UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
 end
 
 -- ============================================================
+-- ★ 2026-11-11：单选按钮组（一个数字变量上只能选一个值）
+-- ------------------------------------------------------------
+-- 背景：部分配置以前用下拉框选 1..N（如防骑常驻圣印 FH_SEAL），玩家希望
+--   改成面板上直接可见、可点击的按钮。做法：CB 配置里写
+--   radioVariable = "FH_SEAL", radioValue = 1..6，
+--   点击某个按钮 → PigSet[radioVariable] = radioValue，同组其它按钮自动取消勾选。
+--   与 exclusiveGroup 的区别：exclusiveGroup 管理「一组布尔开关」；radio 管理
+--   「一个数字变量的多个候选值」，因此不带 saveVariable、不生成 /变量 on|off 宏；
+--   但 radio 按钮仍可拖到动作条生成「/radio变量 <序号>」宏（见 WR_PickupToggleMacro）。
+-- ============================================================
+WR_ConfigRadioGroups = WR_ConfigRadioGroups or {}   -- 变量名 → { {value, checkbox, iconFrame, iconTexture}, ... }
+WR_ConfigRadioDefaults = WR_ConfigRadioDefaults or {} -- 变量名 → 默认值（无匹配时回退）
+
+-- 登记一个单选按钮（重复登记同一 value 时更新控件引用，避免重建面板后指向旧控件）
+function WR_ConfigRadio_Register(variable, value, checkbox, iconFrame, iconTexture, defaultValue)
+    if type(variable) ~= "string" or variable == "" or value == nil then return end
+    if defaultValue ~= nil then
+        WR_ConfigRadioDefaults[variable] = defaultValue
+    end
+    local members = WR_ConfigRadioGroups[variable]
+    if not members then
+        members = {}
+        WR_ConfigRadioGroups[variable] = members
+    end
+    for i = 1, #members do
+        if members[i].value == value then
+            members[i].checkbox = checkbox
+            members[i].iconFrame = iconFrame
+            members[i].iconTexture = iconTexture
+            return
+        end
+    end
+    table.insert(members, {
+        value = value,
+        checkbox = checkbox,
+        iconFrame = iconFrame,
+        iconTexture = iconTexture,
+    })
+end
+
+-- 按 PigSet 当前值刷新同组所有按钮的勾选状态与高亮
+function WR_ConfigRadio_Refresh(variable)
+    local members = WR_ConfigRadioGroups[variable]
+    if not members then return end
+    local current = tonumber(PigSet[variable])
+    -- 存档值越界/损坏时回退默认值（默认通常为 3=愤怒圣印），避免一个都没选中
+    local matched = false
+    for i = 1, #members do
+        if current == tonumber(members[i].value) then matched = true; break end
+    end
+    if not matched then
+        local fallback = WR_ConfigRadioDefaults[variable]
+        local fallbackMember = nil
+        for i = 1, #members do
+            if fallback ~= nil and tonumber(members[i].value) == tonumber(fallback) then
+                fallbackMember = members[i]
+                break
+            end
+        end
+        fallbackMember = fallbackMember or members[1]
+        if fallbackMember then
+            PigSet[variable] = fallbackMember.value
+            current = tonumber(fallbackMember.value)
+        end
+    end
+    for i = 1, #members do
+        local m = members[i]
+        local want = (current == tonumber(m.value))
+        if m.checkbox then
+            if m.checkbox:GetChecked() ~= want then
+                m.checkbox:SetChecked(want)
+            end
+            if UpdateCheckboxGlow and m.iconFrame and m.iconTexture then
+                UpdateCheckboxGlow(m.iconFrame, m.iconTexture, m.checkbox)
+            end
+        end
+    end
+end
+
+-- ============================================================
 -- 图标缩放相关
 -- ============================================================
 
@@ -344,7 +441,7 @@ end
 -- ★ 2026-11-08：把 PigSet 里的开关状态同步回面板勾选框
 -- ------------------------------------------------------------
 -- 背景：勾选框只在「创建时」用 SetChecked(PigSet[var]) 同步一次。
---   对于「一次性插入」类开关（指向保护 FH_ZZBH、插入光明圣印 FH_CRGMSY 等），
+--   对于「一次性插入」类开关（指向保护 FH_ZZBH、插入智慧圣印 FH_CRZHSY 等），
 --   代码在施放成功后会直接写 PigSet[var] = false 自动关闭，
 --   但**界面上的勾选不会跟着取消** → 玩家看到勾还在，以为没生效、
 --   或者重新点一次反而又打开，表现为「无法回弹取消」。
@@ -357,9 +454,22 @@ function WR_SyncConfigCheckbox(saveVariable)
         local talentFrame = WR_TalentFrameList[i]
         if talentFrame and talentFrame.cbItems then
             for _, item in ipairs(talentFrame.cbItems) do
-                local var = item.config and item.config.saveVariable
-                if var and (saveVariable == nil or var == saveVariable) then
-                    local want = PigSet[var] and true or false
+                local cfg = item.config
+                local var = cfg and cfg.saveVariable
+                local radioVar = cfg and cfg.radioVariable
+                local match = false
+                if radioVar then
+                    match = (saveVariable == nil or saveVariable == radioVar)
+                elseif var then
+                    match = (saveVariable == nil or var == saveVariable)
+                end
+                if match then
+                    local want
+                    if radioVar then
+                        want = (tonumber(PigSet[radioVar]) == tonumber(cfg.radioValue))
+                    else
+                        want = PigSet[var] and true or false
+                    end
                     if item.checkbox and item.checkbox:GetChecked() ~= want then
                         item.checkbox:SetChecked(want)
                     end
@@ -370,6 +480,159 @@ function WR_SyncConfigCheckbox(saveVariable)
             end
         end
     end
+end
+
+-- ★ 2026-11-10：只同步「某一个面板」的勾选框（面板还在构建、尚未登记进
+--   WR_TalentFrameList 时用；供互斥组在面板创建末尾收敛后刷新界面）
+function WR_SyncFrameCheckboxes(talentFrame, saveVariable)
+    if not talentFrame or not talentFrame.cbItems then return end
+    for _, item in ipairs(talentFrame.cbItems) do
+        local cfg = item.config
+        local var = cfg and cfg.saveVariable
+        local radioVar = cfg and cfg.radioVariable
+        local match = false
+        if radioVar then
+            match = (saveVariable == nil or saveVariable == radioVar)
+        elseif var then
+            match = (saveVariable == nil or var == saveVariable)
+        end
+        if match then
+            local want
+            if radioVar then
+                want = (tonumber(PigSet[radioVar]) == tonumber(cfg.radioValue))
+            else
+                want = PigSet[var] and true or false
+            end
+            if item.checkbox and item.checkbox:GetChecked() ~= want then
+                item.checkbox:SetChecked(want)
+            end
+            if UpdateCheckboxGlow and item.iconFrame and item.iconTexture then
+                UpdateCheckboxGlow(item.iconFrame, item.iconTexture, item.checkbox)
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- ★ 2026-11-10：开关互斥组（同一组内「只能有一个开关处于开启状态」）
+-- ------------------------------------------------------------
+-- 背景：面板上有些开关在语义上互斥（例：防骑的「光明圣印」「十字军审判」
+--   两个 buff 维持开关只能开一个）。以前两者能同时勾上，玩家很容易
+--   配出自相矛盾的状态，也看不出到底哪个在生效。
+-- 做法：菜单配置里给开关加 exclusiveGroup = "<组名>"，同组开关自动变成单选：
+--   · 面板点开 A → 同组其它开关立刻自动关闭（PigSet 与界面勾选同步刷新）；
+--   · 斜杠命令 /A on（以及从图标拖出的切换宏）走同一条互斥逻辑；
+--   · 重置按钮、存档里历史遗留的「同组双开」在面板创建时自动收敛；
+--   · 组内「后声明者优先」：CB 列表里排在后面的那个保留，前面的自动关闭，
+--     并在聊天框明确提示被关掉的是哪个（不静默改玩家状态）。
+-- 只影响面板开关状态，不介入任何循环逻辑（循环仍按 PigSet 现值判断）。
+-- ============================================================
+WR_ConfigExclusiveGroups = WR_ConfigExclusiveGroups or {}    -- 组名 → 成员数组（按声明顺序）{ var, name }
+WR_ConfigExclusiveMemberOf = WR_ConfigExclusiveMemberOf or {} -- saveVariable → 组名
+
+-- 去掉 |cffXXXXXX 与 |r 之类染色码，得到干净的开关名（用于提示文案）
+local function WR_ConfigExclusive_CleanName(text, fallback)
+    local s = tostring(text or "")
+    s = s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    s = s:gsub("^%s+", ""):gsub("%s+$", "")
+    if s == "" then return fallback or "" end
+    return s
+end
+
+-- 登记一个开关到互斥组（重复登记安全，可重入）
+function WR_ConfigExclusive_Register(saveVariable, group, displayName)
+    if type(saveVariable) ~= "string" or saveVariable == "" then return end
+    if type(group) ~= "string" or group == "" then return end
+    local members = WR_ConfigExclusiveGroups[group]
+    if not members then
+        members = {}
+        WR_ConfigExclusiveGroups[group] = members
+    end
+    for i = 1, #members do
+        if members[i].var == saveVariable then
+            if displayName and displayName ~= "" then
+                members[i].name = WR_ConfigExclusive_CleanName(displayName, saveVariable)
+            end
+            WR_ConfigExclusiveMemberOf[saveVariable] = group
+            return
+        end
+    end
+    table.insert(members, {
+        var = saveVariable,
+        name = WR_ConfigExclusive_CleanName(displayName, saveVariable),
+    })
+    WR_ConfigExclusiveMemberOf[saveVariable] = group
+end
+
+-- 关掉同组其它开关（只改 PigSet + 同步界面，不改循环逻辑）
+-- 返回被关闭的开关名数组（供提示文案使用）
+function WR_ConfigExclusive_Apply(saveVariable, silent)
+    local group = WR_ConfigExclusiveMemberOf[saveVariable]
+    if not group then return {} end
+    local members = WR_ConfigExclusiveGroups[group]
+    if not members then return {} end
+    local turnedOff = {}
+    for i = 1, #members do
+        local m = members[i]
+        if m.var ~= saveVariable and PigSet[m.var] then
+            PigSet[m.var] = false
+            table.insert(turnedOff, m.name or m.var)
+            if type(WR_SyncConfigCheckbox) == "function" then
+                WR_SyncConfigCheckbox(m.var)
+            end
+        end
+    end
+    if #turnedOff > 0 and not silent then
+        local selfName = WR_ConfigExclusive_CleanName(nil, saveVariable)
+        for i = 1, #members do
+            if members[i].var == saveVariable then selfName = members[i].name or saveVariable end
+        end
+        PrintToVisible(string.format(
+            "|cffff0000[互斥]|r 已自动关闭 [%s]（与 [%s] 只能同时开启一个）",
+            table.concat(turnedOff, "、"), selfName))
+    end
+    return turnedOff
+end
+
+-- 收敛一个互斥组：历史存档/重置后若出现多个开启，只保留「最后声明」的那个
+function WR_ConfigExclusive_EnforceGroup(group, silent)
+    local members = WR_ConfigExclusiveGroups[group]
+    if not members or #members < 2 then return {} end
+    local keepIdx, onCount = nil, 0
+    for i = 1, #members do
+        if PigSet[members[i].var] then
+            onCount = onCount + 1
+            keepIdx = i   -- 后声明者优先
+        end
+    end
+    if onCount < 2 or not keepIdx then return {} end
+    local turnedOff = {}
+    for i = 1, #members do
+        local m = members[i]
+        if i ~= keepIdx and PigSet[m.var] then
+            PigSet[m.var] = false
+            table.insert(turnedOff, m.name or m.var)
+            if type(WR_SyncConfigCheckbox) == "function" then
+                WR_SyncConfigCheckbox(m.var)
+            end
+        end
+    end
+    if #turnedOff > 0 and not silent then
+        PrintToVisible(string.format(
+            "|cffff0000[互斥]|r 同组开关只能开一个，已自动关闭 [%s]（保留 [%s]）",
+            table.concat(turnedOff, "、"), members[keepIdx].name or members[keepIdx].var))
+    end
+    return turnedOff
+end
+
+-- 收敛全部互斥组（重置按钮 / 面板创建后兜底调用）
+function WR_ConfigExclusive_EnforceAll(silent)
+    local total = {}
+    for group in pairs(WR_ConfigExclusiveGroups) do
+        local off = WR_ConfigExclusive_EnforceGroup(group, silent)
+        for i = 1, #off do table.insert(total, off[i]) end
+    end
+    return total
 end
 
 -- 全局应用图标缩放（遍历所有天赋面板）
@@ -415,7 +678,7 @@ function WR_LayoutTalentCheckboxes(talentFrame, frameWidth, doLayout)
         return 0
     end
 
-    -- 按 section 分组：无 section 标签的归入「自动」归纳，确保所有复选框都在三大分类内
+    -- 按 section 分组：无 section 标签的归入「自动」，确保所有复选框都有明确分类
     local sectionGroups = {}
     local sectionOrder = {}
     for _, item in ipairs(talentFrame.cbItems) do
@@ -428,8 +691,10 @@ function WR_LayoutTalentCheckboxes(talentFrame, frameWidth, doLayout)
         table.insert(sectionGroups[sec], item)
     end
 
-    -- 固定分组标题条顺序：自动 → 爆发 → 插入（其余未知分组按名称排其后）
-    local sectionPriority = { ["自动"] = 1, ["爆发"] = 2, ["插入"] = 3 }
+    -- 固定分组标题条顺序：自动 → 爆发 → 审判buff → 圣印 → 插入（其余未知分组按名称排其后）
+    -- ★ 2026-11-11：新增「圣印」专区，按用户要求放在「爆发」区下面；
+    --   追加「审判buff」专区放在「圣印」专区上面。
+    local sectionPriority = { ["自动"] = 1, ["爆发"] = 2, ["审判buff"] = 3, ["圣印"] = 4, ["插入"] = 5 }
     table.sort(sectionOrder, function(a, b)
         local pa = sectionPriority[a] or 99
         local pb = sectionPriority[b] or 99
@@ -481,13 +746,16 @@ function WR_LayoutTalentCheckboxes(talentFrame, frameWidth, doLayout)
         col = 0
     end
 
-    -- 各分类（带标题条）按顺序摆放：自动 → 爆发 → 插入；折叠的分类只显示标题，其下图标隐藏且不计入布局高度
+    -- 各分类（带标题条）按顺序摆放：自动 → 爆发 → 审判buff → 圣印 → 插入；折叠的分类只显示标题，其下图标隐藏且不计入布局高度
+    local lastSectionHasVisibleItems = false
     for _, sec in ipairs(sectionOrder) do
         if col > 0 then yCursor = yCursor - cellH; col = 0 end  -- 收尾当前行
-        -- ★ 2026-08-21：取消全部折叠功能，分类始终展开显示
-        local collapsed = false
+        -- ★ 2026-11-11：所有分类均可折叠（只要在 SECTION_COLLAPSE_KEYS 中登记了 collapseKey）
+        local header = talentFrame.sectionHeaders and talentFrame.sectionHeaders[sec]
+        local collapsed = (header and header.collapseKey and PigSet[header.collapseKey] == true) or false
         placeHeader(sec, collapsed)
         local group = sectionGroups[sec]
+        lastSectionHasVisibleItems = (not collapsed) and (#group > 0)
         if collapsed then
             -- 折叠：隐藏该分类下所有图标、复选框与文字标签，不推进布局高度（面板自动收缩）
             -- ★ 修复：复选框是 parentFrame 的独立子控件（非 iconFrame 子级），只 Hide iconFrame 会残留勾选框
@@ -519,7 +787,12 @@ function WR_LayoutTalentCheckboxes(talentFrame, frameWidth, doLayout)
     local FIRST_HEADER_BLOCK = SECTION_HEADER_GAP + SECTION_HEADER_H + SECTION_HEADER_GAP
     local cbSize = CB_BASE_SIZE * WR_GetIconScale()
     local LAST_CELL_VISUAL = iconSize + CB_ICON_CB_GAP * WR_GetIconScale() + cbSize
-    return -yCursor + FIRST_HEADER_BLOCK + LAST_CELL_VISUAL
+    -- ★ 2026-11-11：最后一个分区被折叠时，其下方没有图标行，不能再补 LAST_CELL_VISUAL，
+    -- 否则折叠最后一个分区时面板高度不会收缩（所有分区均可折叠后必须处理这一点）。
+    if lastSectionHasVisibleItems then
+        return -yCursor + FIRST_HEADER_BLOCK + LAST_CELL_VISUAL
+    end
+    return -yCursor + FIRST_HEADER_BLOCK
 end
 
 -- 主布局函数：调整整个配置框架的大小并重新排布图标
@@ -594,22 +867,12 @@ function WR_LayoutConfigFrame()
     -- 右区内容高度：始终为 settings 标题条预留 SECTION_HEADER_H
     local rightContentH = (menuRegionH + iconRegionH) + SECTION_HEADER_H
 
-    -- 左区内容高度（标题 + 10 行控件含 2 个滑块 + 底部余量；行高已统一为 GLOBAL_ROW_H=20）
-    -- 左侧内容高度（下限）：由左侧控件链实际深度决定。
-    -- 实测链（globalRegion 顶向下，单位 px）：AOE标题(36)→AOE内容(展开+40)→调试模式→自动救人→倒数偷药(滑块)
-    --   →爆发总闸→启用怪物屏蔽→职业屏蔽标题→近战/远程/坦克屏蔽→开关提示→图标缩放滑块→窗口透明度滑块
-    --   →自动跟随复选框→跟随目标下拉（最深控件）。AOE 展开时跟随下拉底边≈658px。
-    -- ★ 修复：旧值 638 低估真实链深，右区折叠后主面板高度被压到 666、左区只剩 638，
-    --   导致最深的"跟随目标"下拉（焦点窗口）被挤出框外。改为 690（+32 余量）兜底，右区更高时仍以右区为准。
-    --   折叠 AOE 时链上移 40px，余量更宽松，不会溢出。
-    -- 左区内容高度（下限）：由左侧控件链实际深度决定
-    -- ★ 2026-08-21：左区「全局」整体折叠时，左区只剩标题条，高度收缩到仅容纳标题条
-    -- ★ 2026-08-21 修复复选框溢出：实测左区控件链（全局标题→智能AOE展开→调试模式→自动救人→
-    --   倒数偷药→爆发总闸→怪物/职业屏蔽→开关提示→图标缩放→窗口透明度→自动跟随→跟随目标下拉）
-    --   真实深度≈706px（每行控件约 40px：控件 20 + 行距 20）。旧值 690 余量不足，导致右区较矮的专精下
-    --   最深的「跟随目标」下拉框及上方复选框被挤出主面板底边。旧值 800 导致底部留大段空白，
-    --   2026-08-21 改为 740（余量 34px），在防溢出与减空白之间平衡。
-    local leftContentH = 740
+    -- 左区内容高度（下限）：由左侧控件链实际深度决定。
+    -- ★ 2026-11-11：删除全局区 AOE 分类后，整条控件链上移约 86px；
+    --   实测链（globalRegion 顶向下）：调试模式→自动救人→倒数偷药(滑块)→爆发总闸→
+    --   启用怪物屏蔽→职业屏蔽标题→近战/远程/坦克屏蔽→开关提示→图标缩放滑块→窗口透明度滑块
+    --   →自动跟随复选框→跟随目标下拉（最深控件）。真实深度≈620px，取 660（余量约 40px）。
+    local leftContentH = 660
     local frameHeight = TOP_BAR_H + math.max(leftContentH, rightContentH)
     -- 限制最大默认高度，防止超高职业撑爆屏幕
     if not PigSet["FrameUserSized"] then
@@ -868,6 +1131,8 @@ end
 --   #showtooltip <技能名或FileID>
 --   /<saveVariable>
 -- 形式的开关宏，并 PickupMacro 挂到光标上。战斗中拒绝拖出。
+-- ★ 2026-11-11：单选按钮（radioVariable/radioValue，如「圣印」专区）同样支持拖出：
+--   生成「#showtooltip <圣印名> + /FH_SEAL <序号>」的宏（不含 /cast），便于把六个圣印放到动作条。
 -- 设计要点：
 --   1) 优先使用 config.showSpell（真实技能中文名，最稳）；nil 时回退到 IconID
 --      作为 #showtooltip 参数（FileID 也可工作，能正确显示冷却）
@@ -877,7 +1142,20 @@ end
 --   5) 战斗中拒绝拖出（InCombatLockdown 红字提示）
 -- ============================================================
 local function WR_PickupToggleMacro(config, iconFrame)
-    if not config or not config.saveVariable then return false end
+    if not config then return false end
+    local isRadio = (config.radioVariable ~= nil and config.radioValue ~= nil)
+    local varName = config.saveVariable
+    if not varName and isRadio then varName = config.radioVariable end
+    if not varName then return false end
+    -- 单选按钮的命令必须带序号（/FH_SEAL 3），否则宏只能「循环下一项」
+    local cmd
+    if type(config.macroCommand) == "string" and config.macroCommand ~= "" then
+        cmd = config.macroCommand
+    elseif isRadio then
+        cmd = "/" .. tostring(config.radioVariable) .. " " .. tostring(config.radioValue)
+    else
+        cmd = "/" .. tostring(varName)
+    end
     if InCombatLockdown and InCombatLockdown() then
         WR_PrintToVisible("|cffff0000战斗中无法拖出宏|r")
         return false
@@ -1123,7 +1401,7 @@ local function WR_PickupToggleMacro(config, iconFrame)
     -- 唯一化宏名（同名加 2/3/4...；超 16 字节截断；WoW 宏名硬约束）
     local function MakeUniqueMacroName(baseName, body)
         local name = baseName
-        if name == "" or not name then name = config.saveVariable or "开关" end
+        if name == "" or not name then name = varName or "开关" end
         -- 截断到最多 16 字节；中文按完整 UTF-8 字符截断，避免截出损坏尾字节
         if #name > 16 then
             name = SafeSubUtf8(name, 5)
@@ -1131,7 +1409,6 @@ local function WR_PickupToggleMacro(config, iconFrame)
         local exist = GetMacroIndexByName and GetMacroIndexByName(name) or 0
         if exist == 0 then return name end
         local _, _, existBody = GetMacroInfo(exist)
-        local cmd = "/" .. tostring(config.saveVariable)
         if TrimMacroBody(existBody) == body then return name end
         if existBody and tostring(existBody):find(cmd, 1, true) then return name end
         for i = 2, 99 do
@@ -1153,14 +1430,16 @@ local function WR_PickupToggleMacro(config, iconFrame)
         return "INV_MISC_QUESTIONMARK"
     end
 
-    local cmd = "/" .. config.saveVariable
     local tipName = ResolveShowTooltipName()
     -- ★ 2026-08-31：组合宏 —— 当开关图标能推导出真实可施放技能/物品名时，
     --   拖出宏在切换命令前追加 /cast 行，使一个动作条按键「既施放又切开关」。
     --   仅对"插入型/施放型"开关生效（tipName 为真实技能名且非纯数字），
-    --   无对应技能的开关（AOE 总开关、自动跟随等回退到 FileID 的）维持纯切换宏。
+    --   无对应技能的开关（自动跟随等回退到 FileID 的）维持纯切换宏。
     local castLine = ""
-    if type(tipName) == "string" and tipName ~= "" and not tipName:match("^%d+$") and IsValidTipTarget(tipName) then
+    -- ★ 2026-11-11：单选按钮（圣印专区）不生成 /cast 行 —— 用户口径「创建的宏删除 /cast 技能」；
+    --   宏只保留 #showtooltip + /FH_SEAL <序号>，圣印施放交给循环/AHK 色块链路。
+    if not isRadio and type(tipName) == "string" and tipName ~= ""
+        and not tipName:match("^%d+$") and IsValidTipTarget(tipName) then
         castLine = "/cast " .. tipName .. "\n"
     end
     local body = cmd
@@ -1176,7 +1455,7 @@ local function WR_PickupToggleMacro(config, iconFrame)
         baseName = ResolveMacroDisplayName()
     end
     if not baseName or baseName == "" or baseName == "插入" or baseName == "自动" or baseName == "使用" then
-        baseName = ResolveMacroDisplayName() or StripMacroName(config.text) or config.saveVariable or "开关"
+        baseName = ResolveMacroDisplayName() or StripMacroName(config.text) or varName or "开关"
     end
     local idx = FindMacroByCommand(cmd, body)
     local macroName
@@ -1211,8 +1490,15 @@ end
 -- 输入：config表格（包含 IconID, text, saveVariable, defaultState, tooltipText, showSpell）
 -- 返回：iconFrame（图标按钮）、checkbox（复选框）、iconTexture（图标纹理）、text（标签文字）
 -- ★ 2026-08-26：showSpell（可选）指定拖出宏的 #showtooltip 技能名；nil 时回退 IconID 兜底
+-- ★ 2026-11-10：exclusiveGroup（可选）互斥组名 —— 同组开关只能开一个，开一个自动关其它
 -- ============================================================
 local function CreateCheckbox(config)
+    -- ★ 2026-11-11：radioVariable/radioValue = 单选按钮模式（一个数字变量多选一，如圣印）
+    local isRadio = (config.radioVariable ~= nil and config.radioValue ~= nil)
+    -- ★ 2026-11-10：登记互斥组成员（供点击/斜杠命令/重置/存档收敛统一使用）
+    if config.exclusiveGroup and config.saveVariable then
+        WR_ConfigExclusive_Register(config.saveVariable, config.exclusiveGroup, config.text)
+    end
     local iconFrame = CreateFrame("Button", nil, config.parentFrame)
     iconFrame:SetSize(ICON_BASE_SIZE, ICON_BASE_SIZE)
     iconFrame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -1254,11 +1540,21 @@ local function CreateCheckbox(config)
     checkbox:SetAlpha(0.95)
 
     -- 从PigSet读取状态，若不存在则使用默认值
-    if PigSet[config.saveVariable] == nil then
-        PigSet[config.saveVariable] = config.defaultState
+    if isRadio then
+        if PigSet[config.radioVariable] == nil then
+            PigSet[config.radioVariable] = config.radioDefault or config.radioValue
+        end
+        checkbox:SetChecked(tonumber(PigSet[config.radioVariable]) == tonumber(config.radioValue))
+    else
+        if PigSet[config.saveVariable] == nil then
+            PigSet[config.saveVariable] = config.defaultState
+        end
+        checkbox:SetChecked(PigSet[config.saveVariable])
     end
-    checkbox:SetChecked(PigSet[config.saveVariable])
     UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
+    if isRadio then
+        WR_ConfigRadio_Register(config.radioVariable, config.radioValue, checkbox, iconFrame, iconTexture, config.radioDefault)
+    end
     iconFrame:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
 
     -- 显示提示信息
@@ -1267,12 +1563,35 @@ local function CreateCheckbox(config)
         checkbox:SetAlpha(1)
         iconFrame:LockHighlight()
         if config.tooltipText then
+            -- ★ 2026-11-10：互斥组开关在提示里明确写清「与谁互斥」，避免玩家以为还能双开
+            local exclusiveTip = ""
+            if config.exclusiveGroup then
+                local peers = {}
+                local members = WR_ConfigExclusiveGroups[config.exclusiveGroup]
+                if members then
+                    for i = 1, #members do
+                        if members[i].var ~= config.saveVariable then
+                            table.insert(peers, members[i].name or members[i].var)
+                        end
+                    end
+                end
+                if #peers > 0 then
+                    exclusiveTip = "\n|cffff5040【互斥】与 [" .. table.concat(peers, "、") ..
+                        "] 只能同时开启一个，开这个会自动关掉另一个。|r"
+                end
+            end
+            local usageTip
+            if isRadio then
+                usageTip = "\n|cff00adf0点击选择该圣印（单选按钮，同一时间只能选一个）|r"
+                    .. "\n|cff00adf0按住图标拖到动作条可生成该圣印的切换宏（点击即设为常驻）|r"
+            else
+                usageTip = "\n宏/" .. config.saveVariable .. "切换开和关" ..
+                    "\n宏/" .. config.saveVariable .. "空格on 打开开关" ..
+                    "\n宏/" .. config.saveVariable .. "空格off 关闭开关" ..
+                    "\n|cff00adf0按住图标拖到动作条可生成切换宏（带技能冷却）|r"
+            end
             GameTooltip:SetOwner(self, config.tooltipAnchor or "ANCHOR_RIGHT")
-            GameTooltip:SetText(config.tooltipText ..
-                "\n宏/" .. config.saveVariable .. "切换开和关" ..
-                "\n宏/" .. config.saveVariable .. "空格on 打开开关" ..
-                "\n宏/" .. config.saveVariable .. "空格off 关闭开关" ..
-                "\n|cff00adf0按住图标拖到动作条可生成切换宏（带技能冷却）|r")
+            GameTooltip:SetText(config.tooltipText .. exclusiveTip .. usageTip)
             GameTooltip:Show()
         end
     end
@@ -1297,10 +1616,29 @@ local function CreateCheckbox(config)
             draggedMacro = false
             return
         end
+        if isRadio then
+            local current = tonumber(PigSet[config.radioVariable])
+            local value = tonumber(config.radioValue)
+            if current == value then
+                -- 单选按钮不可取消：点击已选项时保持选中（CheckButton 默认会反勾，这里纠正回来）
+                checkbox:SetChecked(true)
+                UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
+                return
+            end
+            PigSet[config.radioVariable] = config.radioValue
+            WR_ConfigRadio_Refresh(config.radioVariable)
+            PrintToVisible(string.format("|cff00ff00已选择 [%s]|r",
+                WR_ConfigExclusive_CleanName(config.text, config.radioVariable)))
+            return
+        end
         local newState = not PigSet[config.saveVariable]
         PigSet[config.saveVariable] = newState
         checkbox:SetChecked(newState)
         UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
+        -- ★ 2026-11-10：互斥组 —— 打开本开关时自动关掉同组其它开关（关掉时不动别人）
+        if newState and config.exclusiveGroup then
+            WR_ConfigExclusive_Apply(config.saveVariable)
+        end
         local statusText = newState and "|cff00ff00开启|r" or "|cffff0000关闭|r"
         PrintToVisible(string.format(statusText .. " [%s]", config.tooltipText or config.checkboxName))
     end
@@ -1313,7 +1651,8 @@ local function CreateCheckbox(config)
 
     -- ★ 2026-08-26：图标可拖到动作条（PigToGo 同款）—— 调用 WR_PickupToggleMacro
     -- 创建/复用 #showtooltip 宏并 PickupMacro 挂到光标；战斗中函数内拦截并红字提示
-    if config.saveVariable then
+    -- ★ 2026-11-11：单选按钮（radioVariable/radioValue）同样可拖出，生成带序号的圣印宏
+    if config.saveVariable or isRadio then
         iconFrame:RegisterForDrag("LeftButton")
         iconFrame:SetScript("OnDragStart", function()
             draggedMacro = WR_PickupToggleMacro(config, iconFrame)
@@ -1329,6 +1668,10 @@ local function CreateCheckbox(config)
                 PigSet[config.saveVariable] = true
                 checkbox:SetChecked(true)
                 UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
+                -- ★ 2026-11-10：互斥组（斜杠命令 / 拖出的切换宏走同一条逻辑）
+                if config.exclusiveGroup then
+                    WR_ConfigExclusive_Apply(config.saveVariable)
+                end
                 PrintToVisible(string.format("|cff00ff00已启用 [%s]|r", config.tooltipText or config.checkboxName))
             elseif msg == "off" then
                 PigSet[config.saveVariable] = false
@@ -1340,6 +1683,10 @@ local function CreateCheckbox(config)
                 PigSet[config.saveVariable] = newState
                 checkbox:SetChecked(newState)
                 UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
+                -- ★ 2026-11-10：互斥组（toggle 到「开」才互斥，关的时候不影响别人）
+                if newState and config.exclusiveGroup then
+                    WR_ConfigExclusive_Apply(config.saveVariable)
+                end
                 local statusText = newState and "|cff00ff00开启|r" or "|cffff0000关闭|r"
                 PrintToVisible(string.format(statusText .. " [%s]", config.tooltipText or config.checkboxName))
             end
@@ -1399,7 +1746,6 @@ local function CreateSectionHeader(parentFrame, text, collapseKey)
         f:SetScript("OnMouseDown", function(self)
             PigSet[collapseKey] = not (PigSet[collapseKey] == true)
             self:RefreshIndicator()
-            if WR_LayoutGlobalAOECategory then WR_LayoutGlobalAOECategory() end
             if WR_RefreshConfigUI then WR_RefreshConfigUI() end
         end)
     end
@@ -1802,11 +2148,12 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
         -- 如果有复选框配置，则创建复选框
         if CB_List then
             for _, config in ipairs(CB_List) do
-                -- 惰性创建对应分类标题条：无 section 的开关归入「自动」归纳；「自动/爆发/插入」三标题条均显示，标题条上下留白已收紧为 0
+                -- 惰性创建对应分类标题条：无 section 的开关归入「自动」；自动/爆发/审判buff/圣印/插入 均显示
                 local cbSection = config.section or "自动"
                 if not Frame.sectionHeaders[cbSection] then
-                    -- ★ 2026-08-21：取消全部折叠功能，分类标题条改为静态（不可点击折叠）
-                    Frame.sectionHeaders[cbSection] = CreateSectionHeader(Frame, cbSection, nil)
+                    -- ★ 2026-11-11：所有分区标题条统一可折叠（collapseKey 持久化展开/收起状态）
+                    local collapseKey = SECTION_COLLAPSE_KEYS[cbSection]
+                    Frame.sectionHeaders[cbSection] = CreateSectionHeader(Frame, cbSection, collapseKey)
                 end
                 local iconFrame, checkbox, iconTexture, labelText = CreateCheckbox({
                     parentFrame = Frame,
@@ -1814,10 +2161,15 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
                     column = config.column,
                     IconID = config.IconID,
                     text = config.text,
-                    checkboxName = config.saveVariable .. "_CB",
+                    checkboxName = config.saveVariable and (config.saveVariable .. "_CB")
+                        or (config.radioVariable and (config.radioVariable .. "_CB_" .. tostring(config.radioValue)) or nil),
                     tooltipText = config.tooltipText,
                     saveVariable = config.saveVariable,
-                    defaultState = config.defaultState
+                    defaultState = config.defaultState,
+                    exclusiveGroup = config.exclusiveGroup,
+                    radioVariable = config.radioVariable,
+                    radioValue = config.radioValue,
+                    radioDefault = config.radioDefault,
                 })
                 table.insert(Frame.cbItems, {
                     iconFrame = iconFrame,
@@ -1827,6 +2179,12 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
                     config = config,
                     anchorTo = DM_Text,
                 })
+            end
+            -- ★ 2026-11-11：所有单选按钮登记完毕后统一刷新一次，保证初始勾选与 PigSet 一致
+            for _, config in ipairs(CB_List) do
+                if config.radioVariable then
+                    WR_ConfigRadio_Refresh(config.radioVariable)
+                end
             end
         end
     end
@@ -1878,7 +2236,14 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
         -- 重置复选框
         if CB_List then
             for _, config in ipairs(CB_List) do
-                if config.saveVariable then
+                if config.radioVariable then
+                    -- ★ 2026-11-11：单选按钮组恢复默认值（同一个变量只写一次也无妨，重复写同值）
+                    local def = config.radioDefault or config.radioValue
+                    PigSet[config.radioVariable] = def
+                    if type(WR_ConfigRadio_Refresh) == "function" then
+                        WR_ConfigRadio_Refresh(config.radioVariable)
+                    end
+                elseif config.saveVariable then
                     local def = config.defaultState ~= nil and config.defaultState or false
                     PigSet[config.saveVariable] = def
                     local cb = _G[config.saveVariable .. "_CB"]
@@ -1886,10 +2251,12 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
                 end
             end
         end
+        -- ★ 2026-11-10：重置后收敛互斥组（默认值若出现同组多开，只保留后声明者）
+        if WR_ConfigExclusive_EnforceAll then WR_ConfigExclusive_EnforceAll(false) end
         print("|cff00ff00[MKHelperForever]|r 当前天赋的设置已恢复默认值！")
     end)
 
-    -- 主界面命令清单/更新公告/BOSS特化按钮已迁移至功能设置面板
+    -- 主界面更新公告等按钮已迁移至功能设置面板
     -- 使用底部"功能设置"按钮统一进入
 
     Frame:Hide()
@@ -1899,6 +2266,19 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
         local cellH, iconSize, cbSize = WR_GetLayoutMetrics()
         for _, item in ipairs(Frame.cbItems) do
             WR_ApplyIconScaleToItem(item, iconSize, cbSize)
+        end
+    end
+
+    -- ★ 2026-11-10：本面板的开关全部建好（= 互斥组成员已登记齐全）后收敛一次。
+    --   历史存档里可能残留「同组双开」（例如旧版把「正义圣印」和「单体」同时勾上），
+    --   这里按「后声明者优先」自动关掉多余的那个，并在聊天框说明关了哪个，
+    --   避免玩家带着自相矛盾的配置进本、却看不出哪个在生效。
+    if type(WR_ConfigExclusive_EnforceAll) == "function" then
+        WR_ConfigExclusive_EnforceAll(false)
+        -- 此刻本面板还没登记进 WR_TalentFrameList（由 WR_TalentFrame 稍后写入），
+        -- WR_SyncConfigCheckbox 遍历不到它 → 单独同步本面板，保证界面勾选与 PigSet 一致。
+        if type(WR_SyncFrameCheckboxes) == "function" then
+            WR_SyncFrameCheckboxes(Frame)
         end
     end
 
@@ -2181,69 +2561,15 @@ local function ConfigFrame()
     iconTexture:SetPoint("TOPLEFT", globalHeader, "TOPLEFT", 4, -1)
     iconTexture:SetTexture("Interface\\AddOns\\MKHelperForever\\MKHelperForever.tga")
 
-    -- 智能AOE 分类（左全局区首个分类，标题条静态不可折叠）
-    -- ★ 设计：仅提供 UI 开关 + PigSet 占位键，暂未接入各职业 AOE 逻辑（按用户 8/21 决策"UI开关+占位hook"）
-    --   始终显示"智能AOE（自动）/手动AOE（爆发）"两个子开关；并据此重定位下方调试模式控件链。
-    local aoeCatHeader = CreateSectionHeader(globalRegion, "智能AOE", nil)
-    aoeCatHeader:SetWidth(GLOBAL_REGION_W - GLOBAL_INNER_PAD * 2)
+    -- ★ 2026-11-11：删除左侧全局区的 AOE 分类与两个 AOE 开关
+    --   （用户口径：「删除全局区下的，AOE功能和选项」）。
+    --   AOE 判定逻辑 Core/SmartAOE.lua（WR_ShouldUseAOE 等）同步删除；
+    --   旧存档的两个全局 AOE 开关字段由 ZZ_Features_Migration 清理。
 
-    local aoeCatContent = CreateFrame("Frame", nil, globalRegion)
-    aoeCatContent:SetWidth(GLOBAL_REGION_W - GLOBAL_INNER_PAD * 2)
-
-    -- 创建智能AOE 子开关（复选框 + 标签），yOffset 为相对内容容器顶部的偏移
-    local function MakeAOESwitch(var, label, defaultVal, tip, yOffset)
-        if PigSet[var] == nil then PigSet[var] = defaultVal end
-        local chk = CreateFrame("CheckButton", nil, aoeCatContent, "UICheckButtonTemplate")
-        chk:SetSize(18, 18)
-        chk:SetPoint("TOPLEFT", aoeCatContent, "TOPLEFT", 0, yOffset)
-        chk:SetChecked(PigSet[var] == true)
-        chk:SetScript("OnClick", function(self) PigSet[var] = self:GetChecked() end)
-        local txt = aoeCatContent:CreateFontString(nil, "ARTWORK")
-        txt:SetFont(STANDARD_TEXT_FONT, 15, "")
-        txt:SetTextColor(classColor.r, classColor.g, classColor.b)
-        txt:SetPoint("LEFT", chk, "RIGHT", 4, 0)
-        txt:SetText(label)
-        if tip and tip ~= "" then
-            chk:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(tip)
-                GameTooltip:Show()
-            end)
-            chk:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        end
-        return chk
-    end
-
-    -- 两个子开关：默认关闭"智能AOE（自动）"，默认开启"手动AOE（爆发）"
-    -- ★ 2026-08-21：提示更新（智能/手动 AOE 逻辑已接入，参考 ZZHELPER 三段式：手动强制/智能按目标数/都关不施放）
-    local aoeSmartChk = MakeAOESwitch("WR_GLOBAL_SMART_AOE", "智能AOE（自动）", false,
-        "|cff00ff00智能 AOE 模式|r：所有职业 AOE 技能已统一接入 WR_ShouldUseAOE。\n开启后，AOE 技能按范围内敌对数阈值自动判定（近战 8yd≥2、远程 10-35yd≥2）。\n|cffff5040关闭|r + |cffff5040手动 AOE 关闭|r 时全职业 AOE 停用。", 0)
-    local aoeManualChk = MakeAOESwitch("WR_GLOBAL_MANUAL_AOE", "手动AOE（爆发）", true,
-        "|cff00ff00手动 AOE 模式|r（爆发期）：开启后强制施放 AOE 技能，无视目标数。\n典型场景：饰品触发 / 团队爆发 / 开怪倒数期间。\n与智能 AOE 独立，可同时开启（手动覆盖智能判定）。", -GLOBAL_ROW_H)
-
-    -- 智能AOE 分类布局：根据折叠状态显隐内容，并据此重定位下方调试模式等控件链（依赖 globalRegion.debugCheckbox）
-    -- ★ 2026-08-21：取消全部折叠功能，智能AOE 分类始终展开显示，下方调试模式控件链锚定到 AOE 内容底部
-    function WR_LayoutGlobalAOECategory()
-        if not aoeCatHeader or not aoeCatContent then return end
-        aoeCatHeader:ClearAllPoints()
-        -- ★ 2026-08-21 v5：AOE 标题从 -36 下移到 -40，给 globalHeader 左侧的图标留一点间距
-        aoeCatHeader:SetPoint("TOPLEFT", globalRegion, "TOPLEFT", GLOBAL_INNER_PAD, -40)
-        aoeCatHeader:Show()
-        aoeCatContent:Show()
-        aoeCatContent:ClearAllPoints()
-        aoeCatContent:SetPoint("TOPLEFT", aoeCatHeader, "BOTTOMLEFT", 0, 0)
-        aoeCatContent:SetHeight(2 * GLOBAL_ROW_H)
-        if globalRegion.debugCheckbox then
-            globalRegion.debugCheckbox:ClearAllPoints()
-            globalRegion.debugCheckbox:SetPoint("TOPLEFT", aoeCatContent, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
-        end
-    end
-
-    -- ★ 2026-08-21：取消全部折叠功能，左区全局内容始终全部显示，仅负责 AOE 子区块定位
+    -- 左区全局内容始终显示（取消全部折叠功能），保留该函数供初始化时调用
     function WR_LayoutGlobal()
         if not globalRegion then return end
         if globalHeader then globalHeader:Show() end
-        if WR_LayoutGlobalAOECategory then WR_LayoutGlobalAOECategory() end
     end
 
     -- ★ 2026-08-21：取消全部折叠功能，WR_CollapseAllCategories / 折叠全部·展开全部按钮 已移除
@@ -2308,11 +2634,11 @@ local function ConfigFrame()
     iconChkText:SetPoint("LEFT", iconChk, "RIGHT", 0, 0)
     globalRegion.skillIconCheckbox = iconChk
 
-    -- ★ 2026-08-19 顶栏重构：删除原"功能设置"单一按钮，改为三个独立按钮（怪物屏蔽/命令清单/更新公告）
-    -- 三个按钮采用短词版本（屏蔽/命令/更新），宽 40 高 24，紧凑排列在重置按钮左侧
-    -- 按钮位置（相对 configFrame TOPRIGHT）：
-    --   - 重置按钮宽 65 左边界 -99；三个按钮右边界依次 -62 / -105 / -148（左边界 -102 / -145 / -188），间隔 3 px
+    -- ★ 2026-08-19 顶栏重构：删除原"功能设置"单一按钮，改为独立按钮（怪物屏蔽/爆发/更新）
+    -- ★ 2026-11-11：删除「命令清单」功能与顶栏「命令」按钮，现只保留 3 个按钮
+    -- 按钮位置（相对 configFrame TOPRIGHT）：重置按钮左边界 -99；三个按钮右边界依次 -103 / -171 / -239
     --   调 ZZ_OpenMonsterBlockSection(1/2/3) 显示弹窗并跳到对应 tab
+    --   （1=怪物屏蔽 / 2=爆发列表 / 3=更新公告）
 
     local function CreateTopBarButton(text, tooltip, sectionIdx, width)
         local btn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
@@ -2331,10 +2657,9 @@ local function ConfigFrame()
         return btn
     end
 
-    -- 四个按钮按"由右到左"排（最右的"屏蔽"最靠近重置按钮）
+    -- 三个按钮按"由右到左"排（最右的"爆发"最靠近重置按钮）
     -- 重置按钮：TOPRIGHT -34, -3，宽 65，左边界 = -34-65 = -99
-    -- "爆发"右边界 -34-65-4 = -103（重置左侧）；"屏蔽"再往左 -171；"命令" -239；"更新" -307
-    -- ★ 2026-08-21：新增「爆发」按钮在「屏蔽」右侧（重置按钮左边），打开爆发列表 tab
+    -- "爆发" -103；"屏蔽" -171；"更新" -239
     local burstListBtn = CreateTopBarButton("爆发",
         "|cffffd100爆发列表|r\n按副本阶段配置允许触发自动爆发的团本目标（BOSS/小怪勾选）\n\n勾选=允许爆发；取消=爆发循环跳过该目标", 2, 65)
     burstListBtn:SetPoint("TOPRIGHT", WR_ConfigFrame, "TOPRIGHT", -103, -3)
@@ -2343,13 +2668,9 @@ local function ConfigFrame()
         "|cffffd100怪物屏蔽|r\n打开分副本阶段配置首类/单体/AOE 屏蔽名单\n\n命令 |cff00adf0/monster [on|off|toggle]|r 直接切换总开关", 1, 65)
     monsterBlockBtn:SetPoint("TOPRIGHT", WR_ConfigFrame, "TOPRIGHT", -171, -3)
 
-    local commandListBtn = CreateTopBarButton("命令",
-        "|cffffd100命令清单|r\n打开所有可用的 / 命令、宏绑定与说明", 3, 65)
-    commandListBtn:SetPoint("TOPRIGHT", WR_ConfigFrame, "TOPRIGHT", -239, -3)
-
     local updateLogBtn = CreateTopBarButton("更新",
-        "|cffffd100更新公告|r\n打开插件历史更新日志", 4, 65)
-    updateLogBtn:SetPoint("TOPRIGHT", WR_ConfigFrame, "TOPRIGHT", -307, -3)
+        "|cffffd100更新公告|r\n打开插件历史更新日志", 3, 65)
+    updateLogBtn:SetPoint("TOPRIGHT", WR_ConfigFrame, "TOPRIGHT", -239, -3)
 
     -- ★ 2026-08-21：取消全部折叠功能，「折叠全部 / 展开全部」按钮已移除
 
@@ -2823,7 +3144,11 @@ local function ConfigFrame()
     local tankBlChk = MakeBLToggle("TANK_BLACKLIST", "坦克屏蔽")
     tankBlChk:SetPoint("TOPLEFT", rangedBlChk, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
 
-    -- ★ 4. 开关提示（迁入左侧全局区，位于爆发总闸下方）
+    -- ★ 4. 屏幕文字提示总闸（迁入左侧全局区，位于爆发总闸下方）
+    --    2026-11-11 用户口径：「把插件中屏幕文字提示都关闭了」→ 默认关闭。
+    --    一个开关覆盖：PigAlert 屏幕中央大字、色块/技能图标上的技能名文字、
+    --    聊天框开关提示、WR_MessageWindows 弹窗、调试 HUD 文字。
+    --    色块颜色本身不受影响，AHK 取色照常工作。
     local noticeCheckbox = CreateFrame("CheckButton", nil, globalRegion, "UICheckButtonTemplate")
     noticeCheckbox:SetSize(20, 20)
     noticeCheckbox:SetPoint("TOPLEFT", tankBlChk, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
@@ -2831,20 +3156,28 @@ local function ConfigFrame()
     local noticeLabel = noticeCheckbox:CreateFontString(nil, "ARTWORK")
     noticeLabel:SetFont(STANDARD_TEXT_FONT, 16, "")
     noticeLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
-    noticeLabel:SetText("开关提示")
+    noticeLabel:SetText("屏幕文字提示")
     noticeLabel:SetPoint("LEFT", noticeCheckbox, "RIGHT", -2, 1)
 
-    if PigSet["ChatNoticeMode"] == nil then PigSet["ChatNoticeMode"] = 2 end
-    noticeCheckbox:SetChecked(PigSet["ChatNoticeMode"] ~= 0)
+    if PigSet["ScreenTextNotice"] == nil then PigSet["ScreenTextNotice"] = false end
+    noticeCheckbox:SetChecked(PigSet["ScreenTextNotice"] == true)
+    -- 供 /screentip 在面板已打开时同步勾选态（定义于 Core/TIP.lua）
+    WR_RefreshScreenTextCheckbox = function()
+        if noticeCheckbox and noticeCheckbox.SetChecked then
+            noticeCheckbox:SetChecked(WR_ScreenTextNoticeEnabled())
+        end
+    end
     noticeCheckbox:SetScript("OnClick", function(self)
-        local isChecked = self:GetChecked()
-        PigSet["ChatNoticeMode"] = isChecked and 2 or 0
+        local isChecked = self:GetChecked() and true or false
+        PigSet["ScreenTextNotice"] = isChecked
         local statusText = isChecked and "|cff00ff00开启|r" or "|cffff0000关闭|r"
-        print(string.format("|cff00ff00[MKHelperForever]|r 聊天窗口提示已%s。", statusText))
+        print(string.format("|cff00ff00[MKHelperForever]|r 屏幕文字提示已%s。", statusText))
     end)
     noticeCheckbox:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("开启或关闭技能开关时的聊天窗口提示。\n可通过 /pigchat 命令设置高级模式。")
+        GameTooltip:SetText("开启或关闭插件的所有屏幕文字提示（屏幕中央大字、色块技能名、聊天框开关提示、提示弹窗）。\n"
+            .. "|cffaaffaa默认关闭|r；色块颜色本身不受影响，AHK 取色照常工作。\n"
+            .. "高级：/screentip on|off|status 控制本开关，/pigchat 0|1|2 控制聊天框提示窗口。")
         GameTooltip:Show()
     end)
     noticeCheckbox:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
@@ -3163,7 +3496,7 @@ local function ConfigFrame()
         uiScaleLabel:SetPoint("TOPLEFT", followDropdown, "BOTTOMLEFT", 16, -GLOBAL_ROW_H)
     end
 
-    -- 应用左区全局折叠初始状态（含智能AOE 子区块定位）；WR_LayoutGlobal 内部在展开时再调 AOE 布局
+    -- 应用左区全局初始化状态（WR_LayoutGlobal 仅负责显示全局标题条）
     if WR_LayoutGlobal then WR_LayoutGlobal() end
 
     -- 右下角整体缩放手柄（等比缩放整个框架，含文字与控件一起放大/缩小）
@@ -3332,6 +3665,12 @@ end
 SLASH_PIGCHAT1 = "/pigchat"
 SlashCmdList["PIGCHAT"] = function(msg)
     msg = strtrim(strlower(msg or ""))
+    -- ★ 2026-11-11：除「关闭」外，设置聊天提示模式时顺带打开屏幕文字提示总闸，
+    -- 避免总闸关闭导致 /pigchat 设了模式却看不到任何提示。
+    if type(PigSet) == "table" and msg ~= "0" and msg ~= "off" then
+        PigSet["ScreenTextNotice"] = true
+        if type(WR_RefreshScreenTextCheckbox) == "function" then WR_RefreshScreenTextCheckbox() end
+    end
     if msg == "0" or msg == "off" then
         PigSet["ChatNoticeMode"] = 0
         print("|cff00ff00[MKHelperForever]|r 开关提示已完全|cffff0000关闭|r。")

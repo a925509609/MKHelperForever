@@ -52,6 +52,12 @@ function WR_TalentFrame(Menu, Talent_Name, Talent_Id)
             end
         end
         WR_TalentFrameCreateOK = true
+        -- ★ 2026-11-10：面板全部建好后收敛一次「互斥组」——
+        --   历史存档里可能残留同组双开（例如旧版同组两个开关同时勾着），
+        --   这里按「后声明者优先」自动关掉多余的那个，并在聊天框说明关了哪个。
+        if type(WR_ConfigExclusive_EnforceAll) == "function" then
+            WR_ConfigExclusive_EnforceAll(false)
+        end
     end
 
     -- 更新标题并显示对应面板

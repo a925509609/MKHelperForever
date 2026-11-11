@@ -41,6 +41,21 @@ WR_Forever = WR_Forever or {}
 local F = WR_Forever
 
 -- ============================================================
+-- ★ 0-. 屏幕文字提示总闸（PigSet.ScreenTextNotice）
+-- ------------------------------------------------------------
+-- 用户口径：「把插件中屏幕文字提示都关闭了」。
+-- 放在最先加载的兼容层，保证后续所有文件在加载/运行时都能调用。
+-- 默认关闭：字段为 nil / false 时一律不显示任何屏幕文字提示；
+-- 只有显式置 true（全局区「屏幕文字提示」复选框或 /screentip on）才放行。
+-- 覆盖：PigAlert 屏幕中央大字、色块/技能图标上的技能名文字、聊天框
+--       开关提示、WR_MessageWindows 弹窗、调试 HUD 文字。
+-- 不覆盖：色块颜色本身（AHK 取色依赖）、手动执行的诊断/调试命令输出。
+-- ============================================================
+function WR_ScreenTextNoticeEnabled()
+    return type(PigSet) == "table" and PigSet["ScreenTextNotice"] == true
+end
+
+-- ============================================================
 -- ★ 0. 旧光环 API 兜底（UnitBuff / UnitDebuff）
 -- ------------------------------------------------------------
 -- 背景：无限使用与正式服 Mainline 12.1.5 同源的 UI 架构，经典期的
@@ -1229,6 +1244,12 @@ end
 function WR_BuildSpellBookIndex(force)
     if WR_Forever_SpellBookIndex and not force then return WR_Forever_SpellBookIndex end
     local idx, list = {}, {}
+    -- ★ 2026-11-10：法术书条目的名字通常带「（等级 N）」后缀（例如「神圣打击（等级 5）」），
+    --   旧的 idx[nm] 只能精确匹配全名，导致 WR_ResolveSpellID("神圣打击") 查不到当前 rank，
+    --   只能退回写死的 Rank3 ID 1866 —— 角色升到 28 级以上后旧 rank 失效，
+    --   IsUsableSpell(1866) 返回 false，整条神圣打击链路都不亮。
+    --   这里额外建立「去掉等级后缀的基础名 → 最高 rank 条目」索引，供 WR_ResolveSpellID 使用。
+    local baseRank = {}  -- 基础名 → { id = spellID, rank = 等级数字 }
     local CSB = (type(C_SpellBook) == "table") and C_SpellBook or nil
     local CSP = (type(C_Spell) == "table") and C_Spell or nil
     local bank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player)
@@ -1288,10 +1309,29 @@ function WR_BuildSpellBookIndex(force)
                 if type(t) == "table" then nm = t.name end
             end
             if sid then
-                if nm and nm ~= "" then idx[nm] = sid end
+                if nm and nm ~= "" then
+                    idx[nm] = sid
+                    -- ★ 注意：Lua 5.1 的字符类按字节匹配，不能把多字节全角括号放进 [...]
+                    --   里（[（(] 只匹配单字节）。这里分两步用字面量多字节串去剥后缀：
+                    --   先全角「（等级 N）」，再半角「(等级 N)」。
+                    local base = string.gsub(nm, "%s*（等级%s*%d+）%s*$", "")
+                    if base == nm then
+                        base = string.gsub(nm, "%s*%(等级%s*%d+%)%s*$", "")
+                    end
+                    if base ~= "" and base ~= nm then
+                        local rankNo = tonumber(string.match(nm, "等级%s*(%d+)")) or 0
+                        local cur = baseRank[base]
+                        if not cur or rankNo >= cur.rank then
+                            baseRank[base] = { id = sid, rank = rankNo }
+                        end
+                    end
+                end
                 list[#list + 1] = { id = sid, name = nm or "", tab = tabName or "", slot = slot }
             end
         end
+    end
+    for base, rec in pairs(baseRank) do
+        idx[base] = rec.id
     end
     WR_Forever_SpellBookIndex = idx
     WR_Forever_SpellBookList  = list
@@ -1313,7 +1353,18 @@ function WR_ResolveSpellID(spell)
         return nil
     end
     -- ★ 2026-11-06：强制 ID（IsPlayerSpell 不可靠的核心技能）
+    -- ★★ 2026-11-10：强制 ID 只作兜底，优先用「法术书基础名索引」里的当前 rank。
+    --   原因：神圣打击共 8 个 rank（678/679/1866/680/2495/5569/10332/10333），
+    --   写死 Rank3 的 1866 后，角色升到 28 级以上会换 rank，旧 rank 不再可用；
+    --   IsUsableSpell(1866) 返回 false → WR_SpellUsable("神圣打击") 恒 false →
+    --   防护循环 hsEligible 恒 false，神圣打击 CD 好了也永远不亮色块。
     if F.SPELL_ID_FORCE and F.SPELL_ID_FORCE[spell] then
+        local idx = WR_BuildSpellBookIndex()
+        local current = idx and idx[spell]
+        if type(current) == "number" then
+            WR_Forever_SpellIDCache[spell] = current
+            return current
+        end
         return F.SPELL_ID_FORCE[spell]
     end
     -- ★ 2026-11-06：本服法术 ID 变动覆盖（祝福类）。已学会才采用，否则继续按法术书索引。

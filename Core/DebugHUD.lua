@@ -21,6 +21,13 @@ if not WR_DebugHUD then
     WR_DebugHUD:Hide()
     SLASH_WRDEBUG1 = "/wrdebug"
     SlashCmdList["WRDEBUG"] = function()
+        -- ★★ 2026-11-11：调试 HUD 也是屏幕文字，总闸关闭时不允许显示
+        if type(WR_ScreenTextNoticeEnabled) ~= "function"
+            or not WR_ScreenTextNoticeEnabled() then
+            WR_DebugHUD:Hide()
+            print("|cff00ff00[MKHelperForever]|r 调试 HUD 属于屏幕文字提示，已关闭；用 /screentip on 可重新开启。")
+            return
+        end
         if WR_DebugHUD:IsShown() then
             WR_DebugHUD:Hide()
         else

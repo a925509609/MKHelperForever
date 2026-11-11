@@ -23,11 +23,7 @@ function WR_PaladinForeverRet()
         if WR_ColorFrame_ShowSkill("清洁术", 27) then return true end
     end
 
-    -- 2. 输出光环（复仇光环 / 圣洁光环，常驻 DPS）
-    local auraUp = (WR_GetUnitBuffTime("player", "复仇光环") > 0) or (WR_GetUnitBuffTime("player", "圣洁光环") > 0)
-    if not auraUp and (WR_SpellUsable("复仇光环") or WR_SpellUsable("圣洁光环")) then
-        PigAlert("开启输出光环", 1, 0.8, 0, 1.2)
-    end
+    -- 2. ★ 2026-11-10 用户要求：删除「开启输出光环」文字提示，不再提醒。
 
     -- 3. 祝福（战斗外按菜单「祝福」下拉补）
     if WR_PaladinForever_Blessing(PigSet and PigSet.CJ_ZF) then return true end
@@ -55,7 +51,7 @@ function WR_PaladinForeverRet()
     if WR_PaladinForever_SealActive() and WR_SpellUsable("审判", true) then
         candidates["审判"] = judgeCD
     end
-    if hsRangeOK and (PigSet.FH_HS ~= false) and WR_SpellUsable("神圣打击") then
+    if hsRangeOK and (PigSet.FH_HS ~= false) and WR_PaladinForever_SpellKnown("神圣打击") then
         candidates["神圣打击"] = WR_PaladinForever_SkillCD["神圣打击"]
     end
     local scheduled = WR_PaladinForever_PickMostReady(candidates)
@@ -101,7 +97,7 @@ function WR_PaladinForeverRet()
     --   ★ 2026-11-08：真理之声(115)/光之守夜(116)/迅捷审判(117) 原用色块，
     --     但这三个槽位是旧版跟随系统专用（115=跟随目标 / 116=设焦点 / 117=跟随焦点），
     --     点亮即等于命令 AHK 执行 /follow、/focus —— 会造成「莫名其妙跟随/设焦点」。
-    --     改为只弹文字提示，不占色块槽位。
+    --     改为只弹文字提示，不占色块槽位（迅捷审判的提示已按用户要求删除）。
     if WR_PaladinForever_Talent("神恩术", 114) then return true end
     if WR_PaladinForever_SpellKnown("真理之声")
        and WR_PaladinForever_CanPrompt("真理之声", 60) then
@@ -115,12 +111,7 @@ function WR_PaladinForeverRet()
         WR_PaladinForever_MarkPrompt("光之守夜")
         return true
     end
-    if WR_PaladinForever_SpellKnown("迅捷审判")
-       and WR_PaladinForever_CanPrompt("迅捷审判", 60) then
-        PigAlert("可施放 迅捷审判", 1, 0.8, 0, 1.2)
-        WR_PaladinForever_MarkPrompt("迅捷审判")
-        return true
-    end
+    -- ★ 2026-11-10 用户要求：删除「可施放 迅捷审判」文字提示，不再提醒。
     if WR_PaladinForever_Talent("圣殿壁垒", 118) then return true end
 
     return false

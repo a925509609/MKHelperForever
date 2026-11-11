@@ -14,3 +14,6 @@ Forever_SpellScan_Report.html
 # WorkBuddy 应用标记文件（非插件代码）
 .wbapp_*.genie
 *.genie
+
+# Agent 子工作树（非插件代码，不进发布仓库）
+.agents/

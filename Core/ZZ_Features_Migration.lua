@@ -13,6 +13,10 @@
 --    ChatNoticeMode：0=关闭 1=默认窗口 2=所有可见窗口
 --    （文件级定义，上移至此以便文件前部的怪物屏蔽总开关等也能捕获）
 local function PrintToVisible(msg)
+    -- ★★ 2026-11-11：屏幕文字提示总闸（默认关闭）。关闭时聊天框切换提示也不输出。
+    -- 兼容：总闸函数未定义时按「关闭」处理，避免加载顺序异常导致报错。
+    if type(WR_ScreenTextNoticeEnabled) ~= "function"
+        or not WR_ScreenTextNoticeEnabled() then return end
     local mode = PigSet["ChatNoticeMode"]
     if mode == 0 then return end
     if mode == 1 then print(msg); return end
@@ -226,6 +230,11 @@ end
 PigSet.WCL_MODE = nil
 -- 清理已删除的防骑「自动保持圣洁护盾」(FH_SJHD) 旧存档字段（菜单开关与斜杠命令均已移除）
 PigSet.FH_SJHD = nil
+-- 清理已删除的防骑「单体循环」(FH_DT) 旧存档字段（2026-11-11 用户要求删除，改为「十字军审判」buff 维持）
+PigSet.FH_DT = nil
+-- 清理已删除的「全局区-AOE」两个开关旧存档字段（2026-11-11 用户要求删除全局区 AOE 功能与选项）
+PigSet.WR_GLOBAL_SMART_AOE = nil
+PigSet.WR_GLOBAL_MANUAL_AOE = nil
 -- 清理已删除的防骑「自动正义之锤」(FH_ZYZC) 旧存档字段（菜单开关与斜杠命令均已移除）
 PigSet.FH_ZYZC = nil
 -- 清理已删除的防骑「插入复仇者之盾」(FH_CRFD) 旧存档字段（菜单开关与斜杠命令均已移除）
@@ -241,10 +250,27 @@ PigSet.SS_SP = nil
 PigSet.FH_CRSSKQ = nil
 PigSet.SS_SSKQ = nil
 PigSet.SS_SSKQ_MP = nil
--- 清理已删除的「圣印」下拉框（技能不再细分，旋转使用固定圣印）
+-- 清理旧版「圣印」下拉框字段（旧 CJ_SY/FH_SY/SS_SY；三系各自的旧下拉）
 PigSet.CJ_SY = nil
 PigSet.FH_SY = nil
 PigSet.SS_SY = nil
+-- ★★ 2026-11-11：防护「圣印」改为「圣印」专区按钮（FH_SEAL 六项，默认 3=愤怒圣印）
+--   旧存档迁移：FH_GMSY=true → 4（光明·回血）；否则 FH_ZYSY=true → 2（正义）；否则 3。
+--   已有显式 FH_SEAL 时不被旧开关覆盖；迁移只执行一次（FH_SEAL_MIGRATED 标记）。
+if not PigSet.FH_SEAL_MIGRATED then
+    if PigSet.FH_SEAL == nil then
+        if PigSet.FH_GMSY == true then
+            PigSet.FH_SEAL = 4
+        elseif PigSet.FH_ZYSY == true then
+            PigSet.FH_SEAL = 2
+        else
+            PigSet.FH_SEAL = 3
+        end
+    end
+    PigSet.FH_SEAL_MIGRATED = true
+end
+PigSet.FH_GMSY = nil
+PigSet.FH_ZYSY = nil
 
 -- ★ 防骑祝福下拉索引迁移（2026-11-06：删除「庇护/强效庇护」两项，9 项 → 7 项）
 --   旧: 1力量 2智慧 3王者 4庇护 5强效力量 6强效智慧 7强效王者 8强效庇护 9禁用
@@ -1734,7 +1760,7 @@ local function Core_PS08_F007()
     end)
 
     -- ============================================
-    -- 顶层分区选项卡（4个分区）
+    -- 顶层分区选项卡（3个分区）
     -- ============================================
     -- ★ 2026-08-19：sectionTabs/sectionPanels/SelectSection 移到模块级（见上文）
     local function SelectSection_local(index)
@@ -1742,8 +1768,8 @@ local function Core_PS08_F007()
         return SelectSection(index)
     end
 
-    -- ★ 2026-08-21：插入"爆发列表"为分区2（怪物屏蔽右边）；命令清单→3、更新公告→4
-    local sectionNames = {"怪物屏蔽", "爆发列表", "命令清单", "更新公告"}
+    -- ★ 2026-11-11：删除「命令清单」分区；现为 怪物屏蔽 / 爆发列表 / 更新公告
+    local sectionNames = {"怪物屏蔽", "爆发列表", "更新公告"}
 
     local secPrevious
     for i, secName in ipairs(sectionNames) do
@@ -1834,7 +1860,7 @@ local function Core_PS08_F007()
         end
     end
 
-    -- ★ 间距对齐命令清单职业按钮（BTN_GAP=4，起始x=4，垂直间隔4）
+    -- ★ 间距对齐职业按钮（BTN_GAP=4，起始x=4，垂直间隔4）
     --   随 phaseDivider 整体上移 100px，填补原开关所占空间。
     local row1Gap, row2Gap = 4, 4
     local row1X, row1Y = 4, -36
@@ -1972,242 +1998,12 @@ local function Core_PS08_F007()
     SelectBurstPhase(1)
 
     -- ============================================
-    -- ★ 分区3: 命令清单（内联显示）
-    -- ★ 2026-08-21：爆发列表插入为分区2，命令清单变为分区3 → sectionPanels[3]
+    -- ★ 分区3: 更新公告（内联显示）
+    -- ★ 2026-11-11：删除「命令清单」功能后，更新公告前移为分区3 → sectionPanels[3]
     -- ============================================
     local panel3 = sectionPanels[3]
 
-    local cmdClassTabs = {}
-    local cmdClassScroll = CreateFrame("ScrollFrame", nil, panel3, "UIPanelScrollFrameTemplate")
-    cmdClassScroll:SetPoint("TOPLEFT", 0, -34)
-    -- ★ 2026-08-21：滚动条右边界由 -16 改为 -4，与上方「选择职业」按钮行右边缘对齐（不再偏左/超出框架）；
-    --   内容区宽 660 与 scrollframe 宽一致，避免触发水平滚动条。
-    cmdClassScroll:SetPoint("BOTTOMRIGHT", -4, 0)
-    WR_StyleScrollBarBlack(cmdClassScroll)
-    local cmdClassChild = CreateFrame("Frame", nil, cmdClassScroll)
-    cmdClassChild:SetWidth(660)
-
-    local cmdCurrentClass = 1
-    local cmdDataIndexMap = {}
-
-    local function RefreshCmdListInline()
-        -- ★ 销毁旧容器后重建，彻底杜绝旧专精名称、旧按钮累积不消失的问题
-        -- 注意：WoW 的 GetChildren() 返回迭代器，{}包裹只能捕获前3个值，导致大量子元素残留
-        if cmdClassChild then
-            cmdClassChild:Hide()
-            cmdClassChild:SetParent(nil)
-        end
-        cmdClassChild = CreateFrame("Frame", nil, cmdClassScroll)
-        cmdClassChild:SetWidth(660)
-        -- 每次刷新时重建索引映射（确保数据顺序与按钮始终一致）
-        -- ★ 2026-08-21：映射表第一个固定为「通用」数据索引，后面跟职业索引
-        wipe(cmdDataIndexMap)
-        if ZZ_CMDLIST_DATA then
-            -- 通用置顶
-            for idx = 1, #ZZ_CMDLIST_DATA do
-                local cd = ZZ_CMDLIST_DATA[idx]
-                if cd and cd.name == "通用" then
-                    cmdDataIndexMap[#cmdDataIndexMap + 1] = idx
-                    break
-                end
-            end
-            -- 其他职业
-            for idx = 1, math.min(10, #ZZ_CMDLIST_DATA) do
-                local cd = ZZ_CMDLIST_DATA[idx]
-                if cd and cd.name ~= "通用" then
-                    cmdDataIndexMap[#cmdDataIndexMap + 1] = idx
-                end
-            end
-        end
-        local data = ZZ_CMDLIST_DATA
-        if not data or type(data) ~= "table" or #data == 0 then
-            local noData = cmdClassChild:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-            noData:SetPoint("TOPLEFT", 4, -4)
-            noData:SetText("命令清单数据未加载")
-            cmdClassChild:SetHeight(40)
-            cmdClassChild:Show()
-            cmdClassScroll:SetScrollChild(cmdClassChild)
-            return
-        end
-        -- 使用映射表获取实际数据索引
-        local realIndex = cmdDataIndexMap[cmdCurrentClass]
-        if not realIndex then
-            cmdClassChild:SetHeight(40)
-            cmdClassChild:Show()
-            cmdClassScroll:SetScrollChild(cmdClassChild)
-            return
-        end
-        local classData = data[realIndex]
-        if not classData then
-            cmdClassChild:SetHeight(40)
-            cmdClassChild:Show()
-            cmdClassScroll:SetScrollChild(cmdClassChild)
-            return
-        end
-
-        local y = -4
-        for _, spec in ipairs(classData.specs or {}) do
-            local specHeader = cmdClassChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            specHeader:SetPoint("TOPLEFT", 4, y)
-            specHeader:SetText("|cffffd100" .. spec.name .. "|r")
-            specHeader:SetShadowOffset(0, 0)
-            specHeader:SetShadowColor(0, 0, 0, 0)
-            y = y - 22
-            for _, item in ipairs(spec.items or {}) do
-                local cmd = item[1] or ""
-                local desc = item[2] or ""
-                local defaultVal = item[3] or ""
-                local button = CreateFrame("Button", nil, cmdClassChild, "UIPanelButtonTemplate")
-                button:SetSize(650, 20)
-                button:SetPoint("TOPLEFT", 10, y)
-                button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-                -- 设置按钮文本：命令(黄色) + 说明(白色) + 默认值(绿/红/灰)
-                local defColor = defaultVal == "开" and "|cff00ff00" or (defaultVal == "关" and "|cffff6060" or "|cff888888")
-                local btnText = "|cffffd700" .. cmd .. "|r  " .. desc .. "  " .. defColor .. "[" .. defaultVal .. "]|r"
-                button:SetText(btnText)
-                local fs = button:GetFontString()
-                if fs then
-                    fs:SetJustifyH("LEFT")
-                    fs:SetFont(STANDARD_TEXT_FONT, 11, "")
-                end
-                button.cmd = cmd
-                button:SetScript("OnEnter", function(self)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(desc)
-                    GameTooltip:AddLine("命令: " .. cmd, 1, 1, 1)
-                    GameTooltip:AddLine("默认: " .. defaultVal, 0.82, 0.82, 0.82)
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("|cffffd700左键:|r 填入聊天框", 0.5, 1, 0.5)
-                    GameTooltip:AddLine("|cffffd700Shift+左键:|r 填入 /变量名 on", 0.5, 1, 0.5)
-                    GameTooltip:AddLine("|cffffd700Ctrl+左键:|r 填入 /变量名 off", 0.5, 1, 0.5)
-                    GameTooltip:AddLine("|cffffd700右键:|r 直接切换开关", 0.5, 1, 0.5)
-                    GameTooltip:Show()
-                end)
-                button:SetScript("OnLeave", function() GameTooltip:Hide() end)
-                button:SetScript("OnClick", function(self, mouseButton)
-                    local chatFrame = _G["ChatFrame1"] or DEFAULT_CHAT_FRAME
-                    if mouseButton == "LeftButton" then
-                        local var = cmd:match("^/(%S+)")
-                        if IsShiftKeyDown() and var then
-                            ChatFrame_OpenChat("/" .. var .. " on ", chatFrame)
-                        elseif IsControlKeyDown() and var then
-                            ChatFrame_OpenChat("/" .. var .. " off ", chatFrame)
-                        else
-                            ChatFrame_OpenChat(cmd .. " ", chatFrame)
-                        end
-                    elseif mouseButton == "RightButton" then
-                        local var = cmd:match("^/(%S+)")
-                        if var and SlashCmdList[var] then
-                            SlashCmdList[var]("toggle")
-                        else
-                            ChatFrame_OpenChat(cmd, chatFrame)
-                        end
-                    end
-                end)
-                y = y - 20
-            end
-        end
-        cmdClassChild:SetHeight(math.max(1, -y + 8))
-        cmdClassChild:Show()
-        cmdClassScroll:SetScrollChild(cmdClassChild)
-    end
-
-    -- 职业选择选项卡
-    local function SelectCmdClass(index)
-        cmdCurrentClass = index
-        for i, tab in ipairs(cmdClassTabs) do
-            if i == index then
-                tab:LockHighlight()
-                tab:GetFontString():SetTextColor(0.2, 0.8, 1)
-            else
-                tab:UnlockHighlight()
-                tab:GetFontString():SetTextColor(1, 0.82, 0)
-            end
-        end
-        cmdClassScroll:SetVerticalScroll(0)
-        RefreshCmdListInline()
-    end
-
-    local cmdClassLabel = panel3:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    cmdClassLabel:SetPoint("TOPLEFT", 4, 0)
-    cmdClassLabel:SetText("|cffffd700选择职业：|r")
-    cmdClassLabel:SetShadowOffset(0, 0)
-    cmdClassLabel:SetShadowColor(0, 0, 0, 0)
-
-    -- 使用 ZZ_CMDLIST_DATA 中的职业名，确保顺序与数据一致；如果不可用则显示提示
-    -- ★ 2026-08-21：把「通用」分类置顶并单独做成按钮，用户可直接查看通用命令清单
-    local function GetClassNames()
-        if ZZ_CMDLIST_DATA and #ZZ_CMDLIST_DATA > 0 then
-            local names = {}
-            -- 先把「通用」放在最前面
-            for idx = 1, #ZZ_CMDLIST_DATA do
-                local cd = ZZ_CMDLIST_DATA[idx]
-                if cd and cd.name == "通用" then
-                    names[#names + 1] = cd.name
-                    break
-                end
-            end
-            -- 再取其他职业（排除"通用"）
-            for idx = 1, math.min(10, #ZZ_CMDLIST_DATA) do
-                local cd = ZZ_CMDLIST_DATA[idx]
-                if cd and cd.name ~= "通用" then
-                    names[#names + 1] = cd.name
-                end
-            end
-            return names
-        end
-        -- 回退列表顺序必须与 ZZ_CMDLIST_DATA 一致，避免索引错位导致专精显示错误
-        return {"通用", "圣骑士", "战士", "死亡骑士", "猎人", "萨满", "盗贼", "德鲁伊", "术士", "法师", "牧师"}
-    end
-
-    local classNames = GetClassNames()
-    -- ★ 2026-08-21：职业按钮增加「通用」，改为每行6列（通用+5职业 / 5职业）
-    local BTN_PER_ROW = 6
-    local BTN_GAP = 4
-    local BTN_W = math.floor((660 - (BTN_PER_ROW - 1) * BTN_GAP) / BTN_PER_ROW)
-    local BTN_H = 22
-    local row1Previous, row2Previous
-
-    for i, cname in ipairs(classNames) do
-        local isRow1 = i <= BTN_PER_ROW
-        local tab = CreateFrame("Button", nil, panel3, "UIPanelButtonTemplate")
-        tab:SetSize(BTN_W, BTN_H)
-        if isRow1 then
-            if row1Previous then
-                tab:SetPoint("LEFT", row1Previous, "RIGHT", BTN_GAP, 0)
-            else
-                tab:SetPoint("TOPLEFT", 4, -20)
-            end
-            row1Previous = tab
-        else
-            if row2Previous then
-                tab:SetPoint("LEFT", row2Previous, "RIGHT", BTN_GAP, 0)
-            else
-                tab:SetPoint("TOPLEFT", 4, -46)
-            end
-            row2Previous = tab
-        end
-        tab:SetText(cname)
-        local btnIndex = i  -- 捕获当前索引，避免闭包陷阱
-        tab:SetScript("OnClick", function()
-            SelectCmdClass(btnIndex)
-        end)
-        cmdClassTabs[i] = tab
-    end
-
-    -- 调整滚动区域起始位置，避免与2排按钮重叠
-    cmdClassScroll:SetPoint("TOPLEFT", 0, -74)
-
-    -- ★ 2026-08-21：默认选中「通用」分类（cmdCurrentClass=1，映射表第一个就是通用）
-    SelectCmdClass(1)
-
-    -- ============================================
-    -- ★ 分区4: 更新公告（内联显示）
-    -- ★ 2026-08-21：爆发列表插入为分区2，更新公告变为分区4 → sectionPanels[4]
-    -- ============================================
-    local panel4 = sectionPanels[4]
-
-    local noticeScroll = CreateFrame("ScrollFrame", nil, panel4, "UIPanelScrollFrameTemplate")
+    local noticeScroll = CreateFrame("ScrollFrame", nil, panel3, "UIPanelScrollFrameTemplate")
     noticeScroll:SetPoint("TOPLEFT", 0, -4)
     noticeScroll:SetPoint("BOTTOMRIGHT", -16, 0)
     WR_StyleScrollBarBlack(noticeScroll)
@@ -2291,7 +2087,6 @@ local function Core_PS08_F007()
             ZZ_MonsterBlockMasterChk:SetChecked(PigSet.MONSTER_BLOCK_ENABLED ~= false)
         end
         -- 职业屏蔽（近战AOE/远程多线/坦克）三个子开关已迁至左侧全局面板，创建时即读取 PigSet，无需在此重复刷新
-        RefreshCmdListInline()
         RefreshNoticeInline()
     end)
 
@@ -2304,7 +2099,7 @@ function Core_PS08_F008(sectionIdx)
     if not configFrame then
         configFrame = Core_PS08_F007()
     end
-    -- ★ 2026-08-19：支持指定 tab（sectionIdx 1=怪物屏蔽 / 2=命令清单 / 3=更新公告）。
+    -- ★ 2026-11-11：支持指定 tab（sectionIdx 1=怪物屏蔽 / 2=爆发列表 / 3=更新公告）。
     --  若当前已显示且 tab 与请求一致 → 隐藏（再次点击同 tab 关闭弹窗）；
     --  若指定不同 tab → 仅切 tab 不重新 Show/Hide。
     if sectionIdx then
@@ -3155,6 +2950,10 @@ local function Iconid_F005(config)
     iconFrame:SetScript("OnLeave", HideTooltip)
 
     local function PrintToVisible(msg)
+        -- ★★ 2026-11-11：屏幕文字提示总闸（默认关闭）。关闭时聊天框切换提示也不输出。
+        -- 兼容：总闸函数未定义时按「关闭」处理，避免加载顺序异常导致报错。
+        if type(WR_ScreenTextNoticeEnabled) ~= "function"
+            or not WR_ScreenTextNoticeEnabled() then return end
         local mode = PigSet["ChatNoticeMode"]
         if mode == 0 then return end
         if mode == 1 then print(msg); return end
@@ -3207,6 +3006,12 @@ end
 SLASH_PIGCHAT1 = "/pigchat"
 SlashCmdList["PIGCHAT"] = function(msg)
     msg = strtrim(strlower(msg or ""))
+    -- ★ 2026-11-11：除「关闭」外，设置聊天提示模式时顺带打开屏幕文字提示总闸，
+    -- 避免总闸关闭导致 /pigchat 设了模式却看不到任何提示。
+    if type(PigSet) == "table" and msg ~= "0" and msg ~= "off" then
+        PigSet["ScreenTextNotice"] = true
+        if type(WR_RefreshScreenTextCheckbox) == "function" then WR_RefreshScreenTextCheckbox() end
+    end
     if msg == "0" or msg == "off" then
         PigSet["ChatNoticeMode"] = 0
         print("|cff00ff00[MKHelperForever]|r 开关提示已完全|cffff0000关闭|r。")
@@ -4037,6 +3842,7 @@ local configUIInitialized = false
 local CoreDefaults = {
     FrameAlpha = 100,
     ChatNoticeMode = 2,
+    ScreenTextNotice = false,  -- ★ 2026-11-11：屏幕文字提示总闸，默认全部关闭（/screentip on 或面板复选框开启）
     MONSTER_BLOCK_ENABLED = false,  -- 怪物屏蔽总开关（原 WCL 冲分模式已并入此开关）
     DBM_PREPULL_POTION = false,
     TOUYAO_TIME = 3,       -- 全职业偷药/爆发预开窗口（DBM倒数秒数，0-3 可调，默认3）
