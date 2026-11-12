@@ -79,6 +79,7 @@ Data\Forever_Content.lua
 Data\Forever_Racials.lua
 Data\Forever_Abilities.lua
 Data\Forever_SkillRegistry.lua
+Data\Forever_MageSpells.lua
 Core\Forever_Compat.lua
 Core\Forever_SecretGuard.lua
 
@@ -128,6 +129,7 @@ Core\TIP.lua
 # 4. 职业模块
 # ============================================================
 Paladin\Paladin_Menu.lua
+Paladin\Paladin_Blessing.lua
 Paladin\Paladin_Macros.lua
 Paladin\Paladin_P1Enhancement.lua
 Paladin\Paladin_Holy.lua

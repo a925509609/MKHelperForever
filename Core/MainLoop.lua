@@ -963,6 +963,12 @@ frame:SetScript("OnUpdate", function(self, elapsed)
 
             -- 职业循环
             p_t0 = WR_Profiling and debugprofilestop() or 0
+            -- ★★★ 2026-11-12：本轮「是否点亮过色块」的序号闸。
+            --   配合 Core/SoD_Runes.lua 的 WR_SoD_SweepPowerBlocked：本 tick 若一个
+            --   色块都没点亮，而上一 tick 残留的那个技能现在资源不足（蓝不够），
+            --   就把残留色块熄灭 —— 否则 AHK 读到同色会一直按，正是用户反馈的
+            --   「技能不够蓝释放时，应当不亮色块，导致一直按按键」。
+            if type(WR_SoD_BeginTick) == "function" then WR_SoD_BeginTick() end
             if PlayerClassBase == "PALADIN" then
                 if type(WR_PaladinForeverRotation) == "function" then
                     WR_PaladinForeverRotation()
@@ -1024,6 +1030,9 @@ frame:SetScript("OnUpdate", function(self, elapsed)
                     WR_MonkWindwalker()
                 end
             end
+            -- ★★★ 2026-11-12：职业循环跑完后收尾清扫（资源不足的残留色块必须熄灭，
+            --   否则 AHK 会一直按那个已经打不出去的技能键）。见 Core/SoD_Runes.lua。
+            if type(WR_SoD_SweepPowerBlocked) == "function" then WR_SoD_SweepPowerBlocked() end
             if WR_Profiling then WR_ProfileAcc["4.ClassRotation"] = (WR_ProfileAcc["4.ClassRotation"] or 0) + (debugprofilestop() - p_t0) end
             WR_LastTime = GetTime()
             if WR_TestCheckbox ~= nil then

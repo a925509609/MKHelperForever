@@ -78,7 +78,13 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-SHIFT-F5", "/petautocaston 水箭\n/petattack [combat]") -- 75
   WR_CreateMacro("CTRL-SHIFT-F6", "/cast 寒冰箭\n/petattack [combat]") -- 76
   WR_CreateMacro("CTRL-SHIFT-F7", "") -- 77
-  WR_CreateMacro("CTRL-SHIFT-F8", "") -- 78
+  -- ★★ 2026-11-12：78 原为空占位（CTRL-SHIFT-F8），启用为「魔爆术」宏。
+  --   背景：火法/奥法循环一直点亮 75 号槽来提示「魔爆术」，但 75 号槽绑的是
+  --   /petautocaston 水箭（开关水元素自动施法），全仓库也没有任何宏绑魔爆术 ——
+  --   于是 AHK 读到 75 的颜色会去开关水元素，而不是放 AOE。
+  --   现在把 78 号槽（ColorTable 有、AHK 已映射 ^+{F8}、原为空占位）绑成魔爆术，
+  --   并把 WR_SkillColor["MAGE"]["魔爆术"] 从 75 改到 78。
+  WR_CreateMacro("CTRL-SHIFT-F8", "/cast 魔爆术") -- 78
   WR_CreateMacro("CTRL-SHIFT-F12", "") -- 79
   WR_CreateMacro("CTRL-SHIFT-F10", "") -- 80
   WR_CreateMacro("ALT-CTRL-SHIFT-F1", "") -- 81
@@ -233,14 +239,38 @@ WR_SkillColor["MAGE"] = {
     ["冰枪术"] = 44,
     ["冰霜新星"] = 11,
     ["寒冰箭"] = 60,
-    ["魔爆术"] = 75,
+    -- ★★ 2026-11-12：魔爆术从 75 改到 78。
+    --   75 号槽实际绑的是 /petautocaston 水箭（开关水元素自动施法），
+    --   全仓库没有任何宏绑魔爆术 → 火法/奥法点亮 75 会让 AHK 去开关水元素。
+    --   现在 78 号槽（原空占位 CTRL-SHIFT-F8）已绑 /cast 魔爆术。
+    ["魔爆术"] = 78,
     ["奥术涌动"] = 74,
     ["法力宝石"] = 77,
-    ["冰冷之血"] = 4,
-    ["气定神闲"] = 301,
-    ["奥术强化"] = 302,
-    ["冲击波"] = 303,
-    ["寒冰屏障"] = 304,
-    ["急速冷却"] = 305,
-    ["寒冰护盾"] = 306,
+    -- ★★ 2026-11-12：4 号槽实际绑的是 /CAST 活动炸弹，不是冰冷之血。
+    --   且 Forever 冰霜树里根本没有「冰冷之血」（那是 SoD 腿符文），
+    --   这条登记已无意义且会误导后续接入者 → 删除。
+    -- ["冰冷之血"] = 4,
+    -- ★★ 2026-11-12 修复：下面三个原来登记 301/302/303/304/305/306，
+    --   但 Core/UI_ColorFrame.lua 的 ColorTable 只到 240（1..240）——
+    --   WR_Frame_Color[304] 是 nil，WR_CreateSingleColorSlot 会把它送进
+    --   PIG_BGRtoBGR 做 math.floor(nil / 0x10000) → 直接抛错（整个 tick 崩掉）。
+    --   现在改为 Mage_Macros.lua 里真实绑定了宏的槽位：
+    --     寒冰屏障 ALT-CTRL-NUMPAD2 = 32  → /cast 寒冰屏障
+    --     急速冷却 ALT-CTRL-F3      = 63  → /cast 急速冷却
+    --     寒冰护体 ALT-CTRL-F5      = 65  → /cast 寒冰护体
+    --   顺带把「寒冰护盾」改成本服客户端真名「寒冰护体」（65 号槽的宏就是这个名字），
+    --   避免 WR_SoD_ResolveSlot("寒冰护盾") 反查不到而回落。
+    ["寒冰屏障"] = 32,
+    ["急速冷却"] = 63,
+    ["寒冰护体"] = 65,
+    ["寒冰护盾"] = 65,   -- 别名：Data/Forever_Abilities.lua 的 zh 用「寒冰护盾」
+    -- ★★ 2026-11-12：气定神闲 / 奥术强化 / 冲击波 的 301/302/303 同样是
+    --   ColorTable 不存在的 key，会崩。它们目前没有任何循环在点亮，
+    --   但为防将来误用，这里一并改成真实绑定的槽位：
+    --     气定神闲 CTRL-NUMPAD5 = 15 → /cast 气定神闲
+    --     奥术强化 CTRL-NUMPAD6 = 16 → /cast 奥术强化
+    --     冲击波   ALT-NUMPAD2  = 22 → /cast 冲击波
+    ["气定神闲"] = 15,
+    ["奥术强化"] = 16,
+    ["冲击波"] = 22,
 }

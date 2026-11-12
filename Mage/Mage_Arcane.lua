@@ -34,8 +34,9 @@ function WR_MageArcane()
     local inRange = (TargetRange and TargetRange <= 35)
 
     -- ===== 3. AoE 分支（3+ 敌近身）=====
+    -- ★★ 2026-11-12：槽位从 75 改 78（75 实绑 /petautocaston 水箭，78 已绑 /cast 魔爆术）
     if UnitCount8 >= 3 and WR_SpellUsable("魔爆术", true) then
-        if WR_ColorFrame_ShowSkill("魔爆术", 75) then return true end
+        if WR_ColorFrame_ShowSkill("魔爆术", 78) then return true end
     end
 
     -- ===== 4. 单体核心（仅当在射程）=====

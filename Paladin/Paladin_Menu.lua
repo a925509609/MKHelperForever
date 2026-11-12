@@ -68,22 +68,8 @@ Paladin_Menu = {
                 tooltipText = "选择|cff00adf0圣光闪现|r的阈值\n",
                 saveVariable = "CJ_SGSX"
             },
-            -- 祝福选择
-            {
-                text = "|cffF58CBA祝福|r",
-                menuItems = {
-                    { text = "|cffF58CBA力量|r" },
-                    { text = "|cffF58CBA智慧|r" },
-                    { text = "|cffF58CBA王者|r" },
-                    { text = "|cffF58CBA强效力量|r" },
-                    { text = "|cffF58CBA强效智慧|r" },
-                    { text = "|cffF58CBA强效王者|r" },
-                    { text = "|cffF58CBA禁用|r" },
-                },
-                tooltipText = "|cff00adf0蓝色：普通祝福|r\n|cffffdf00金色：强效祝福。\n★ 祝福仅在战斗外施放，不影响战斗节奏",
-                saveVariable = "CJ_ZF",
-                defaultID = 7
-            },
+            -- ★ 2026-11-11：祝福下拉框已删除，改为「祝福设置」按钮，
+            --   点击打开独立列表（Paladin_Blessing.lua）。见 DM 列表末尾。
             -- 清洁术模式
             {
                 text = "|cffF58CBA清洁术|r",
@@ -97,6 +83,15 @@ Paladin_Menu = {
                 tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r",
                 saveVariable = "CJ_QJS",
                 defaultID = 5
+            },
+            -- ★ 2026-11-11：祝福下拉框 → 「祝福设置」按钮（打开独立列表）
+            {
+                -- 用户口径「祝福设置保留，祝福两个字剔除」：按钮保名「祝福设置」，左侧标签不再写「祝福」
+                text = "",
+                isButton = true,
+                buttonText = "祝福设置",
+                onClick = "WR_OpenPaladinBlessing",
+                tooltipText = "打开|cff00adf0祝福设置列表|r：单人 / 小队 / 团队分别配置力量·智慧·王者祝福，脱战自动补祝福。\n（原「祝福」下拉框已删除）",
             },
         },
         -- ===== 复选框（CB） =====
@@ -167,22 +162,8 @@ Paladin_Menu = {
             --   顺序必须与 Paladin_Forever.lua 的 WR_PaladinForever_SealOptions 严格一致：
             --   1=十字军圣印(30) 2=正义圣印(47) 3=愤怒圣印(11)
             --   4=光明圣印·回血(54) 5=智慧圣印·回蓝(108) 6=公正圣印(9)
-            -- ★ 祝福选择（防护专精）
-            {
-                text = "|cffF58CBA祝福|r",
-                menuItems = {
-                    { text = "|cffF58CBA力量|r" },
-                    { text = "|cffF58CBA智慧|r" },
-                    { text = "|cffF58CBA王者|r" },
-                    { text = "|cffF58CBA强效力量|r" },
-                    { text = "|cffF58CBA强效智慧|r" },
-                    { text = "|cffF58CBA强效王者|r" },
-                    { text = "|cffF58CBA禁用|r" },
-                },
-                tooltipText = "|cff00adf0蓝色：普通祝福|r\n|cffffdf00金色：强效祝福。\n★ 祝福仅在战斗外施放，不影响战斗节奏",
-                saveVariable = "FH_ZF",
-                defaultID = 7
-            },
+            -- ★ 祝福选择（防护专精）：下拉框已删除，改为「祝福设置」按钮，
+            --   位置按用户口径放在「打断」滑块下方（见本 DM 列表末尾）。
             -- 清洁术模式
             {
                 text = "|cffF58CBA清洁术|r",
@@ -222,6 +203,15 @@ Paladin_Menu = {
                 defaultID = 4
             },
             { text = "|cffF58CBA打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 50, tooltipText = "施法进度达到该百分比时自动打断（0=关闭，默认50）", saveVariable = "FH_DD" },
+            -- ★ 2026-11-11：按用户口径放在「打断」下方：祝福下拉框 → 「祝福设置」按钮
+            {
+                -- 用户口径「祝福设置保留，祝福两个字剔除」：按钮保名「祝福设置」，左侧标签不再写「祝福」
+                text = "",
+                isButton = true,
+                buttonText = "祝福设置",
+                onClick = "WR_OpenPaladinBlessing",
+                tooltipText = "打开|cff00adf0祝福设置列表|r：单人 / 小队 / 团队分别配置力量·智慧·王者祝福，脱战自动补祝福。\n（原「祝福」下拉框已删除）",
+            },
         },
         -- ===== 复选框（CB） =====
         CB = {
@@ -257,7 +247,7 @@ Paladin_Menu = {
             --   光明圣印 / 十字军审判 / 智慧审判，三者互斥（PAL_PROT_JUDGEMENT_SEAL）。
             -- ==========================================================
             -- ★★ 2026-11-11：原「插入 光明圣印」一次性流程改为「光明圣印」常驻开关
-            { row = 1, column = 1, IconID = 135917, text = "|cffF58CBA光明圣印|r", tooltipText = "光明圣印|cff00adf0 buff 常驻开关|r（原「插入光明圣印」改造，宏 CTRL-F11 / 颜色槽 54）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 优先维持自己身上的|cff00adf0光明圣印|r（30 秒 Buff，掉了会自动补）\n2. 目标没有「光明审判」debuff 时，审判就绪即提示|cff00adf0审判|r，给目标挂上 debuff\n3. 目标已有|cff00adf0光明审判|r（光明圣印的审判效果）时，自动提示切回当前常驻圣印（面板「圣印」专区所选，默认愤怒圣印）\n4. 光明审判持续 40 秒，到期后自动重复上述流程\n\n|cffff5040注意|r：圣印同一时间只能有一个，切光明会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n仅建议需要光明审判回血时开启；与「十字军审判」「智慧审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选光明圣印时同样有效）。\n未学会光明圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_CRGMSY", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
+            { row = 1, column = 1, IconID = 135917, text = "|cffF58CBA光明圣印|r", tooltipText = "光明圣印|cff00adf0 buff 常驻开关|r（原「插入光明圣印」改造，宏 CTRL-F11 / 颜色槽 54）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 平时维持面板「圣印」专区所选常驻圣印（仇恨/嘲讽来源不断档）\n2. |cff00adf0审判 CD 只剩 2 秒（含已就绪）|r 且目标没有「光明审判」debuff 时，才切光明圣印 → 提示|cff00adf0审判|r 挂 debuff\n3. 目标已有|cff00adf0光明审判|r 时，自动提示切回当前常驻圣印\n4. 光明审判持续 40 秒，到期后重新等下一个「审判 CD ≤2 秒」窗口\n\n|cffff5040注意|r：圣印同一时间只能有一个，切光明会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n|cffaaffaa切印时机已修正|r：不再一勾选就切印干等审判 CD，只在审判快好时才切；\n与「十字军审判」「智慧审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选光明圣印时同样有效）。\n未学会光明圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_CRGMSY", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
             -- ★ 2026-11-09：插入 智慧圣印（回复法力；宏 ALT-SHIFT-F8 / 颜色槽 108）
             { row = 5, column = 3, IconID = 135970, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0智慧圣印|r（一次性）\n\n|cffaaffaa勾选后，等「审判」CD 转好时执行一次：|r\n1. 提示切到|cff00adf0智慧圣印|r（槽位 108，宏 ALT-SHIFT-F8）\n2. 切印完成后提示|cff00adf0审判|r，让这一发审判带上智慧圣印效果（回蓝）\n3. 审判打出后|cffaaffaa自动取消勾选|r，本次插入结束\n\n|cffff5040注意|r：圣印同一时间只能有一个，切智慧会暂时顶掉常驻圣印（仇恨来源），\n所以只在缺蓝时用；平时保持关闭。\n切印后 10 秒内没打出审判会自动放弃并取消勾选，不会卡住。\n未学会智慧圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_CRZHSY", section = "插入", defaultState = false },
             -- ★ 自动切目标开关
@@ -269,9 +259,9 @@ Paladin_Menu = {
             -- ★★ 2026-11-11：删除「单体」循环开关（FH_DT）。原「十字军圣印 → 审判 → 切回」起手
             --   由下方「十字军审判」buff 维持开关取代（常驻维持，不再是一次性起手）。
             -- ★★ 2026-11-11：十字军审判 buff 维持开关（与「光明圣印」常驻开关同款状态机）
-            { row = 1, column = 2, IconID = 135924, text = "|cffF58CBA十字军审判|r", tooltipText = "十字军审判|cff00adf0 buff 维持开关|r（十字军圣印，宏 ALT-NUMPAD0 / 颜色槽 30）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 优先维持自己身上的|cff00adf0十字军圣印|r（30 秒 Buff，掉了会自动补）\n2. 目标没有「十字军审判」debuff 时，审判就绪即提示|cff00adf0审判|r，给目标挂上 debuff\n3. 目标已有「十字军审判」debuff 时，自动提示切回当前常驻圣印（面板「圣印」专区所选，默认愤怒圣印）\n4. 十字军审判持续 40 秒，到期后自动重复上述流程\n\n|cffff5040注意|r：圣印同一时间只能有一个，切十字军会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n建议需要提升神圣伤害时开启；与「光明圣印」「智慧审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选十字军圣印时同样有效）。\n未学会十字军圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_SZJSP", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
+            { row = 1, column = 2, IconID = 135924, text = "|cffF58CBA十字军审判|r", tooltipText = "十字军审判|cff00adf0 buff 维持开关|r（十字军圣印，宏 ALT-NUMPAD0 / 颜色槽 30）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 平时维持面板「圣印」专区所选常驻圣印（仇恨/嘲讽来源不断档）\n2. |cff00adf0审判 CD 只剩 2 秒（含已就绪）|r 且目标没有「十字军审判」debuff 时，才切十字军圣印 → 提示|cff00adf0审判|r 挂 debuff\n3. 目标已有「十字军审判」debuff 时，自动提示切回当前常驻圣印\n4. 十字军审判持续 40 秒，到期后重新等下一个「审判 CD ≤2 秒」窗口\n\n|cffff5040注意|r：圣印同一时间只能有一个，切十字军会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n|cffaaffaa切印时机已修正|r：不再一勾选就切印干等审判 CD，只在审判快好时才切；\n与「光明圣印」「智慧审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选十字军圣印时同样有效）。\n未学会十字军圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_SZJSP", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
             -- ★★ 2026-11-11：智慧审判 buff 维持开关（与「光明圣印」「十字军审判」同款状态机）
-            { row = 1, column = 3, IconID = 135970, text = "|cffF58CBA智慧审判|r", tooltipText = "智慧审判|cff00adf0 buff 维持开关|r（智慧圣印，宏 ALT-SHIFT-F8 / 颜色槽 108）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 优先维持自己身上的|cff00adf0智慧圣印|r（30 秒 Buff，掉了会自动补）\n2. 目标没有「智慧审判」debuff 时，审判就绪即提示|cff00adf0审判|r，给目标挂上 debuff（攻击/法术有几率回蓝）\n3. 目标已有「智慧审判」debuff 时，自动提示切回当前常驻圣印（面板「圣印」专区所选，默认愤怒圣印）\n4. 智慧审判持续 40 秒，到期后自动重复上述流程\n\n|cffff5040注意|r：圣印同一时间只能有一个，切智慧会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n建议需要回蓝时开启；与「光明圣印」「十字军审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选智慧圣印时同样有效）。\n未学会智慧圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_ZHSP", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
+            { row = 1, column = 3, IconID = 135970, text = "|cffF58CBA智慧审判|r", tooltipText = "智慧审判|cff00adf0 buff 维持开关|r（智慧圣印，宏 ALT-SHIFT-F8 / 颜色槽 108）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 平时维持面板「圣印」专区所选常驻圣印（仇恨/嘲讽来源不断档）\n2. |cff00adf0审判 CD 只剩 2 秒（含已就绪）|r 且目标没有「智慧审判」debuff 时，才切智慧圣印 → 提示|cff00adf0审判|r 挂 debuff（攻击/法术有几率回蓝）\n3. 目标已有「智慧审判」debuff 时，自动提示切回当前常驻圣印\n4. 智慧审判持续 40 秒，到期后重新等下一个「审判 CD ≤2 秒」窗口\n\n|cffff5040注意|r：圣印同一时间只能有一个，切智慧会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n|cffaaffaa切印时机已修正|r：不再一勾选就切印干等审判 CD，只在审判快好时才切；\n与「光明圣印」「十字军审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选智慧圣印时同样有效）。\n未学会智慧圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_ZHSP", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
             -- ★ 2026-11-08：神圣之盾开关（常驻；默认开 = 保持原有行为）
             { row = 7, column = 1, IconID = 135880, text = "|cffF58CBA神圣之盾|r", tooltipText = "开启后，防护循环会在|cff00adf0神圣之盾|r冷却好时提示施放（防护核心减伤/仇恨）。\n\n|cffaaffaa默认勾选|r，与加入此开关之前的行为一致。\n关闭后循环不再提示神圣之盾，适合想手动控制、或该技能浪费蓝量时。\n未学会神圣之盾时不会提示（与开关无关）。", saveVariable = "FH_SZS", defaultState = true },
 
@@ -298,22 +288,8 @@ Paladin_Menu = {
     ["神圣"] = {
         -- ===== 下拉菜单（DM） =====
         DM = {
-            -- 祝福选择
-            {
-                text = "|cffF58CBA祝福|r",
-                menuItems = {
-                    { text = "|cffF58CBA力量|r" },
-                    { text = "|cffF58CBA智慧|r" },
-                    { text = "|cffF58CBA王者|r" },
-                    { text = "|cffF58CBA强效力量|r" },
-                    { text = "|cffF58CBA强效智慧|r" },
-                    { text = "|cffF58CBA强效王者|r" },
-                    { text = "|cffF58CBA禁用|r" },
-                },
-                tooltipText = "|cff00adf0蓝色：普通祝福|r\n|cffffdf00金色：强效祝福。\n★ 祝福仅在战斗外施放，不影响战斗节奏",
-                saveVariable = "SS_ZF",
-                defaultID = 7
-            },
+            -- ★ 2026-11-11：祝福下拉框已删除，改为「祝福设置」按钮，
+            --   点击打开独立列表（Paladin_Blessing.lua）。见 DM 列表末尾。
             -- 清洁术模式
             {
                 text = "|cffF58CBA清洁术|r",
@@ -503,6 +479,15 @@ Paladin_Menu = {
                 defaultVal = 30,
                 tooltipText = "当队友中了需要保护的减伤DEBUFF，或者血量低于设定值的时候，使用|cffffffb3保护之手|r。\n|cffff5040值为0：不使用|cffffffb3保护之手|r。|r",
                 saveVariable = "SS_BHZS"
+            },
+            -- ★ 2026-11-11：祝福下拉框 → 「祝福设置」按钮（打开独立列表）
+            {
+                -- 用户口径「祝福设置保留，祝福两个字剔除」：按钮保名「祝福设置」，左侧标签不再写「祝福」
+                text = "",
+                isButton = true,
+                buttonText = "祝福设置",
+                onClick = "WR_OpenPaladinBlessing",
+                tooltipText = "打开|cff00adf0祝福设置列表|r：单人 / 小队 / 团队分别配置力量·智慧·王者祝福，脱战自动补祝福。\n（原「祝福」下拉框已删除）",
             },
         },
         -- ===== 复选框（CB） =====

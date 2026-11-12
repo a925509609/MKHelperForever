@@ -16,6 +16,582 @@ local FontSize = 16
 -- ==========================================
 local UpdateContent = [[
 
+【全局】2026-11-12（修复「技能不够蓝释放时色块仍然亮，导致一直按空键」）
+- 用户口径原话：「技能不够蓝释放时，应当不亮色块，导致一直按按键」。
+- 现象链（色块模型）：法力不够 → 色块照样亮 → AHK 读色按键 → 客户端以
+  「法力不足」拒绝 → 技能没出去 → 色块不灭（下一 tick 又点亮）→ AHK 继续按，
+  形成空按死循环。
+- 根因（三层，全部实测确认）：
+  ① Core/Forever_Compat.lua 的 WR_IsSpellUsableCompat 只取 IsUsableSpell 的
+     **第 1 个返回值**，把「缺法力」的第二返回值 noMana 彻底丢掉；很多客户端
+     在法力不足时第 1 个返回值仍是 true（第 2 个才报缺资源）→ WR_SpellUsable
+     恒 true → 色块常亮。12.x 的 C_Spell.IsSpellUsable 还可能返回 **table**
+     { isUsable, insufficientPower }，旧代码把 table 直接当真值 → 同样恒 true。
+  ② 完全没有「当前资源 vs 技能消耗」的比对，只能等客户端报错。
+  ③ 色块是「亮着就一直按」的模型：各循环拦下时只 return false、**不熄灭**该槽位，
+     上一 tick 的色块会一直挂着 → AHK 读到同色继续按。
+- 修复（三层闸，读不到一律放行，宁可少判不可误杀）：
+  ① 客户端回执归一（Core/Forever_Compat.lua）：
+     · 新增 WR_Forever_ParseUsable / WR_Forever_TakeUsable：自适应多返回值与
+       table 两种形状，noMana / insufficientPower=true → 直接判死；
+     · 新增 WR_Forever_SpellPowerCost（GetSpellPowerCost / C_Spell 版，按
+       spellID 缓存）与 WR_Forever_NotEnoughPower（cur < cost → 判死）；
+       只判 法力0/怒气1/集中值2/能量3/符文能量6 五类，连击点/符文/碎片/圣能
+       一律不判（避免误挡盗贼、德鲁伊、死骑、圣骑士）；
+     · 负缓存（取不到消耗）改为 **3 秒过期** —— 旧实现永久记 false，登录初期
+       法术书未就绪或换 rank 后该技能再也不会被资源检查，蓝不够照样常亮；
+     · 探测统一改用 pcall（本仓库老坑：type(API)=="function" 在离线夹具里是
+       "userdata"，会让整段守卫静默跳过）。
+  ② 色块总闸（Core/SoD_Runes.lua WR_ColorFrame_ShowSkill）：
+     · 新增 WR_SoD_NotEnoughPower（资源算术 + 客户端回执黑名单）；
+     · 拦下时**主动熄灭该技能自己的槽位**（新增 WR_HideSkillColorSlot，
+       只灭该技能、不动别的提示框）；
+     · 新增 UI_ERROR_MESSAGE 监听：捕获「法力/能量/怒气不足」文案，把刚亮过的
+       技能记进 2.5 秒短期黑名单并立刻熄灭 —— 战斗中资源是 secret 读不到时，
+       只有客户端知道到底缺不缺，这条回执是唯一可靠证据；
+     · 新增 WR_SoD_BeginTick / WR_SoD_SweepPowerBlocked：每 tick 收尾清扫，
+       本轮一个色块都没点亮、而残留色块对应的技能现在资源不足 → 熄灭它。
+  ③ 循环侧：WR_SpellUsable（全仓 ~300 处调用）自动受益；冰法 WR_MageFrost_Show
+     的蓝量下限、圣骑 WR_PaladinForever_ShowSkillCD 与祝福 WR_PaladinBlessing_Show
+     在拦下时同步熄灭该槽位。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 28 个 test_*.py exit=0。
+  新增夹具 test_power_gate.py（A~F 六段 30 条）：noMana 第二返回值 / table 形状 /
+  资源算术边界（== 放行、> 放行、无消耗放行、读不到放行、非判资源不判）/
+  总闸熄灭 / 回执黑名单与过期 / 每 tick 清扫四条路径 / MainLoop 静态接线。
+
+【全局】2026-11-12（主面板：删除全局功能区「倒数偷药」开关）
+- 用户口径原话：「删除全局功能区下的倒数偷药开关」。
+- 改动范围（Core/UI_Config.lua 左侧 globalRegion）：
+  · 删除「倒数偷药」复选框 WR_PrepullCheckbox、文字标签「倒数偷药」、
+    OnClick/OnEnter/OnLeave 脚本，以及该处的 PigSet["DBM_PREPULL_POTION"] 默认值初始化。
+- 关键联动：左区控件是**链式锚定**，「偷药时间」滑块（WR_TouyaoSlider）原锚在
+  prepullCheckbox 下方。删掉复选框后已把该滑块改锚到「自动救人」rescueCheckbox
+  （TOPLEFT → rescueCheckbox BOTTOMLEFT, -GLOBAL_ROW_H），保证整条布局链不断裂；
+  leftContentH 仍为 660（链上移约 26px，余量更充足），窗口尺寸不变。
+- 明确**未删除**的部分（避免误伤其它功能）：
+  · 「偷药时间」滑块与 PigSet["TOUYAO_TIME"] 保留 —— 它经 WR_PrepullInWindow()
+    控制全职业的「爆发预开窗口」（药水/饰品/种族/手套/血DK邪恶狂热等），
+    与本次删除的 DBM_PREPULL_POTION 总闸不是同一件事；
+  · 底层逻辑保留 —— Core/Combat_Tools.lua 的 WR_PrePullPotion_BExt /
+    WR_PrePullPotions_BExt、Core/ZZ_Features_Migration.lua 的 TryPrePullPotion /
+    WR_PrepullInWindow 及默认值 DBM_PREPULL_POTION=false 均不动。
+    只移除 UI 入口，旧存档里已开启的值仍按原设置生效，不改变任何职业的循环行为。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；新增 test_config_prepull_removed.py
+  （删除结果 + 锚点重接 + 其余全局控件仍在 + 底层逻辑未动），全部夹具 0 失败。
+- /reload 后生效。
+
+【圣骑士】2026-11-12（祝福：修复「队友不在附近时，队友的祝福上到自己身上」）
+- 用户口径原话：「存在异常，当队友不在附近时，队友的祝福会上到自己身上
+  导致与个人选择的祝福冲突」。
+- 根因（两条同源，都是 **WoW 宏的条件回退 macro fallthrough**）：
+  ① 直施宏 `/cast [@party1] 力量祝福` 里的 `[@party1]` 只是**条件**，不是硬目标：
+     条件不成立（离队 / 死亡 / 单位 token 失效）时该条件被丢弃，
+     `/cast` 退化成「无目标施放」→ 落到当前目标；没有目标时友善法术就落到
+     **自己**身上 → 与单人选的那条互相顶掉 = 用户说的「冲突」。
+     更糟的是 Paladin_Macros.lua 里槽 95 的**初始文本**原本是
+     `/cast [target=player] 力量祝福`（纯自施）：CreateClassesMacro 每次脱战
+     都重跑，只要动态重写有任何一次没写成功，按 ALT-F5 就是直接给自己上祝福。
+  ② 焦点兜底宏 `/cast [@focus] 力量祝福` 同理：焦点为空、或焦点**还停在自己**
+     身上（单人行 146 号槽就是 `/focus [@player]`，给队友切焦点失败时焦点
+     留在自己）→ 祝福直接打给自己。
+     而 WR_PaladinBlessing_FocusIs 原本「UnitIsUnit 读不到 → 返回 true」，
+     战斗中 secret 时等于无条件放行，正好走进这条自施路径。
+- 修复（Paladin/Paladin_Blessing.lua + Paladin/Paladin_Macros.lua）：
+  · 新增 WR_PaladinBlessing_DirectMacroText：直施宏改成两段式硬闸 ——
+      `/stopmacro [@partyN,noexists] [@partyN,dead] [@partyN,nohelp]`
+      `/cast [@partyN,help] 祝福名`
+    目标无效时 /stopmacro 让**整条宏立刻结束**（什么都不做），绝不回退成自施；
+    /cast 行再带 [,help] 双保险。
+  · 焦点祝福宏 102~107 全部改成同样的两段式硬闸（noexists / dead / nohelp）。
+  · 槽 95 初始注册文本由 `/cast [target=player] 力量祝福` 改为裸 `/stopmacro`
+    （无条件空转）：重写一旦没生效，按下去什么都不做，绝不误施。
+  · WR_PaladinBlessing_CastDirect 写完宏后**回读 GetAttribute("macrotext") 校验**：
+    战斗锁定导致 SetAttribute 被丢弃时宏还是上一次的旧目标，这时一律返回 false
+    不点亮色块 —— 宁可不补，也不能把祝福打给错误的人。
+  · WR_PaladinBlessing_FocusIs 增加两道保护：给队友补时先独立探测
+    「焦点是不是自己」（是 → 强制走切焦点流程）；UnitIsUnit 读不到时不再
+    无条件放行，改为「确认焦点不是自己才放行」。
+- 夹具（新增 2 个，共 27 个）：
+  · test_blessing_no_self_cast.py（静态，28 条）：直施/焦点宏必须带
+    stopmacro 闸与 [,help]、槽 95 初始文本不得是自施、ALT-F5 只注册一次、
+    FocusIs 探测焦点为自己、CastDirect 有 macrotext 校验、单人自施 91~93 不变。
+    修复前 28 条全红，修复后全绿。
+  · test_blessing_no_self_cast_dyn.py（动态，17 条）：真跑 Auto()，覆盖
+    「宏写不进去 → 绝不点亮槽 95」「焦点==自己 / 读不到 → 绝不点亮队友的
+    [@focus] 祝福」「队友超程 → 跳过且不退化成自施」「直施宏目标与本次要补的
+    单位一致（不张冠李戴）」「单人自施不受影响」。
+  · 三个既有祝福夹具里硬编码的 `"/cast [@party1] 力量祝福"` 断言改为
+    语义解析 direct_cast_target()，只看「施放行的目标单位 + 法术名」。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 27 个 test_*.py exit=0。
+
+【法师】2026-11-12（冰霜：主循环接线复查 —— 修掉「输出被保底火球术穿插」与「脱战色块粘连」）
+- 用户口径原话：「检查冰法在无限服客户端是否能正常输出，打主循环」。
+- 复查范围（全部离线可验证，逐层走通）：
+  · MainLoop.lua:976 → WR_MageForeverRotation()（MAGE 分支，10Hz OnUpdate）；
+  · WR_GetMyTalent() → 无限服天赋 shim 第 2/5 返回值 → WR_Forever_NormalizeSpec
+    → "冰霜"（SPEC_TREES.MAGE = {奥术, 火焰, 冰霜}），分发器 spec=="冰霜"
+    → WR_MageForeverFrost()；isForever 由接口号 16000~16999 判定；
+  · 9 个技能槽位逐条交叉核对 WR_MageFrost_SLOT / Mage_Macros.lua 的
+    WR_SkillColor["MAGE"] / Core/UI_ColorFrame.lua 的 ColorTable(1..240) /
+    外部 AHK ColorMap，全部一致且有绑定（60/44/27/26/11/65/32/63/18）；
+  · WR_ColorFrame_ShowSkill → WR_SoD_ResolveSlot 优先宏表，缺失回退调用处槽位，
+    不会点亮 ColorTable 之外的 key（不会触发 PIG_BGRtoBGR(nil) 崩溃）。
+- 发现并修复的两个真机缺陷：
+  ① 【输出被保底火球术穿插】寒冰箭（唯一无 CD 填充）带
+     WR_MageFrost_PROMPT_DEBOUNCE=0.4s 提示防抖，而主循环是 10Hz(0.1s/tick)。
+     防抖期内的 tick 返回 false → 分发器 WR_MageForeverRotation() 一看到 false
+     就点亮「保底火球术」(槽 5)，于是冰法每 4 tick 有 3 tick 被 3.5 秒读条的
+     火球术占掉。修复：仅当确实是「防抖空窗」时返回 true 表示冰法链已接管，
+     阻止保底插入；其它失败原因（槽位非法 / 蓝量不足）仍返回 false 交给保底
+     （保底自身有 noMana 门槛）。防抖空窗不点亮新色块是正确的：上一 tick 的
+     寒冰箭色块保持常亮、AHK 同色连按继续打寒冰箭。
+  ② 【脱战 / 超射程色块粘连】WR_ColorFrame_Show 每次成功点亮才「隐藏全部 →
+     显示一个」；整条链返回 false 时没有任何 Show 调用，上一 tick 的色块会
+     一直常亮，AHK 继续按（甚至可能在防ADD开的情况下自动开怪）。文件里早已
+     写好 WR_MageFrost_HideNow / ClearPrompts 但从未接线。修复：在「战斗门
+     return false」与「链末 return false」两处调用 WR_MageFrost_ClearPrompts()，
+     按 WR_MageFrost_PromptSlot 精确 Hide 本循环自己的槽位（不碰焦点/跟随/BOSS
+     等其它系统的色块），并清掉防抖计时便于下次进战立刻点亮；
+     ★ 防抖空窗的 return true 路径绝不调用 —— 那里正是要靠常亮让 AHK 连按。
+- 夹具：新增 .workbuddy/test_mage_frost_dispatch.py（端到端：分发器入口 →
+  专精分派 → 点亮槽位；A 分发 / B 槽位交叉 / C 12tick 保底调用 0 次 /
+  D 冻结窗口 / E 非冰霜·非Forever 兜底 / F 战斗门 / G 脱战熄灭与防抖不熄灭）。
+  原有 test_mage_frost.py 的 A~M 段无回归。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 25 个 test_*.py exit=0。
+- 仍需真机 /reload 验证（离线无法覆盖）：UNIT_SPELLCAST_SUCCEEDED 的 spellID
+  是否命中 WR_MageFrost_RANK_IDS、战斗中 aura 为 secret 时 frozen 判为 false
+  后的降级链、AHK 实际按键与色块颜色的一致性、防ADD 面板默认值 FADD_BF=1。
+
+【圣骑士】2026-11-12（祝福：新增「射程条件」——队友不在祝福射程内就跳过，不卡着用）
+- 用户口径原话：「新增一个祝福条件吧，当队友不在技能释放范围的时候，
+  不在卡着使用祝福buff」。
+- 根因：旧距离门只有 UnitInRange（40 码「连线距离」），而且读不到就放行。
+  但本服普通祝福的真实射程只有 30 码（数据源 talentsforever.com/export/paladin.json：
+  Blessing of Might / Wisdom / Kings = "30 yd range"，
+  Greater Blessing of * = "40 yd range"）。于是：
+  ① 30~40 码之间的队友仍然被点亮色块 → AHK 按下去被客户端以「距离不够」拒绝
+     → 色块灭了、buff 没上身；
+  ② 这次无效点亮还占掉了本 tick 唯一的返回点，并记了 pending（2.5 秒）与
+     施放单位（JustCast 8 秒宽限）→ 后面的队友全被这条「打不出去的祝福」卡住。
+  两者合起来正是用户说的「卡着使用祝福buff」。
+- 修复（Paladin/Paladin_Blessing.lua）：
+  · 新增常量 WR_PAL_BLESS_RANGE = 30（普通祝福）、
+    WR_PAL_BLESS_RANGE_GREATER = 40（强效祝福）、WR_PAL_BLESS_RANGE_SLACK = 2（分桶容差）；
+  · 新增 WR_PaladinBlessing_CastRange / WR_PaladinBlessing_InCastRange：
+    三层判定，任一层能明确给答案就用它，全部读不到才放行 ——
+    ① IsSpellInRange(spell, unit)：1=在射程 / 0=超射程（最准，客户端按技能算，
+       普通 30 / 强效 40 自动区分）；
+    ② UnitInRange(unit)：false = 超 40 码 → 对两种祝福都算超程（保守否决）；
+    ③ WR_UnitRange(unit)（LibRangeCheck）：数值距离 > 射程 + 2 码余量即超程。
+    player 永远放行（自施不受距离限制）。
+  · Auto() 主循环接入射程门，位置在 Needs 之前（连距离都不够就不必扫光环 / 判退避）：
+    超程 → **跳过该单位**（不是 return false）→ 不点亮、不记 pending、不记 JustCast、
+    不占 GCD 间隔闸，队列继续推进到下一个够得着的队友；
+    同时收口该单位残留状态：清 pending + HideNow 熄灭该祝福的各槽位色块
+    （防 AHK 读到旧色块继续连按）。
+  · 语义保持：读不到距离（战斗中 secret / 库不可用 / 法术名解析不出）一律放行 ——
+    宁可多点亮一次（AHK 按一下被拒绝，代价小），也不能因读值失败把全队挡在门外。
+  · 面板说明追加一行「距离条件」文案，讲清 30/40 码与「走近了自动补上」。
+- 夹具：新增 .workbuddy/test_blessing_cast_range.py（24 条断言，A~I 九段）：
+  射程常量与权威导出数据一致 / 自己永远放行 / 射程内正常点亮 / 射程外不点亮且
+  不写 pending 与直施宏 / 射程外队友不得卡住后面的队友（tick 继续推进）/
+  读不到距离放行 / 超程收口残留状态 / 强效 40 码比普通 30 码宽（含 35 码分流）/
+  静态接线（射程门在 Auto() 里且在 Needs 之前）。全部通过。
+- 回归：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；祝福相关夹具
+  （test_paladin_blessing.py 110 条、test_blessing_rebuff_stress.py、
+  test_blessing_cast_range.py）全部通过，无回归。
+
+【圣骑士】2026-11-12（祝福：修正「补祝福的时机太晚」——脱战不第一时间补 / 队友排队）
+- 用户口径原话：「骑士祝福脱战了，没有第一时间补祝福」+「给队友加也是这样，
+  补的时机太晚」。
+- 根因（三条，均已用离线脚本量化复现）：
+  ① 【队友之间撞 GCD】祝福是占 GCD 的主动技能，但旧实现完全没有 GCD 间隔闸：
+     脱战瞬间 tick 点亮 player → AHK 按键 → 祝福打出（吃 GCD）；
+     0.1 秒后 tick 又点亮 party1 并重写 ALT-F5 宏 → AHK 立刻按 → **GCD 还没转完，
+     客户端直接拒绝** → 色块灭了但 buff 没上身；pending 再把该单位锁 8 秒
+     → 才轮到 party2。离线实测 4 个队友分别在第 0.1 / 8.2 / 16.3 / 24.4 / 32.5 秒
+     才拿到祝福，这就是「补得太晚」。
+  ② 【JustCast 按法术名全局判定】给 player 打出「智慧祝福」后，8 秒内
+     JustCast("智慧祝福") 对**所有单位**都返回 true —— 祝福明明是按单位生效的，
+     给 A 加过跟 B 毫无关系，却让每个队友都白等 8 秒。
+  ③ 【队友光环缓存永不自愈】旧的自愈重扫只针对 player
+     （RepairPlayerAuraCache）。而 Core 的 WR_ScanAurasForUnit 在战斗中命中
+     secret 就放弃扫描、保留 nil 缓存、却仍标记「已扫描」→ 队友永久读不到
+     → 恒判「缺祝福」→ 走指数退避（10/30/60/120/300 秒）→ 补一次要等好几分钟。
+- 修复（Paladin/Paladin_Blessing.lua）：
+  · 新增 WR_PAL_BLESS_CAST_GAP = 1.2（一个 GCD）+ CastGapReady/NoteLightAt：
+    点亮一次后隔一个 GCD 再处理下一个单位 —— 按键不再撞 GCD，队列也不再被
+    pending 拉长。带时钟倒退保护，绝不因异常永久卡住。
+  · JustCast(spellName, unit) 增加单位维度：新增 LastCastUnit 表 + NoteCastUnit，
+    NoteLit 时登记「这条祝福这次是给哪个单位的」；只有「同一单位刚加过」才抑制，
+    别的单位刚加过一律放行（单位未知的旧调用点保持原语义）。
+  · PENDING_TTL 8 秒 → 2.5 秒（≈ GCD 1.5 秒 + AHK 读屏按键余量）：撞 GCD 被拒
+    后不再白锁 8 秒。
+  · PROMPT_CD 10 秒 → 3 秒：「读得到 + 确实没有」= AHK 漏按或被驱散，3 秒重试
+    才对得上手感；反复刷已由 CacheUnreadable 指数退避单独处理，不再靠拉长重试
+    间隔来防刷。
+  · 新增 RepairUnitAuraCache：把缓存自愈重扫扩展到所有被遍历的队友单位
+    （每单位独立节流 2 秒，避免全队读不到时每 tick 扫 25 个单位）；
+    player 仍走原专用通道，保持「战斗 secret 态不做 force 重扫」的原语义。
+- 效果（离线实测，修复前 → 修复后）：
+  · 4 个队友全部拿到祝福：32.5 秒 → 5.3 秒，相邻间隔稳定 ≈ 1.3 秒（一个 GCD）；
+  · 脱战后第一次补祝福：仍是脱战后第一个 tick（0.1 秒），不受本次改动影响；
+  · 光环长期读不到 10 分钟：仍只点亮 ≤ 6 次（反复刷防护未被削弱）。
+- 夹具：test_blessing_rebuff_stress.py 新增 H 段 8 条断言
+  （H1a/H1b 脱战首 tick 就补、H2a/H2b/H2c 多队友排队 ≈ 一个 GCD、
+  H3 同一条祝福给 player 后不挡队友、H4a/H4b 队友缓存自愈）；
+  test_paladin_blessing.py 的 O1b/O3 改为「GCD 已过才推进到下一个单位」，
+  reset_env 补清 LastLightAt / UnitRepairAt / LastCastUnit。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 23 个 test_*.py exit=0。
+
+【圣骑士】2026-11-12（祝福：彻底堵住「反复刷 buff」最后一条真机路径）
+- 用户口径原话：「目前祝福有异常，单人的时候每次脱战会再次刷选择的对应
+  buff，选择目标后还会再次刷一次，造成反复刷 buff 的异常」。
+- 本轮复查结论：前四条修复（基础名匹配 / JustCast 宽限 / pending 待确认 /
+  缓存自愈）覆盖了「读得到但不精确」与「短时间读不到」，但**还剩一条**：
+  WR_AuraCache[unit] 整块为 nil 时（战斗中 C_UnitAuras 抛 secret、扫描被
+  pcall 放弃、单位刚出现还没扫过），WR_GetAuraInfoCore 直接 return 0,0,0
+  → BuffRemain 恒 0 → Needs 恒 true。而 JustCast 宽限只有 8 秒、pending 只有
+  8 秒，两者一过就回到「每 WR_PAL_BLESS_PROMPT_CD(10 秒) 亮一次色块」
+  → AHK 每 10 秒按一次 → 玩家看到的仍然是「反复刷 buff」。
+- 复现：新增离线压力夹具 .workbuddy/test_blessing_rebuff_stress.py，
+  按真机语义（精确名匹配 + 999 哨兵 + 过期残留不算有）连续 tick 仿真，
+  统计「色块被点亮次数」= AHK 会按下多少次祝福键。修复前实测：
+  · 光环长期读不到 10 分钟 → 点亮 60 次（正是每 10 秒一次）；
+  · 刚施放后读不到 120 秒 → 点亮 13 次。
+- 修复（Paladin/Paladin_Blessing.lua，新增「核心五」）：
+  · WR_PaladinBlessing_CacheUnreadable(unit)：判定「整块读不到」
+    （WR_AuraCache[unit] / .HELPFUL 不是 table）；
+  · WR_PAL_BLESS_UNREADABLE_BACKOFF = { 10, 30, 60, 120, 300 }：
+    读不到时的指数退避序列，封顶 5 分钟；
+  · BackoffAllow / BackoffBump / BackoffClear：按 [unit|kind] 记等级，
+    点亮一次推进一级；光环恢复可读 / 确认不需要补 → 立刻清零回正常节奏。
+  ★ 关键区分（不能混为一谈）：
+    「缓存表在、只是里面没这条祝福」= 真的没有 → 仍按 10 秒重试（正确）；
+    「缓存整块缺失」= 读不到，有没有无法区分 → 必须退避，绝不按 10 秒刷。
+  祝福本身持续 30~60 分钟，最坏晚 5 分钟补上，远好过每 10 秒白刷一次。
+- 修复后同一夹具实测：长期读不到 10 分钟 → 点亮 3 次（原 60 次）；
+  刚施放后读不到 120 秒 → 点亮 2 次（原 13 次）。
+- 夹具：test_paladin_blessing.py 新增 S1~S7（整块缺失 vs 表在为空 /
+  退避期内不点亮 / 等级封顶 / 恢复可读即清零 / 静态接线）；
+  另新增 test_blessing_rebuff_stress.py（A~F 六段长时间仿真）。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 23 个 test_*.py exit=0。
+
+【圣骑士】2026-11-12（祝福：修复「小队队友加不上选择的祝福」）
+- 用户口径原话：「目前不给小队队友加选择的对应祝福buff」。
+- 根因（已用离线脚本复现整条路径）：祝福设置窗口「小队」4 行的存档 key
+  用的是 row.curName，而它只在 WR_PaladinBlessing_Refresh() 里赋值一次
+  —— 也就是**窗口打开的那一刻**。真实流程几乎必然是：
+    ① 单人/刚上线时打开祝福窗口 → 还没组队，4 行全显示「（空）」，
+       row.curName 全是 nil；
+    ② 之后才被拉进小队 → 窗口没重开，row.curName 仍是 nil；
+    ③ 玩家点「力/智/王」→ Toggle("party", nil, 1) 第一行
+       `if scope ~= "solo" and key == nil then return false end` 直接返回
+       → 存档里什么都没写（而且**完全静默**：格子不亮、也不报错，
+         玩家只会觉得「点了没用」）；
+    ④ 循环 Auto() 里 partyPick[队友名] 查不到 → 落到团队职业表 raidPick
+       → 职业表没配就是 0（不加）→ 表现就是「选了祝福也不给队友加」。
+- 附带同源 bug：Paladin_Macros.lua 里 ALT-F5（槽 95，小队/团队直施动态宏）
+  被注册了**两次**，第二次是空宏 `WR_CreateMacro("ALT-F5", "")`，把上面刚
+  注册的动态宏覆盖掉。CreateClassesMacro 在 PLAYER_ENTERING_WORLD 与**每次
+  脱战**都会重跑 → 脱战瞬间槽 95 变空宏，一旦祝福模块没能在点亮前重写成功
+  （宏系统异常 / 冷却跳过），AHK 按 ALT-F5 就是按了个空键 → 队友收不到祝福。
+- 修复：
+  ① Paladin/Paladin_Blessing.lua 新增 WR_PaladinBlessing_PartyName(index)：
+     现场向客户端要 partyN 的名字。小队 4 行的 keyFn 改为
+     `function() return WR_PaladinBlessing_PartyName(idx) end`
+     —— 不再依赖「打开窗口那一刻」的快照，什么时候点都拿得到当前名字。
+     （idx 用 local 固定住，避免闭包共享同一个循环变量。）
+  ② Refresh() 里小队行标签也改走同一个函数，保证「标签显示的名字」和
+     「点格子写进存档的 key」永远是同一个名字（不会出现标签显示甲、
+     写进乙的情况）。
+  ③ Toggle() 空行不再静默失败：打印「这一行还没有队友…先组队再点」。
+  ④ 新增队伍名单变化事件监听（GROUP_ROSTER_UPDATE /
+     PARTY_MEMBERS_CHANGED / RAID_ROSTER_UPDATE / PLAYER_ENTERING_WORLD）：
+     队友进出时窗口自动刷新行标签与格子亮灭，不用手动关掉重开。
+     事件帧用 WR_PalBless_Fn(CreateFrame) 做能力检测（夹具里接口是
+     userdata，写死 type()=="function" 会被静默跳过 —— 本文件的老坑）。
+  ⑤ Paladin_Macros.lua 删掉那行覆盖用的空 ALT-F5 注册，槽 95 只注册一次。
+- 夹具：test_paladin_blessing.py 新增 R 段 8 条断言，把真实回归路径锁死：
+  R3 单人状态建窗口（小队行全空）→ R4 窗口不重开也能写进存档
+  （partyPick[队友甲]=1）→ R5 点完立刻 Auto() 真的点亮直施槽 95 且宏文本是
+  /cast [@party1] 力量祝福 → R6 队伍名单变化事件触发后行标签跟着变 →
+  R7 空行点格子拒写存档且不再静默 → R8 ALT-F5 只注册一次且非空宏。
+  R1/R2 是静态接线断言。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 22 个 test_*.py exit=0。
+
+【圣骑士】2026-11-12（祝福：修复「反复刷 buff」——读值失败 ≠ 真的没有）
+- 用户口径原话：「目前祝福有异常，单人的时候每次脱战会再次刷选择的对应
+  buff，选择目标后还会再次刷一次，造成反复刷 buff 的异常」。
+  用户截图证明自身 buff 栏里确实已有「智慧祝福 / 法术ID 19850 /
+  每 5 秒恢复 18 点法力值 / 剩余 60 分钟」——祝福明明在身，插件还在提示补。
+- 根因（两条同源路径，实测确认）：
+  ① 本服光环名带「（等级 N）」后缀（如「智慧祝福（等级 3）」），而
+     WR_GetUnitBuffTime 走 Core_Functions.lua 的 WR_GetAuraInfoCore
+     `name == AuraName` 精确名匹配 → 恒返回 0 → Needs 恒 true →
+     每 WR_PAL_BLESS_PROMPT_CD(10 秒) 重新点亮一次色块 → AHK 连按 → 反复刷。
+     圣印模块（Paladin_Forever.lua:1391）踩过同一个坑：Lua 5.1 字符类按字节
+     匹配，[（(] 写法对多字节全角括号不生效，必须两步字面量 gsub。
+  ② WR_ScanAurasForUnit 用 pcall(doScan) 包住整段扫描：命中 secret 单位就
+     放弃本次扫描、保留旧缓存（可能为 nil），但仍把 WR_AuraCacheScanned
+     标成 true → 之后 WR_GetAuraInfoCore 读到 not cache 直接 return 0,0,0，
+     永不重扫。于是「缓存坏掉」= 永久读到 0 = 永久认为没祝福。
+  核心病症：**「读值失败」和「真的没有」被当成同一件事**。
+- 修复（只动 Paladin/Paladin_Blessing.lua，不改 Core 热路径）：
+  ① 名字容错：新增 WR_PalBless_StripRankSuffix / WR_PalBless_BaseName
+     （两步字面量 gsub 剥全角/半角「（等级 N）」）+ 
+     WR_PaladinBlessing_BuffRemainFromCache（扫 WR_AuraCache[unit].HELPFUL
+     按基础名比较，明确看到才返回秒数/999）。BuffRemain 改为
+     「精确名快路径 + 缓存基础名扫描」双通道取较大值，不依赖 spellID。
+  ② 施放事件宽限：WR_PAL_BLESS_AFTER_CAST_GRACE = 8 秒，
+     WR_PaladinBlessing_JustCast 用 UNIT_SPELLCAST_SUCCEEDED 维护的
+     WR_Forever_LastPlayerCast 兜底 —— 刚刚确实打出过就不重复提示。
+     ★ 额外加本地闩锁 WR_PaladinBlessing_LastCastAt：全局记录只保留
+     最近一次施法，玩家打出祝福后常立刻接圣印/审判，0.1 秒内就被覆盖，
+     只读全局记录等于没加保护。
+  ③ 已点亮待确认：WR_PAL_BLESS_PENDING_TTL = 8 秒，
+     NoteLit / IsPendingLit / SettlePending / Light 统一出口；
+     点亮后 HideSkillLater(1.0)，下一 tick 一旦 Needs 变 false（buff 真上身）
+     立刻 HideNow 熄灭，不再等保持到期（那 1.5 秒里 AHK 会继续连按）。
+  ④ 缓存自愈：WR_PaladinBlessing_RepairPlayerAuraCache —— cache nil 时
+     WR_ForceRefreshAuraCache("player")，2 秒节流 + 刚脱战强制一次。
+     ★ 战斗态用 combatKnown 三分（true/false/读不到）：UnitAffectingCombat
+     战斗中返 secret → 收敛成 nil，若据此判「刚脱战」会每 tick 走 force 重扫
+     绕过节流，把热路径变成全量扫描。
+  ⑤ 修复二（上一轮只读审计确认的结构缺陷）：Auto() 原来遍历单位时一遇到
+     「在防刷屏冷却中」就 return false 直接结束整个 tick，而 units[1] 永远是
+     player —— 自己的 10 秒冷却会把后面所有队友一起挡掉（实测「自己缺智慧 +
+     队友甲缺力量」时队友甲永远轮不到）。现抽出 TryUnit 单单位逻辑，
+     冷却中的单位改为「跳过」而非结束 tick，tick 继续推进到下一个单位。
+- 夹具：test_paladin_blessing.py 622 → 1036 行、断言 110 条全绿（新增
+  L/M/N/O/P 五段 40 条：带全角/半角等级后缀 / 999 / 快到期 / 已过期 /
+  不同种不串味；刚施放宽限含「祝福后立刻接圣印、全局记录被覆盖，闩锁仍生效」；
+  buff 上身立刻 HideNow / pending 内不重复 / 超时允许重提示；
+  修复二三种场景；脱战强制重扫 + secret 战斗态不刷热路径）。A~K 原有断言无回归。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 19 个 test_*.py exit=0。
+- 备注（2026-11-12 已修）：Data/Forever_SkillRegistry.lua:124 与
+  Core/Forever_Compat.lua:142 原写 ["智慧祝福"] = 19742，但截图实测 buff 工具提示
+  法术ID 是 19850 —— 19742 是旧 rank1 的 ID（与力量祝福 19740→19834 完全同型的坑）。
+  已把两处数据改为 19850；SPELL_ID_OVERRIDES 只在 IsPlayerSpell(19850) 为真时才采用，
+  学不会时仍走法术书索引，故低等级角色不受影响。本文件祝福修复本身不依赖 spellID，
+  修正前后的判定路径完全一致。
+
+【法师】2026-11-12（冰霜：按 Forever 冰霜天赋树重写输出循环）
+- 用户口径原话：「修复目前冰法循环」「当前魔兽世界版本是无限服，可以从 nga、
+  抖音等平台获取最新的冰法输出循环，并实现该功能」。
+- 数据源：https://talentsforever.com/export/mage.json（直接从 Forever 客户端
+  数据文件导出，build 1.60.1.70755）。NGA 需登录（403）、抖音抓不到，
+  这份客户端原始数据比二手攻略权威。
+- 核实结论：Forever 冰霜树共 18 条天赋，**只有 4 条是主动技能**（passive:false）：
+  冰枪术 r3c3（45 蓝 / 瞬发 / **8 秒 CD** / 对 Frozen 目标 +300% 即 4 倍伤害）、
+  寒冰屏障 r4c2（15 蓝 / 瞬发 / 5 分钟）、急速冷却 r5c2（瞬发 / 10 分钟）、
+  寒冰护体 r7c2（305 蓝 / 瞬发 / 30 秒 / 吸收 447 + 冰霜伤害 +15%，持续 1 分钟）。
+  其余 14 条全部 passive（Frost Warding / Improved Frostbolt / Precision /
+  Ice Shards / Frostbite / Improved Frost Nova / Permafrost / Frost Channeling /
+  Improved Blizzard / Arctic Reach / Shatter / Improved Cone of Cold /
+  Fingers of Frost / Winter's Chill），只能当判定条件，不能进循环。
+  **「冰冷之血 / Icy Veins」在 Forever 冰霜树里根本不存在**（那是 SoD 腿符文）。
+- 原实现 4 类问题（2 个会崩 / 1 个按错键）：
+  ① 【主 bug】冰枪术判定写成 `if (fofProc or true)` —— **恒为真**；叠加
+     「无限战斗中 GetSpellCooldown 是 secret → WR_GetGCD 收敛成 0 →
+     WR_SpellUsable 恒 true」，导致每 tick 都点亮 44 号槽 → AHK 连按 →
+     冰枪术在 8 秒 CD 里反复施放失败，**整条循环永久卡在第一行**，
+     寒冰箭 / 暴风雪 / 冰锥术一次都轮不到。
+  ② 【会崩】寒冰屏障 / 急速冷却 / 寒冰护盾 点亮 304 / 305 / 306 号槽，而
+     Core/UI_ColorFrame.lua 的 ColorTable **只到 240** → WR_Frame_Color[304]
+     为 nil → WR_CreateSingleColorSlot 把它送进 PIG_BGRtoBGR 做
+     math.floor(nil / 0x10000) → **直接抛错，整个 tick 崩掉**。
+     改为真实绑定了宏的 32（ALT-CTRL-NUMPAD2 /cast 寒冰屏障）、
+     63（ALT-CTRL-F3 /cast 急速冷却）、65（ALT-CTRL-F5 /cast 寒冰护体）。
+  ③ 【会崩 + 按错键】「冰冷之血」用了 4 号槽，而 4 号槽在本服绑的是
+     `/CAST 活动炸弹`；技能本身也不存在 → 整条删除。
+  ④ 【按错键】魔爆术点了 75 号槽，但 Mage_Macros.lua 里没有任何宏绑魔爆术，
+     75 号槽实际是 `/petautocaston 水箭` → 点亮它会让 AHK 去开关水元素
+     自动施法 → 已从优先级链移除。
+  另外原实现全程裸用 WR_SpellUsable、没有本地 CD 记账（防骑 11-09 踩过同一个
+  坑），天赋主动技能也没做「已学会」判定（没点天赋也会常亮）。
+- 新优先级（Mage/Mage_Forever_Frost.lua 重写）：
+  保命/资源：1 寒冰屏障（血量 <30% 且面板「自动冰箱」开）→ 2 唤醒（蓝量 <25%）
+  单体/通用链：3 冰枪术（**仅当目标 Frozen 且 8 秒 CD 已好**）→
+  4 冰霜新星（25 秒 CD，贴身且尚未冻结时开碎裂窗口）→
+  5 暴风雪（面板「智能AOE」开且 8 码内 ≥3 目标，或勾了「插入暴风雪」）→
+  6 冰锥术（10 秒 CD，≥2 目标且贴身）→ 7 寒冰护体（30 秒 CD，排在伤害链之后补）→
+  8 急速冷却（仅当「目标 Frozen + 冰枪术在 CD」时，多开一个碎裂窗口）→
+  9 寒冰箭（无 CD 填充，整条链的兜底）。
+  ★ 关键取舍：冰枪术只在冻结窗口打，非冻结时绝不为「CD 好了」浪费这一发 ——
+  这是原实现最大的错误。
+- 实现要点：新增本地 CD 记账（WR_MageFrost_CastAt / CastAtByID 双通道 +
+  UNIT_SPELLCAST_SUCCEEDED 接线，名字 secret 时靠 spellID 反查）；
+  提示防抖 0.4 秒 + 色块保持 1.5 秒 + HideNow；
+  **槽位合法性闸 WR_MageFrost_SlotUsable**（ColorTable 外一律不放行，防崩）；
+  **已学会闸 WR_MageFrost_KNOWN_GATE**（4 个天赋主动技能）；蓝量下限表 /
+  rank-ID 反查表 / 冻结 debuff 候选表。
+  另修：`type(f) == "function"` 守卫在 lupa 夹具下会漏掉 C 侧 callable → 统一改 pcall。
+- Mage/Mage_Macros.lua：WR_SkillColor["MAGE"] 把 301/302/303/304/305/306
+  （ColorTable 不存在，历史遗留越界）改为真实宏槽位 15/16/22/32/63/65；
+  「寒冰护盾」→「寒冰护体」（65 号槽宏的真实名字）并保留别名。
+- Mage/Mage_Menu.lua：更新 3 条 tooltip（智能AOE / 急速冷却 / 自动冰箱）
+  使其与新逻辑一致。
+- 夹具：新增 .workbuddy/test_mage_frost.py（A~M 共 13 段），覆盖
+  冰枪术 CD 记账（3s/7.9s 不打、8.05s 放行）、冻结窗口 4 种 debuff 名、
+  非冻结不打冰枪术、冰霜之指等价 Frozen、单体/多目标/智能AOE 开关、
+  蓝量门 6 档边界、14 条被动天赋 + 9 个不存在技能永不点亮、
+  防抖与施放记账（含「事件名字 secret、只有 spellID」）、
+  槽位合法性（9 个分支断言零 PIG_BGRtoBGR(nil) 崩溃）、保命链、
+  急速冷却不拿大招换小 buff、防ADD 与射程门、完整链顺序。
+- 校验：全量 Lua 语法 TOTAL=194 OK=194 FAIL=0；全部 21 个 test_*.py exit=0。
+- ★ 顺手修掉同源的历史遗留（Lead 复核时发现，影响火法/奥法/旧 SoD 三系）：
+  · 「魔爆术 = 75」号槽：Mage_Macros.lua 里 75 号槽实际绑的是
+    `/petautocaston 水箭`（开关水元素自动施法），而全仓库**没有任何宏绑魔爆术**
+    —— 火法/奥法/旧 SoD 三系点亮 75 时，AHK 会去开关水元素而不是放 AOE。
+    修复：把原为空占位的 78 号槽（CTRL-SHIFT-F8；ColorTable 有、AHK 已映射
+    ^+{F8}、且未被任何全局宏占用）绑成 `/cast 魔爆术`，
+    WR_SkillColor["MAGE"]["魔爆术"] 由 75 改 78，
+    五处调用点（Mage_Forever_Fire / Mage_Forever_Arcane / Mage_Arcane /
+    Mage_Fire / Mage_Frost）的回退槽位一并从 75 改 78。
+  · 「冰冷之血 = 4」号槽：4 号槽实际绑 `/CAST 活动炸弹`，且 Forever 冰霜树里
+    根本没有冰冷之血 → WR_SkillColor 里这条登记已注释删除，避免后续接入者误用。
+- 备注（未改动）：Data/Forever_Abilities.lua 里 Ice Barrier 的 zh 写「寒冰护盾」，
+  但客户端真名是「寒冰护体」（Mage_Macros.lua 65 号槽宏即 /cast 寒冰护体）。
+  本次按客户端真名实现并在 WR_SkillColor 保留别名。
+
+【法师】2026-11-12（新增：法师法术书 SpellID / IconID 速查表）
+- 用户口径原话：「目录下 fengfeng，这是我存放目前法师所学的技能，你可以记住
+  这些技能法术图标 id，用于后面的功能开发」。
+- 素材：fengfeng\ 下 29 张游戏内「法术书」截图，逐张读出 tooltip 上的
+  SpellID / IconID / 等级 / 消耗 / 施法 / CD / 射程。
+- 新增 Data\Forever_MageSpells.lua（toc 第 82 行，排在 Data 段末尾）：
+  · WR_Forever_MageSpells：29 条表项（18 奥术 / 3 火焰 / 8 冰霜）；
+  · 三个索引表：WR_Forever_MageSpellIndex（按名）、
+    WR_Forever_MageIconIndex（按图标，可反查撞车）；
+  · 四个查询函数：WR_Forever_MageSpell / _MageSpellID /
+    _MageIconID / _MageNamesByIcon；
+  · 调试命令 /mkmagespells 打印整张表。
+- 关键 ID（可直接用于 Mage_Menu.lua 的 IconID 字段）：
+  火球术 8402/135812、火焰冲击 8413/135807、烈焰风暴 8422/135826、
+  寒冰箭 8408/135846、冰枪术 1240044/135844、冰锥术 8492/135852、
+  暴风雪 8427/135857、冰霜新星 865/135848、寒冰屏障 11958/135841、
+  霜甲术 7301/135843、冰甲术 7302/135843、奥术智慧 1461/135932、
+  奥术飞弹 8416/136096、魔爆术 8439/136116、法力护盾 8495/136153、
+  法术反制 2139/135856、缓落术 130/135992、解除次级诅咒 475/136082、
+  变形术 12824/136071、闪现术 1953/135736、唤醒 12051/136075、
+  制造魔法玛瑙 759/134104、制造魔法翡翠 3552/134105、
+  造水术 6127/132797、造食术 6129/133950、魔甲术 6117/135991、
+  传送：奥格瑞玛 3567/135759、传送：幽暗城 3563/135766、
+  传送：雷霆崖 3566/135765。
+- 校验：29 条 spellID 无重复；图标仅 135843 被霜甲术/冰甲术共用（已注释提醒
+  按图标反查会撞，优先按名查）。SpellID 与截图上的法术等级完全吻合
+  （火球术 8402=Rank7、寒冰箭 8408=Rank7、奥术飞弹 8416=Rank4 等），
+  说明取到的数字可信。
+- 注意：冰枪术是 7 位 1240044，属无限新增段（1200000..1400000），
+  不是经典段的 30455/42872 —— 后续写循环时别用错。
+
+【圣骑士】2026-11-12（防护：修正 buff 维持开关「切圣印的时机」）
+- 用户口径原话：「防骑需要修正各项维持buff常驻开关切圣印的时机，当审判cd还有
+  2秒钟恢复使用时目标没有对应审判buff，这时候再切选择的对应圣印打审判，
+  不要第一时间开启了维持审判buff的开关后就切对应圣印等审判使用」。
+- 旧行为：勾选「光明圣印 / 十字军审判 / 智慧审判」开关后立刻切走常驻圣印，
+  然后干等审判 CD 转好（最长近 10 秒）—— 这段时间没有常驻圣印的仇恨/嘲讽收益。
+- 新行为（三个开关统一）：
+  · 审判剩余冷却 > 2 秒 → 维持面板「圣印」专区所选常驻圣印，不切印；
+  · 审判剩余冷却 ≤ 2 秒（含已就绪）+ 目标没有对应审判 debuff → 才切 buff 圣印 → 打审判；
+  · 已经切过去（phase1/2）继续占着，直到审判打出并切回常驻圣印；
+  · 40 秒 debuff 到期后同样先等下一个「审判 CD ≤2 秒」窗口，不再第一时间切印。
+- 实现：
+  · Paladin/Paladin_Forever.lua 新增 WR_PaladinForever_JudgementRemain /
+    WR_PaladinForever_JudgementSwitchDue（窗口常量 JUDGE_SWITCH_LEAD = 2.0，
+    单 tick 记忆避免重复探测 CD）。
+  · Paladin/Paladin_Forever_Prot.lua 新增 WR_PaladinForever_BuffSealHolds(phase, cd)，
+    三个状态机 phase0 先过窗口、ProtSealGoal 与主调度「让出审判」判断统一走它；
+    窗口外 phase0 视为「维持常驻圣印」，审判仍由主调度正常打（不会被没到窗口的
+    流程占住）；窗口外若身上还挂着 buff 圣印，仍会提示切回常驻圣印（不干等）。
+- 面板 tooltip 三个开关同步改写（说明「审判 CD 只剩 2 秒才切印」）。
+- 回归：新增 .workbuddy/test_paladin_seal_switch_timing.py（A-L 共 23 项，
+  覆盖 8 秒不切 / 3 秒不切 / 2 秒切 / 已就绪切 / debuff 到期不第一时间切 /
+  phase1 不看窗口 / 十字军与智慧同款 / 窗口外不让出审判 / 窗口内让出审判 /
+  窗口外挂错印切回 / 目标已有 debuff 不切印 / 常量与源码静态断言）；
+  原有 test_paladin_light_seal_toggle、test_paladin_crusader_seal_toggle、
+  test_paladin_wisdom_judgement_toggle、test_justice_seal_loop、
+  test_paladin_prot_gate、test_paladin_prot_aoe 等全部通过。
+
+【圣骑士】2026-11-12（祝福：修复「团队裹自己不跟随单人行选择」）
+- 上一轮只读审计确认的遗留问题：小队已修「单人行选择被忽略」，但团队模式
+  没有同样的跟随 —— 团队里自己只按职业表 raidPick[classToken] 加祝福，
+  单人行（角色名那一行）选的格子被完全忽略。
+- 修复（Paladin/Paladin_Blessing.lua WR_PaladinBlessing_UnitPick raid 分支）：
+  团队状态下「自己」（unit=player）且单人行选了 1/2/3 → 跟随单人行种类，
+  仍用强效祝福（团队段口径不变）；单人行没点（0/未设置）才回落职业表。
+  队友仍按职业表+团队表，行为不变。
+- 未动：审计的「修复二」（Auto() 点亮一个就 return，队首自己可能挡住队友
+  的排队节奏）保持只读状态，待单独确认后再改。
+- 回归：.workbuddy/test_paladin_blessing.py 新增 E5（团队自己+soloPick=2 →
+  智慧、强效）、E6（soloPick=0 → 回落职业表、强效），原有 E1-E4/H/J/K 全部
+  通过；审计脚本 .workbuddy/_audit_group_bless.py 团队段实测点亮
+  @player 强效智慧祝福。
+
+【圣骑士】2026-11-12（祝福：修复「单人选了智慧还是只会亮力量」）
+- 用户口径原话：「单人我选择了智慧还是只会亮力量」。
+- 根因：祝福设置窗口的「单人」行只在**单人状态**下生效；但多开组队后
+  （哪怕队伍里只有自己一个人），状态切到「小队」，自己走的是小队分支 ——
+  小队 4 行只列 party1~4，没有"自己"这一行，单人行选的格子被完全忽略，
+  自己直接落到职业表（圣骑士行若是力量，看到的就是一直亮力量祝福）。
+- 修复（Paladin/Paladin_Blessing.lua WR_PaladinBlessing_UnitPick）：
+  小队状态下「自己」（unit=player）没被小队行单独点过时，跟随单人行
+  （角色名那一行）的选择，普通祝福；单人行没点（0/未设置）才回退职业表。
+- 单人状态行为不变：soloPick 直接点亮自施槽 91/92/93（ALT-F1/F2/F3）。
+- 回归：.workbuddy/test_paladin_blessing.py 新增 H4w（单人选智慧→槽92
+  智慧祝福）、H4k（王者→槽93）、H4p/H4p2（小队状态自己跟随单人行→
+  直施宏 /cast [@player] 智慧祝福），全部通过。
+
+【圣骑士】2026-11-12（祝福：单人/小队/团队全程不切焦点，直接施放）
+- 用户口径原话：「单人可以不用设置焦点直接使用加祝福buff」「小队，团队祝福也
+  可以不用焦点直接加」。
+- 单人：启用空占位宏槽 91/92/93（ALT-F1/F2/F3）为自施宏
+  /cast [target=player] 力量/智慧/王者祝福；单人补祝福直接点亮对应槽，
+  不再「先切焦点到自己 → @focus 宏」，也不受当前目标影响。
+- 小队/团队：启用空占位宏槽 95（ALT-F5）为「直施动态宏」，每次补祝福前
+  把宏文本重写为 /cast [@partyN|@raidN] 祝福名 再点亮槽 95 —— AHK 按
+  ALT-F5 直接对该队友施放，全程不占用焦点；普通/强效祝福按段自动区分。
+- 焦点流程保留为兜底：宏系统不可用（如离线环境）时才回落
+  「切焦点 + [@focus] 宏 102~107」，行为与旧版一致。
+- 防刷屏沿用同一规则（同一单位同一祝福 10 秒内不重复点亮）；
+  停手条件（战斗/坐骑/吃喝/死亡/打字）与三段勾选不变。
+- 回归：.workbuddy/test_paladin_blessing.py 更新为断言自施槽 91 / 直施槽 95
+  与动态宏文本，全部通过；slot_key_audit 校验 91/92/93/95 链路一致。
+
+【圣骑士】2026-11-12（祝福设置窗口：修复说明文字被控件遮挡）
+- 用户反馈原话：「祝福设置界面中的字体也出现异常，被掩盖了」。
+- 根因：顶部说明文字 6 行在 380px 宽度内自动折行成约 10 行（实际高约 170px），
+  而下方「- 额外条件 / 祝福（总开关）/ 单人」按写死的 110px 起排，
+  说明文的后几行正好被这三行控件压住，看起来就是文字异常 / 被掩盖。
+- 修复（Paladin/Paladin_Blessing.lua）：
+  · 说明块高度改为 GetStringHeight 实测（+8px 间隙），下方控件跟着实际高度排；
+    实测不到（离线夹具 stub）时保持 110 不变，旧行为与回归断言不受影响；
+    实测值比 110 还小也仍按 110，绝不比旧版排得更挤。
+  · 说明文与「进了小队才列出队友」小字从 11px 提到 12px，与全窗口文字一致，
+    中文小字渲染发糊的问题一并消除。
+- 回归：.workbuddy/test_paladin_blessing.py 全部通过（I/K 几何断言不变）。
+
+【圣骑士】2026-11-11（祝福下拉框 → 「祝福设置」按钮 + 独立列表）
+- 用户口径原话：「骑士将祝福下拉框删除，更改为祝福按钮，放在打断下方，
+  按钮打开后是一个祝福设置的单独列表，列表如图所示功能」。
+- 下拉框：删除三专精「祝福」下拉（CJ_ZF / FH_ZF / SS_ZF）；旧存档字段与
+  FH_ZF_V2 迁移标记由 ZZ_Features_Migration 清理；旧的 WR_PaladinForever_Blessing
+  系列保留但弃用，三专精循环改走 WR_PaladinBlessing_Auto()。
+- 按钮：Core/UI_Config.lua 的 DM 列表新增 isButton 按钮行支持；三专精菜单区
+  末尾各加一个「祝福设置」按钮，防护的按口径放在「打断」滑块正下方。
+- 独立列表（新增 Paladin/Paladin_Blessing.lua，toc 已加载）：
+  · 额外条件「祝福」总闸；单人 / 小队 / 团队三段各自勾选（去掉「团队」的勾，
+    进了团就不自动补）。
+  · 每行 4 个格子（力量 / 智慧 / 王者 / 无），每行只亮一个、再点一下取消；
+    小队一人一行按名字存，团队一个职业一行按职业存；点「无」= 明确不加。
+  · 单人/小队用普通祝福、团队用强效祝福；身上没有或快到期才补，
+    别的骑士加的同一种（普通或强效）也算有。
+  · 战斗中 / 坐骑 / 吃喝 / 死亡 / 打字时不补；给队友加时先切焦点再用
+    [@focus] 祝福宏（102~107）施放。
+  · 命令 /palbless 或 /祝福 打开列表。
+- 回归：新增 .workbuddy/test_paladin_blessing.py；其余夹具不变。
+
 【全职业】2026-11-11（删除「命令清单」功能与按钮）
 - 用户口径原话：「插件中命令清单功能删除，按钮也删除」。
 - 删除 Core/UI_CommandList.lua（ZZ_CMDLIST_DATA 数据表、ZZ_CmdList_* 独立查询界面、

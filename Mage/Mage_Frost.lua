@@ -38,7 +38,8 @@ function WR_MageFrost()
         if inRange and WR_SpellUsable("暴风雪", true) then
             if WR_ColorFrame_ShowSkill("暴风雪", 26) then return true end
         elseif WR_SpellUsable("魔爆术", true) then
-            if WR_ColorFrame_ShowSkill("魔爆术", 75) then return true end
+            -- ★★ 2026-11-12：槽位从 75 改 78（75 实绑 /petautocaston 水箭，78 已绑 /cast 魔爆术）
+            if WR_ColorFrame_ShowSkill("魔爆术", 78) then return true end
         end
     end
 

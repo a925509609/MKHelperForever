@@ -25,8 +25,9 @@ function WR_PaladinForeverRet()
 
     -- 2. ★ 2026-11-10 用户要求：删除「开启输出光环」文字提示，不再提醒。
 
-    -- 3. 祝福（战斗外按菜单「祝福」下拉补）
-    if WR_PaladinForever_Blessing(PigSet and PigSet.CJ_ZF) then return true end
+    -- 3. 祝福（2026-11-11：下拉框已删除，改走独立祝福设置列表 + 脱战自动补）
+    --   type 保护：离线夹具未加载 Paladin_Blessing.lua 时安全跳过，真实客户端该函数必存在
+    if type(WR_PaladinBlessing_Auto) == "function" and WR_PaladinBlessing_Auto() then return true end
 
     -- 4. 自动攻击（仅开怪前提示；战斗中视为已激活，不抢占技能）
     if not PlayerMove and UnitCanAttack("player", "target") and not UnitIsDead("target")

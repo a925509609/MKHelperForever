@@ -224,6 +224,23 @@ function WR_PaladinForever_ShowSkillCD(spell, slot, cd)
     local lastPrompt = WR_PaladinForever_PromptCD[spell]
     local prompted = WR_PaladinForever_PromptShown and WR_PaladinForever_PromptShown[spell]
 
+    -- ★★★ 2026-11-12 用户口径「技能不够蓝释放时，应当不亮色块，导致一直按按键」：
+    --   骑士的蓝量在战斗中是 secret（WR_GetUnitMP 恒降级为 1），自己算不出够不够，
+    --   但 WR_ColorFrame_ShowSkill 的总闸会拦（资源算术 + 客户端「法力不足」回执）。
+    --   这里必须【在拦下时熄灭本技能的色块】：色块模型是「亮着就一直按」，
+    --   只 return false 不熄灭的话，上一 tick 亮着的色块会一直挂着 → AHK 连按。
+    --   用 pcall 探测（不用 type()=="function"：本仓库夹具里是 userdata）。
+    if WR_SoD_NotEnoughPower ~= nil then
+        local okN, notEnough = pcall(WR_SoD_NotEnoughPower, spell)
+        if okN and notEnough == true then
+            WR_PaladinForever_ClearPromptShown(spell)
+            if WR_HideSkillColorSlot ~= nil then
+                pcall(WR_HideSkillColorSlot, spell, slot)
+            end
+            return false
+        end
+    end
+
     if cd and cd > 0 then
         local castAt = WR_PaladinForever_GetLastCastAt(spell)
         if castAt then
@@ -574,6 +591,56 @@ function WR_PaladinForever_GetJudgeCooldown()
     return WR_PaladinForever_JudgeCD or WR_PaladinForever_JUDGE_CD_BASE
 end
 
+-- ============================================================
+-- ★★ 2026-11-12 防骑 buff 维持开关的「切印窗口」
+-- ------------------------------------------------------------
+-- 用户口径原话：
+--   「修正各项维持buff常驻开关切圣印的时机，当审判cd还有2秒钟恢复使用时
+--     目标没有对应审判buff，这时候再切选择的对应圣印打审判，
+--     不要第一时间开启了维持审判buff的开关后就切对应圣印等审判使用」
+-- 含义：
+--   ① 勾选「光明圣印 / 十字军审判 / 智慧审判」开关后，**不立刻**切对应圣印；
+--   ② 只有「审判 CD 剩余 ≤ 2 秒（含已就绪）」且目标没有对应审判 debuff 时，
+--      才切对应圣印 → 打审判；
+--   ③ 其余时间一律维持面板「圣印」专区所选常驻圣印（仇恨/嘲讽来源不断档）。
+-- 为什么：旧逻辑一勾选（或 40 秒 debuff 一到期）就切走常驻圣印，然后干等
+--   审判 CD 转好（最长近 10 秒），这段时间没有常驻圣印的仇恨/嘲讽收益。
+-- ============================================================
+WR_PaladinForever_JUDGE_SWITCH_LEAD = 2.0
+
+-- 审判距离可用还剩多少秒：0 = 已就绪 / 无记录 / 读不到
+--   ★ 每个 tick 内会被多次调用（三个状态机 + ProtSealGoal + 主调度让出判断），
+--     用 now 做单 tick 记忆，避免重复走 GetJudgeCooldown 的 API 探测。
+function WR_PaladinForever_JudgementRemain(cd)
+    local now = GetTime()
+    local memo = WR_PaladinForever_JudgeRemainMemo
+    if type(memo) == "table" and memo.at == now then
+        return memo.value
+    end
+    local cdv = tonumber(cd)
+    if not cdv or cdv <= 0 then
+        cdv = WR_PaladinForever_GetJudgeCooldown()
+    end
+    local castAt = WR_PaladinForever_GetLastCastAt("审判")
+    local remain
+    if not castAt then
+        -- 无本地施放记录：退到客户端剩余冷却（战斗中不可读时返回 nil）
+        local left = WR_PaladinForever_ClientCooldownLeft("审判")
+        if type(left) == "number" and left > 0 then remain = left else remain = 0 end
+    else
+        remain = (castAt + cdv) - now
+        if remain < 0 then remain = 0 end
+    end
+    WR_PaladinForever_JudgeRemainMemo = { at = now, value = remain }
+    return remain
+end
+
+-- 是否进入「可以切 buff 圣印」的窗口（审判剩余 ≤ lead 秒，含已就绪）
+function WR_PaladinForever_JudgementSwitchDue(cd, lead)
+    local l = tonumber(lead) or WR_PaladinForever_JUDGE_SWITCH_LEAD or 2.0
+    return WR_PaladinForever_JudgementRemain(cd) <= l + 1e-6
+end
+
 -- ★ 隐藏某个技能的可视提示：颜色槽位 + 技能图标框（若当前显示的是该技能）
 function WR_PaladinForever_HideSkillVisual(spell, slot)
     if slot then
@@ -796,9 +863,12 @@ function WR_PaladinForever_ClearStalePrompts(maxAge)
     end
 end
 
--- ★ 防护祝福：按菜单「祝福」下拉（FH_ZF）在战斗外给自己补祝福。
---   本服法术 ID（2026-11-06 实测）：
---     力量祝福 19834 / 智慧祝福 19742 / 王者祝福 20217
+-- ★ 2026-11-11 弃用说明：以下 BlessingList / BlessingUp / Blessing / ProtBlessing
+--   是旧「祝福下拉框」时代的补祝福实现，循环已全部改走 Paladin_Blessing.lua 的
+--   WR_PaladinBlessing_Auto()（独立设置列表 + 单人/小队/团队自动补）。
+--   这里保留仅为兼容历史夹具与可能的外部引用，不再被任何专精循环调用。
+--   本服法术 ID（2026-11-06 实测；智慧祝福 2026-11-12 按截图修正为 19850）：
+--     力量祝福 19834 / 智慧祝福 19850 / 王者祝福 20217
 --   强效祝福沿用同名技能（客户端有则用，无则跳过）。
 --   ★ 判定以「身上是否真的有这个 Buff」为准（WR_GetUnitBuffTime）。
 --     不要加「施放成功记录 60 分钟」之类的本地兜底：祝福会被驱散/被同类祝福覆盖，
@@ -2469,14 +2539,20 @@ SlashCmdList["MKPAL"] = function()
         .. " 任意圣印=" .. tostring(WR_PaladinForever_SealActive())
         .. " Buff剩余=" .. tostring(WR_GetUnitBuffTime("player", sealName))
         .. " 上次施放=" .. (sealAt and string.format("%.0f秒前", now - sealAt) or "无记录"))
-    -- 祝福：当前菜单选中的那条 + Buff 读值（祝福只信 Buff 判定，被驱散后应重新提示）
-    local zf = tonumber(PigSet and PigSet.FH_ZF) or 7
-    local rec = WR_PaladinForever_BlessingList[zf]
-    if rec then
-        print("|cff00ff00[MKPAL]|r 祝福：菜单选中=" .. rec.name
-            .. " 判定已上=" .. tostring(WR_PaladinForever_BlessingUp(rec.name))
-            .. " Buff剩余=" .. tostring(WR_GetUnitBuffTime("player", rec.name)))
+    -- 祝福（2026-11-11）：下拉框已删除，改显示独立祝福设置列表的状态
+    local bc = PigSet and PigSet.PAL_BLESS
+    local bmode = "?"
+    if type(WR_PaladinBlessing_GroupState) == "function" then
+        bmode = WR_PaladinBlessing_GroupState()
     end
+    print("|cff00ff00[MKPAL]|r 祝福：总闸=" .. tostring(bc and bc.enable)
+        .. " 单人/小队/团队=" .. tostring(bc and bc.solo) .. "/" .. tostring(bc and bc.party) .. "/" .. tostring(bc and bc.raid)
+        .. " 单人选择=" .. tostring(bc and bc.soloPick)
+        .. " 当前状态=" .. tostring(bmode)
+        .. " 力量/智慧/王者="
+        .. tostring(WR_PaladinBlessing_BuffRemain and WR_PaladinBlessing_BuffRemain("player", 1)) .. "/"
+        .. tostring(WR_PaladinBlessing_BuffRemain and WR_PaladinBlessing_BuffRemain("player", 2)) .. "/"
+        .. tostring(WR_PaladinBlessing_BuffRemain and WR_PaladinBlessing_BuffRemain("player", 3)))
     -- ★ 2026-11-11：十字军审判 buff 维持开关诊断（原单体循环诊断已随功能删除）
     local crusaderID
     if type(WR_ResolveSpellID) == "function" then

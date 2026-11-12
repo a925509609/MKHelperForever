@@ -139,7 +139,7 @@ F.SPEC_ALIAS = {
 --   仅当该 ID 确实已学会时使用；否则仍走法术书索引（兼容其它 rank）。
 F.SPELL_ID_OVERRIDES = {
     ["力量祝福"] = 19834,
-    ["智慧祝福"] = 19742,
+    ["智慧祝福"] = 19850,  -- ★ 2026-11-12：截图实测（buff 工具提示法术ID 19850，每5秒恢复18点法力值/60分钟）；19742 为旧 rank1
     ["王者祝福"] = 20217,
     -- ★ 2026-11-06：防护循环核心技能（按本服法术书实测 ID）
     ["神圣打击"] = 1866,     -- Holy Strike Rank 3（等级20）
@@ -1459,23 +1459,204 @@ function WR_SpellInfoCompat(spell)
     return a, b, c, WR_Forever_Num(d, 0), WR_Forever_Num(e, 0), WR_Forever_Num(f, 0), g, h
 end
 
+-- ============================================================
+-- ★★★ 2026-11-12 用户口径：「技能不够蓝释放时，应当不亮色块，导致一直按按键」
+-- ------------------------------------------------------------
+-- 现象：法力不够 → 色块仍然亮 → AHK 按该色块对应的键 → 客户端拒绝施放
+--       → 色块不灭（循环每 tick 又点亮）→ AHK 继续按，形成空按死循环。
+--
+-- 旧实现的三个缺陷（都在本段修掉）：
+--   ① IsUsableSpell / C_Spell.IsSpellUsable 返回 (usable, noMana) 两个值，
+--      旧代码只取第 1 个 `a`，把「缺法力」的第二返回值彻底丢掉。
+--      很多客户端在法力不足时第 1 个返回值仍是 true（第 2 个才报缺资源），
+--      于是 WR_SpellUsable 恒 true → 色块常亮。
+--   ② 12.x 的 C_Spell.IsSpellUsable 可能返回 **table**
+--      { isUsable=?, insufficientPower=? }；旧代码把 table 直接当真值
+--      （`a and true or false`）→ 恒 true。
+--   ③ 完全没有「当前资源 vs 技能消耗」的比对，只能等客户端报错。
+--
+-- 现在：缺资源信号一律优先判死；客户端不给信号时自己用 GetSpellPowerCost 比一次。
+-- ============================================================
+
+-- ★★ 注意（本文件的老坑，别再踩）：这里**不能**用 `type(f) == "function"` 守卫。
+--   真实客户端里 WoW 接口是 Lua function，但离线夹具（Python + Lupa）里是
+--   Python 可调用对象，`type()` 返回 "userdata" → 守卫恒 false → 整段被静默
+--   跳过，夹具里「蓝不够不亮」永远测不出来。统一改用 pcall 探测：
+--   pcall 对 nil / 任意 callable 都安全，返回 ok=false 即视为「接口不可用」。
+local function WR_Forever_TryCall(fn, ...)
+    if fn == nil then return false end
+    return pcall(fn, ...)
+end
+
+-- 布尔归一：secret / nil / 非布尔 → nil（= 读不到，绝不猜成 true/false）
+local function WR_Forever_Bool(v)
+    if v == nil then return nil end
+    if type(WR_IsSecretValue) == "function" and WR_IsSecretValue(v) then return nil end
+    if v == true then return true end
+    if v == false then return false end
+    if type(v) == "number" then return v ~= 0 end
+    return nil
+end
+
+-- 可用性返回形状归一：
+--   经典客户端：IsUsableSpell(id) → usable, noMana（多返回值）
+--   12.x 客户端：C_Spell.IsSpellUsable(id) → 可能是 table { isUsable, insufficientPower }
+local function WR_Forever_ParseUsable(a, b)
+    if type(a) == "table" then
+        local u = a.isUsable
+        if u == nil then u = a.usable end
+        local np = a.insufficientPower
+        if np == nil then np = a.noMana end
+        return u, np
+    end
+    return a, b
+end
+
+-- 解析一次可用性结果 → usable(bool/nil), blockedByPower(bool), unreadable(bool)
+local function WR_Forever_TakeUsable(a, b)
+    local u, np = WR_Forever_ParseUsable(a, b)
+    if WR_Forever_Bool(np) == true then return nil, true, false end
+    local ub = WR_Forever_Bool(u)
+    if ub ~= nil then return ub, false, false end
+    if u ~= nil then return nil, false, true end   -- secret 值：读不到，不算 true
+    return nil, false, false
+end
+
+-- 技能资源消耗（按 spellID 缓存；取不到缓存 false，绝不当 0）
+WR_Forever_PowerCostCache = WR_Forever_PowerCostCache or {}
+
+-- 允许做「够不够」判断的资源类型：法力0 / 怒气1 / 集中值2 / 能量3 / 符文能量6。
+-- 其它（连击点4 / 符文5 / 灵魂碎片7 / 圣能9 …）一律不判，避免误挡。
+local WR_FOREVER_POWER_TYPES = { [0] = true, [1] = true, [2] = true, [3] = true, [6] = true }
+
+local function WR_Forever_ParsePowerCost(t)
+    if type(t) ~= "table" then return nil end
+    local bestCost, bestType
+    for _, e in ipairs(t) do
+        if type(e) == "table" then
+            local c = WR_Forever_Num(e.cost, 0)
+            local rawType = e.type
+            if rawType == nil then rawType = e.powerType end
+            local pt = WR_Forever_Num(rawType, 0)
+            if c > 0 and WR_FOREVER_POWER_TYPES[pt] then
+                if not bestCost or c > bestCost then
+                    bestCost, bestType = c, pt
+                end
+            end
+        end
+    end
+    if bestCost then return bestCost, bestType end
+    return nil
+end
+
+-- 返回 cost, powerType；取不到返回 nil（调用方必须按「不判断」处理）
+--
+-- ★★ 负缓存必须带过期时间：
+--   登录初期法术书尚未就绪 / 换天赋换 rank 之后，GetSpellPowerCost 会有一段时间
+--   返回空。如果像旧实现那样把「取不到」永久记成 false，这个技能就再也不会被
+--   「资源够不够」检查一次 —— 蓝不够时色块照样常亮，正是用户反馈的现象。
+--   现在负缓存 3 秒过期，之后自动重探。
+WR_FOREVER_POWER_COST_NEG_TTL = 3
+function WR_Forever_SpellPowerCost(spell)
+    if spell == nil then return nil end
+    local cached = WR_Forever_PowerCostCache[spell]
+    if cached ~= nil then
+        if cached == false then return nil end
+        if cached.neg then
+            if (GetTime() - (cached.at or 0)) < WR_FOREVER_POWER_COST_NEG_TTL then
+                return nil
+            end
+            WR_Forever_PowerCostCache[spell] = nil   -- 负缓存过期 → 重探
+        else
+            return cached.cost, cached.ptype
+        end
+    end
+    local cost, ptype
+    local okG, t = WR_Forever_TryCall(GetSpellPowerCost, spell)
+    if okG and type(t) == "table" then
+        cost, ptype = WR_Forever_ParsePowerCost(t)
+    end
+    if not cost and type(C_Spell) == "table" then
+        local okC, t2 = WR_Forever_TryCall(C_Spell.GetSpellPowerCost, spell)
+        if okC and type(t2) == "table" then
+            cost, ptype = WR_Forever_ParsePowerCost(t2)
+        end
+    end
+    if cost then
+        WR_Forever_PowerCostCache[spell] = { cost = cost, ptype = ptype }
+        return cost, ptype
+    end
+    WR_Forever_PowerCostCache[spell] = { neg = true, at = GetTime() }
+    return nil
+end
+
+-- 当前资源值（同一帧内按 powerType 缓存 0.05 秒，避免热路径反复读）
+WR_Forever_PowerNowCache = WR_Forever_PowerNowCache or {}
+local function WR_Forever_CurrentPower(ptype)
+    local now = GetTime()
+    local c = WR_Forever_PowerNowCache[ptype]
+    if c and (now - (c.at or 0)) < 0.05 then return c.cur end
+    local ok, v = pcall(UnitPower, "player", ptype)
+    local cur = nil
+    if ok then
+        if type(WR_SafeNumber) == "function" then
+            cur = WR_SafeNumber(v, nil)
+        elseif type(v) == "number" and not (type(WR_IsSecretValue) == "function" and WR_IsSecretValue(v)) then
+            cur = v
+        end
+    end
+    WR_Forever_PowerNowCache[ptype] = { at = now, cur = cur }
+    return cur
+end
+
+-- ★★★ 核心判定：返回 true = 资源确实不够（调用方必须判死）；
+--   false = 够 / 无消耗 / 读不到（一律放行，宁可少判不可误挡）。
+function WR_Forever_NotEnoughPower(spell)
+    local key = spell
+    if type(key) == "string" then
+        -- 同样不能用 type() 守卫（夹具里 WR_ResolveSpellID 可能是 userdata）
+        local okR, v = WR_Forever_TryCall(WR_ResolveSpellID, key)
+        if not okR then return false end
+        key = v
+    end
+    if type(key) ~= "number" then return false end
+    local cost, ptype = WR_Forever_SpellPowerCost(key)
+    if not cost or cost <= 0 then return false end
+    local cur = WR_Forever_CurrentPower(ptype or 0)
+    if type(cur) ~= "number" then return false end
+    return cur < cost
+end
+
 -- 技能可用性归一：先把名字换成 ID，再逐级尝试；仅当 API 返回 nil（不认参数）时降级。
--- 明确返回 false 时不降级，避免「缺资源 / 未学会」被误判为可用而乱放技能。
+-- 明确返回 false 或「缺资源」时一律判死，避免「蓝不够还点亮色块」被 AHK 放大成空按。
 function WR_IsSpellUsableCompat(spell)
     local key = WR_ResolveSpellID(spell) or spell
     if key == nil then return false end
     local usable
-    if type(IsUsableSpell) == "function" then
-        local ok, a = pcall(IsUsableSpell, key)
-        if ok and a ~= nil then usable = a and true or false end
+
+    -- ★ 用 pcall 探测，不用 type() 守卫（见本段顶部说明）
+    local ok1, a, b = WR_Forever_TryCall(IsUsableSpell, key)
+    if ok1 then
+        local u, blocked = WR_Forever_TakeUsable(a, b)
+        if blocked then return false end
+        if u ~= nil then usable = u end
     end
-    if usable == nil and type(C_Spell) == "table" and type(C_Spell.IsSpellUsable) == "function" then
-        local ok, a = pcall(C_Spell.IsSpellUsable, key)
-        if ok and a ~= nil then usable = a and true or false end
+    if usable == nil and type(C_Spell) == "table" then
+        local ok2, a2, b2 = WR_Forever_TryCall(C_Spell.IsSpellUsable, key)
+        if ok2 then
+            local u, blocked = WR_Forever_TakeUsable(a2, b2)
+            if blocked then return false end
+            if u ~= nil then usable = u end
+        end
     end
-    if usable == nil and type(key) == "number" and type(IsPlayerSpell) == "function" then
-        local ok, a = pcall(IsPlayerSpell, key)
-        if ok and a ~= nil then usable = a and true or false end
+
+    -- ★★★ 精确资源比对：客户端没给「缺资源」信号（或直接返回 true）时自己比一次。
+    --   这是「蓝不够不亮色块」的最后一道闸，所有 WR_SpellUsable 调用点自动受益。
+    if WR_Forever_NotEnoughPower(key) then return false end
+
+    if usable == nil and type(key) == "number" then
+        local okP, aP = WR_Forever_TryCall(IsPlayerSpell, key)
+        if okP then usable = WR_Forever_Bool(aP) end
     end
     return usable == true
 end

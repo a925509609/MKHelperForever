@@ -30,8 +30,11 @@ function WR_MageForeverFire()
     local inRange = (TargetRange and TargetRange <= 35)
 
     -- ===== 3. AoE 分支（3+ 敌近身）=====
+    -- ★★ 2026-11-12：槽位从 75 改 78。75 号槽实际绑 /petautocaston 水箭
+    --   （开关水元素自动施法），全仓库没有宏绑魔爆术；78 号槽（CTRL-SHIFT-F8）
+    --   已改为 /cast 魔爆术。WR_SkillColor 里也同步改成 78。
     if UnitCount8 >= 3 and inRange and WR_SpellUsable("魔爆术", true) then
-        if WR_ColorFrame_ShowSkill("魔爆术", 75) then return true end
+        if WR_ColorFrame_ShowSkill("魔爆术", 78) then return true end
     end
 
     -- ===== 4. 单体核心（仅当在射程）=====

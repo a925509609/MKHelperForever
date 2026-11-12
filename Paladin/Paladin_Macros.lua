@@ -95,23 +95,68 @@ local function CreateClassesMacro()
     WR_CreateMacro("ALT-CTRL-SHIFT-F8", "") -- 88
     WR_CreateMacro("ALT-CTRL-SHIFT-F12", "") -- 89
   WR_CreateMacro("ALT-CTRL-SHIFT-F10", "/targetenemy") -- 90
-    WR_CreateMacro("ALT-F1", "") -- 91
-    WR_CreateMacro("ALT-F2", "") -- 92
-    WR_CreateMacro("ALT-F3", "") -- 93
+    -- ★ 2026-11-12：91/92/93 原为空占位（ALT-F1/F2/F3），启用为祝福「单人自施」宏：
+    --   [target=player] 直接对自己施放，与当前目标/焦点无关 —— 配合
+    --   Paladin_Blessing.lua 单人分支（WR_PAL_BLESS_KINDS[k].selfSlot）：
+    --   单人补祝福直接点亮这 3 个槽，不再「先切焦点到自己 → @focus 宏」。
+    -- ★ 2026-11-12：95 原为空占位（ALT-F5），启用为祝福「小队/团队直施」动态宏：
+    --   Paladin_Blessing.lua 每次补祝福前用 WR_CreateMacro 把本键宏文本重写为
+    --   /cast [target=partyN|raidN] 祝福名 再点亮槽 95 —— 全程不切焦点；
+    --   宏系统不可用时该模块自行回落旧的「切焦点 + @focus 宏 102~107」流程。
+    WR_CreateMacro("ALT-F1", "/cast [target=player] 力量祝福") -- 91
+    WR_CreateMacro("ALT-F2", "/cast [target=player] 智慧祝福") -- 92
+    WR_CreateMacro("ALT-F3", "/cast [target=player] 王者祝福") -- 93
+    -- ★★★ 2026-11-12 用户口径「队友不在附近时，队友的祝福会上到自己身上」：
+    --   槽 95 的初始文本原来是 `/cast [target=player] 力量祝福`（纯自施）。
+    --   这是「宏条件回退」的直接放大器：CreateClassesMacro 每次脱战都会重跑，
+    --   而动态重写发生在点亮色块之前 —— 只要中间有任何一次没写成功
+    --   （战斗锁定 SetAttribute 被丢弃 / 异常跳过），AHK 按 ALT-F5 就是
+    --   **直接给自己上祝福**，与单人选的那条互相顶掉 = 用户看到的「冲突」。
+    --   现在初始文本改成**无条件空转**（裸 /stopmacro = 整条宏立刻结束）：
+    --   重写一旦没发生，按下去什么都不做，绝不误施。
+    --   真正要施放时由 Paladin_Blessing.lua 的 WR_PaladinBlessing_CastDirect
+    --   重写成「带 noexists/dead/harm 闸 + [@队友,help]」的两段式宏。
+    WR_CreateMacro("ALT-F5", "/stopmacro") -- 95（占位空转；每次点亮前会被重写）
     WR_CreateMacro("ALT-F11", "") -- 94
-    WR_CreateMacro("ALT-F5", "") -- 95
+    -- ★★ 2026-11-12 修复：这里原来还有一行 `WR_CreateMacro("ALT-F5", "") -- 95`，
+    --   会在同一次 CreateClassesMacro 里把上面刚注册的 95 号动态宏**覆盖成空**。
+    --   CreateClassesMacro 在 PLAYER_ENTERING_WORLD 与**每次脱战**都会重跑，
+    --   所以槽 95 在脱战瞬间会变成空宏；一旦祝福模块因任何原因没能在点亮前
+    --   重写成功（宏系统异常 / 冷却跳过），AHK 按 ALT-F5 就是按了个空键
+    --   → 小队队友收不到祝福。空占位已由上一行取代，此处删除。
     WR_CreateMacro("ALT-F6", "/cast 神启") -- 96
     WR_CreateMacro("ALT-F7", "/focus [@party1target,exists,nodead,nocombat]") -- 97
     WR_CreateMacro("ALT-F8", "/focus [@party2target,exists,nodead,nocombat]") -- 98
     WR_CreateMacro("ALT-F12", "/focus [@party3target,exists,nodead,nocombat]") -- 99
     WR_CreateMacro("ALT-F10", "/focus [@party4target,exists,nodead,nocombat]") -- 100
     WR_CreateMacro("ALT-SHIFT-F1", "/stopcasting") -- 101
-    WR_CreateMacro("ALT-SHIFT-F2", "/cast [@focus] 力量祝福") -- 102
-    WR_CreateMacro("ALT-SHIFT-F3", "/cast [@focus] 强效力量祝福") -- 103
-    WR_CreateMacro("ALT-SHIFT-F11", "/cast [@focus] 智慧祝福") -- 104
-    WR_CreateMacro("ALT-SHIFT-F5", "/cast [@focus] 强效智慧祝福") -- 105
-    WR_CreateMacro("ALT-SHIFT-F6", "/cast [@focus] 王者祝福") -- 106
-    WR_CreateMacro("ALT-SHIFT-F7", "/cast [@focus] 强效王者祝福") -- 107
+    -- ★★★ 2026-11-12 用户口径「队友不在附近时，队友的祝福会上到自己身上」：
+    --   [@focus] 同样是**条件**，不是硬目标：
+    --     · 焦点为空 → 条件丢弃 → /cast 退化成无目标施放 → 落到自己；
+    --     · 焦点还停在**自己**身上（单人行 146 号槽 /focus [@player] 留下的）
+    --       → 祝福直接打给自己，与单人选的那条互相顶掉 = 「冲突」。
+    --   现在每条焦点祝福宏都是两段式：第一条 /stopmacro 是硬闸
+    --   （焦点不存在 / 死亡 / 非友善 / 焦点就是自己 → 整条宏立刻结束），
+    --   第二条 /cast 再带 [@focus,help] 显式友善限定。
+    --   代价：焦点无效时按了等于没按（色块白亮一次），但绝不会误施到自己身上。
+    WR_CreateMacro("ALT-SHIFT-F2",
+        "/stopmacro [@focus,noexists] [@focus,dead] [@focus,nohelp]\n" ..
+        "/cast [@focus,help] 力量祝福") -- 102
+    WR_CreateMacro("ALT-SHIFT-F3",
+        "/stopmacro [@focus,noexists] [@focus,dead] [@focus,nohelp]\n" ..
+        "/cast [@focus,help] 强效力量祝福") -- 103
+    WR_CreateMacro("ALT-SHIFT-F11",
+        "/stopmacro [@focus,noexists] [@focus,dead] [@focus,nohelp]\n" ..
+        "/cast [@focus,help] 智慧祝福") -- 104
+    WR_CreateMacro("ALT-SHIFT-F5",
+        "/stopmacro [@focus,noexists] [@focus,dead] [@focus,nohelp]\n" ..
+        "/cast [@focus,help] 强效智慧祝福") -- 105
+    WR_CreateMacro("ALT-SHIFT-F6",
+        "/stopmacro [@focus,noexists] [@focus,dead] [@focus,nohelp]\n" ..
+        "/cast [@focus,help] 王者祝福") -- 106
+    WR_CreateMacro("ALT-SHIFT-F7",
+        "/stopmacro [@focus,noexists] [@focus,dead] [@focus,nohelp]\n" ..
+        "/cast [@focus,help] 强效王者祝福") -- 107
     WR_CreateMacro("ALT-SHIFT-F8", "/cast 智慧圣印") -- 108
     WR_CreateMacro("ALT-SHIFT-F12", "/cast [@focus] 圣光闪现") -- 109
     WR_CreateMacro("ALT-SHIFT-F10", "/cast [@focus] 圣光术") -- 110
@@ -308,6 +353,13 @@ WR_SkillColor["PALADIN"] = {
     ["圣佑术"] = 78,          -- 低血减伤（宏 CTRL-SHIFT-F8）
     -- ★ 2026-11-07：光明圣印（已学）—— 与宏 CTRL-F11 一致（光明圣印常驻开关使用）
     ["光明圣印"] = 54,
+    -- ★ 2026-11-12：单人自施祝福槽位（与上面 ALT-F1/F2/F3 三个 [target=player] 宏一一对应）。
+    --   单人分支（Paladin_Blessing.lua）点亮 selfSlot → AHK 直接对自己施放普通祝福，
+    --   不切焦点、不受当前目标影响；小队/团队走动态直施槽 95（WR_PAL_BLESS_UNIT_SLOT）。
+    ["祝福-单人力量"] = 91,
+    ["祝福-单人智慧"] = 92,
+    ["祝福-单人王者"] = 93,
+    ["祝福-单位直施"] = 95,
     -- ★ 2026-11-09：智慧圣印（已学，可插入；回复法力）—— 与宏 ALT-SHIFT-F8 一致
     --   槽 108 颜色 0x892888 → AHK ColorMap "!+{F8}"，链路已核对一致
     ["智慧圣印"] = 108,

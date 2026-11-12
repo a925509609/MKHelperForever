@@ -869,9 +869,10 @@ function WR_LayoutConfigFrame()
 
     -- 左区内容高度（下限）：由左侧控件链实际深度决定。
     -- ★ 2026-11-11：删除全局区 AOE 分类后，整条控件链上移约 86px；
-    --   实测链（globalRegion 顶向下）：调试模式→自动救人→倒数偷药(滑块)→爆发总闸→
+    -- ★ 2026-11-12：又删除「倒数偷药」复选框，链再上移约 26px。
+    --   实测链（globalRegion 顶向下）：调试模式→自动救人→偷药时间滑块→爆发总闸→
     --   启用怪物屏蔽→职业屏蔽标题→近战/远程/坦克屏蔽→开关提示→图标缩放滑块→窗口透明度滑块
-    --   →自动跟随复选框→跟随目标下拉（最深控件）。真实深度≈620px，取 660（余量约 40px）。
+    --   →自动跟随复选框→跟随目标下拉（最深控件）。真实深度≈594px，仍取 660（余量约 66px）。
     local leftContentH = 660
     local frameHeight = TOP_BAR_H + math.max(leftContentH, rightContentH)
     -- 限制最大默认高度，防止超高职业撑爆屏幕
@@ -2123,6 +2124,39 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
                 DM_Text = label
                 Frame.dmLabels[config.saveVariable] = label
                 Frame.dmDropdowns[config.saveVariable] = chk  -- 供重置逻辑读取
+            elseif config.isButton then
+                -- ★ 2026-11-11：支持 DM 列表内的「按钮行」（骑士「祝福设置」等）。
+                --   布局与滑块/DM复选框一致：标签 TOPLEFT + 按钮在标签右侧。
+                --   按钮行不带 saveVariable，故不写入 dmDropdowns（nil 键会报错），
+                --   也不会被「重置」逻辑处理（那里用 if config.saveVariable 跳过）。
+                local yOffset = -MENU_TOP_PAD - MENU_ROW_H * (row - 1)
+                local label = Frame:CreateFontString(nil, "ARTWORK")
+                label:SetFont(STANDARD_TEXT_FONT, 14, "")
+                label:SetTextColor(classColor.r, classColor.g, classColor.b)
+                label:SetText(config.text)
+                local labelX = config.x or GLOBAL_INNER_PAD
+                label:SetPoint("TOPLEFT", Frame, "TOPLEFT", labelX, yOffset)
+                label:SetSize(config.labelWidth or MENU_LABEL_W, 16)
+                label:SetJustifyH("LEFT")
+
+                local btn = CreateFrame("Button", nil, Frame, "UIPanelButtonTemplate")
+                btn:SetSize(config.buttonWidth or 110, 20)
+                btn:SetPoint("LEFT", label, "RIGHT", 8, 0)
+                btn:SetText(config.buttonText or config.text)
+                btn:SetScript("OnClick", function()
+                    local fn = config.onClick and _G[config.onClick]
+                    if type(fn) == "function" then fn() end
+                end)
+                if config.tooltipText and config.tooltipText ~= "" then
+                    btn:SetScript("OnEnter", function(self)
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:SetText(config.tooltipText)
+                        GameTooltip:Show()
+                    end)
+                    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                end
+                DM_Text = label
+                Frame.dmLabels[config.buttonName or ("btn" .. row)] = label
             else
                 -- 创建下拉菜单
                 DM_Text, WR_Dropdown[config.saveVariable] = CreateDropdownMenu({
@@ -2983,36 +3017,18 @@ local function ConfigFrame()
     rescueLabel:SetText("自动救人")
     rescueLabel:SetPoint("LEFT", rescueCheckbox, "RIGHT", -2, 1)
 
-    -- ★ 倒数偷药（全局，开启 boss 战前自动喝药）
-    if PigSet["DBM_PREPULL_POTION"] == nil then PigSet["DBM_PREPULL_POTION"] = false end
-    local prepullCheckbox = CreateFrame("CheckButton", "WR_PrepullCheckbox", globalRegion, "UICheckButtonTemplate")
-    prepullCheckbox:SetSize(20, 20)
-    prepullCheckbox:SetPoint("TOPLEFT", rescueCheckbox, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
-    prepullCheckbox:SetChecked(PigSet["DBM_PREPULL_POTION"])
-    prepullCheckbox:SetScript("OnClick", function(self)
-        PigSet["DBM_PREPULL_POTION"] = self:GetChecked()
-        local status = self:GetChecked() and "|cff00ff00开启|r" or "|cffff0000关闭|r"
-        PrintToVisible(string.format("|cff00adf0[偷药]|r 倒数偷药: %s", status))
-    end)
-    prepullCheckbox:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("倒数偷药\n开启后根据 DBM 倒计时在开怪前自动喝药水。")
-        GameTooltip:Show()
-    end)
-    prepullCheckbox:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
-    local prepullLabel = globalRegion:CreateFontString(nil, "ARTWORK")
-    prepullLabel:SetFont(STANDARD_TEXT_FONT, 16, "")
-    prepullLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
-    prepullLabel:SetText("倒数偷药")
-    prepullLabel:SetPoint("LEFT", prepullCheckbox, "RIGHT", -2, 1)
-
     -- ★ 偷药时间（全局滑块，单位：秒）
+    -- ★★ 2026-11-12：上方「倒数偷药」开关已按用户要求从全局功能区删除。
+    --   本滑块原锚在已删除的「倒数偷药」复选框上，现改锚到自动救人复选框，
+    --   保证左区链式布局不断裂。
+    --   注意：TOUYAO_TIME 仍被全职业 WR_PrepullInWindow() 用作「爆发预开窗口」，
+    --   与已删除的 DBM_PREPULL_POTION 总闸不是一回事，故滑块与底层逻辑均保留。
     if PigSet["TOUYAO_TIME"] == nil then PigSet["TOUYAO_TIME"] = 3 end
     local touyaoSlider = CreateFrame("Slider", "WR_TouyaoSlider", globalRegion)
     touyaoSlider:SetOrientation("HORIZONTAL")
     touyaoSlider:SetWidth(GLOBAL_REGION_W - GLOBAL_INNER_PAD * 2 - 30)
     touyaoSlider:SetHeight(10)
-    touyaoSlider:SetPoint("TOPLEFT", prepullCheckbox, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
+    touyaoSlider:SetPoint("TOPLEFT", rescueCheckbox, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
     touyaoSlider:SetMinMaxValues(0, 10)
     touyaoSlider:SetValueStep(1)
     touyaoSlider:SetObeyStepOnDrag(true)
@@ -3504,10 +3520,10 @@ local function ConfigFrame()
     scaleGrabber:SetSize(18, 18)
     scaleGrabber:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -1, 1)
     scaleGrabber:SetFrameLevel(configFrame:GetFrameLevel() + 10)
-    scaleGrabber:SetNormalTexture("Interface\Buttons\UI-AutoCastableOverlay")
+    scaleGrabber:SetNormalTexture("Interface\\Buttons\\UI-AutoCastableOverlay")
     local sgTex = scaleGrabber:GetNormalTexture()
     if sgTex then sgTex:SetTexCoord(0, 0.5, 0, 0.5) end
-    scaleGrabber:SetHighlightTexture("Interface\Buttons\UI-AutoCastableOverlay", "ADD")
+    scaleGrabber:SetHighlightTexture("Interface\\Buttons\\UI-AutoCastableOverlay", "ADD")
     scaleGrabber:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:SetText("拖动等比缩放整个窗口（含文字与控件一起放大/缩小，0.5x~2x）")

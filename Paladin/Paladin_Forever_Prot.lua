@@ -54,6 +54,14 @@
 --   · 目标已有「光明审判」debuff 时，自动切回常驻圣印（面板「圣印」专区所选）；
 --   · 本服「光明审判」持续 40 秒（ForeverDB build 1.60.1.70862，Classic 10 秒），
 --     到期后自动重复上述循环。
+-- ★★ 2026-11-12 用户口径（切印时机）：
+--   「修正各项维持buff常驻开关切圣印的时机，当审判cd还有2秒钟恢复使用时
+--     目标没有对应审判buff，这时候再切选择的对应圣印打审判，
+--     不要第一时间开启了维持审判buff的开关后就切对应圣印等审判使用」
+--   实现：phase 0 在切印前先过「审判剩余冷却 ≤ 2 秒」窗口
+--   （WR_PaladinForever_JudgementSwitchDue）；未到窗口就【维持常驻圣印】、
+--   不切印、直接 return false。窗口内才切对应圣印，然后等审判就绪打出去。
+--   这样勾选开关 / debuff 到期后不会长时间占着 buff 圣印干等审判 CD。
 -- 状态机（WR_PaladinForever_LightSealPhase）：
 --   0 = 需要挂光明圣印：不在身上就提示光明圣印，已在身上且审判就绪就提示审判
 --   1 = 已提示光明圣印，等 1 秒让切印生效后再提示审判
@@ -76,6 +84,47 @@ WR_PaladinForever_CRUSADER_JUDGEMENT_SECONDS = 40
 WR_PaladinForever_WISDOM_SEAL_NAME = "智慧圣印"
 WR_PaladinForever_WISDOM_SEAL_SLOT = 108
 WR_PaladinForever_WISDOM_JUDGEMENT_SECONDS = 40
+
+-- ============================================================
+-- ★★★ 2026-11-13 用户口径：「光明/智慧审判互斥」——一身只能挂一种审判
+-- ------------------------------------------------------------
+-- 用户原话：
+--   「防骑目前还存在一个问题，当圣印选择了光明，审判buff选择了智慧审判，
+--     会导致智慧审判和身上的光明审判互相顶，圣印选择了智慧也存在这样的问题，
+--     需要设置限制光明和智慧圣印时目标有智慧或光明审判buff将不使用审判」
+--
+-- 背景（本服法术书实测，talentsforever.com/export/paladin.json）：
+--   「审判」描述：Unleash the energy of a Seal spell upon an enemy.
+--               Only one Judgement per Paladin can be active at any one time.
+--   「光明圣印」：Unleashing this Seal's energy will judge an enemy for 40 sec,
+--               granting melee attacks ... a chance of healing the attacker.
+--   「智慧圣印」：Unleashing this Seal's energy will judge an enemy for 40 sec,
+--               granting attacks and spells ... a chance to restore mana.
+--   即：光明审判 / 智慧审判 **同属 Paladin 自己的「审判」debuff 槽位**，
+--   每人同时只能存在一条。身上是光明圣印 / 智慧圣印时打审判，会用**当下**的
+--   圣印覆盖目标身上已有的那条审判 —— 于是：
+--     · 开着「智慧审判」维持开关，目标刚被常驻光明圣印挂上光明审判，
+--       状态机一打审判就把光明审判顶成智慧审判；
+--     · 开着「光明圣印」维持开关，目标刚被常驻智慧圣印挂上智慧审判，同理被顶。
+--   表现就是「智慧审判和身上的光明审判互相顶」。
+--
+-- 修法（本条限制）：只要
+--   ① 面板「圣印」专区所选常驻圣印是光明圣印或智慧圣印，**或**
+--   ② 光明圣印 / 智慧审判 两个维持开关有一个勾着（即循环会把你切到光明或智慧圣印），
+--   那么目标身上已经存在「光明审判」或「智慧审判」任意一条时，
+--   本次审判**不再施放**（不点亮审判色块），让那条审判自然吃完 40 秒。
+-- 不做的事（避免误伤）：
+--   · 不限制十字军圣印 / 正义圣印 / 愤怒圣印等其它圣印——它们的审判不是这两条，
+--     不会互相顶；
+--   · 不因此切圣印、不改 phase、不取消勾选：只是这一发审判先不打，
+--     其它技能照常轮转，40 秒到期后状态机按原节奏重新挂审判。
+-- ============================================================
+-- 目标身上「单审判槽位」debuff 的两条候选名（不同客户端/版本翻译不同）
+WR_PaladinForever_SINGLE_JUDGEMENT_NAMES = {
+    "光明审判", "圣光审判",
+    "智慧审判", "智慧圣印",
+}
+
 
 -- ★★ 2026-11-11 用户口径：奉献蓝量下限 30%。
 --   蓝量百分比（0~1）低于该值时不提示/不施放奉献；>= 0.30 才允许。
@@ -125,6 +174,39 @@ end
 --   本服名称「智慧审判」；「智慧圣印」作为旧名/异常翻译兜底。
 function WR_PaladinForever_WisdomSealDebuffRemain()
     return WR_PaladinForever_JudgementSealDebuffRemain({ "智慧审判", "智慧圣印" })
+end
+
+-- ★ 2026-11-13：以下三个门控函数必须定义在
+--   WR_PaladinForever_JudgementSealDebuffRemain 之后。
+--   原先它们放在本文件顶部（常量区），那里 JudgementSealDebuffRemain 尚未定义，
+--   于是 SingleSlotJudgementUp 里的 type(...) ~= "function" 恒成立 → 永远
+--   return false → JudgementAllowed 恒为 true → 「互斥限制」静默失效
+--   （目标已有光明/智慧审判时仍会打审判，把它顶掉）。
+-- 本次审判会不会占用「光明/智慧审判」那一个共享槽位
+--   mainSeal  = 面板「圣印」专区所选常驻圣印
+--   返回 true 表示：此刻打出去的审判只会是光明审判或智慧审判之一
+function WR_PaladinForever_JudgementUsesSingleSlot(mainSeal)
+    if mainSeal == WR_PaladinForever_LIGHT_SEAL_NAME then return true end
+    if mainSeal == WR_PaladinForever_WISDOM_SEAL_NAME then return true end
+    if PigSet and (PigSet.FH_CRGMSY or PigSet.FH_ZHSP) then return true end
+    return false
+end
+
+-- 目标身上当前是否已有「光明审判」或「智慧审判」任意一条（同槽位占用）
+--   ★ 用基础名剥离等级后缀，兼容「光明审判（等级 2）」这类本服写法
+function WR_PaladinForever_SingleSlotJudgementUp()
+    if type(WR_PaladinForever_JudgementSealDebuffRemain) ~= "function" then return false end
+    local remain = WR_PaladinForever_JudgementSealDebuffRemain(
+        WR_PaladinForever_SINGLE_JUDGEMENT_NAMES)
+    return type(remain) == "number" and remain > 0
+end
+
+-- 审判门控（供主调度与三个 buff 维持状态机统一使用）
+--   返回 true  = 此刻可以打审判（不会顶掉已有的光明/智慧审判）
+--   返回 false = 目标已有光明/智慧审判且本次审判会占用同一槽位 → 先不打
+function WR_PaladinForever_JudgementAllowed(mainSeal)
+    if not WR_PaladinForever_JudgementUsesSingleSlot(mainSeal) then return true end
+    return not WR_PaladinForever_SingleSlotJudgementUp()
 end
 
 -- 玩家身上是否某个圣印（优先读真实光环；光环不可读时用最近成功施放记账兜底）
@@ -237,6 +319,19 @@ function WR_PaladinForever_ResetWisdomJudgementState()
     WR_PaladinForever_WisdomJudgementMaintainPromptAt = nil
 end
 
+-- 某个 buff 维持状态机此刻是否「应该占着 buff 圣印」（切印/维持阶段）
+-- ★★ 2026-11-12 用户口径：只有进入「审判剩余 ≤ 2 秒」窗口后才允许切 buff 圣印。
+--   phase 1/2 已经切过去了，继续占着直到审判打出并切回；
+--   phase 0 则必须等窗口到了才占（否则一直维持常驻圣印）。
+function WR_PaladinForever_BuffSealHolds(phase, judgeCD)
+    local ph = tonumber(phase) or 0
+    if ph == 1 or ph == 2 then return true end
+    if ph == 0 then
+        return WR_PaladinForever_JudgementSwitchDue(judgeCD)
+    end
+    return false
+end
+
 -- 当前循环应该维持哪个圣印：
 --   · 光明圣印开关开启且处于「需要光明」阶段（0/1/2）→ 光明圣印
 --   · 十字军审判开关开启且处于「需要十字军」阶段（0/1/2）→ 十字军圣印
@@ -246,21 +341,22 @@ end
 --   常驻本身已选光明/十字军/智慧时开关同样有效；这里返回的临时圣印与常驻相同，
 --   状态机收尾阶段不会再提示切回同一种圣印。
 function WR_PaladinForever_ProtSealGoal(mainSeal, mainSealSlot)
+    local judgeCD = WR_PaladinForever_GetJudgeCooldown()
     if PigSet and PigSet.FH_CRGMSY then
         local phase = WR_PaladinForever_LightSealPhase or 0
-        if phase == 0 or phase == 1 or phase == 2 then
+        if WR_PaladinForever_BuffSealHolds(phase, judgeCD) then
             return WR_PaladinForever_LIGHT_SEAL_NAME, WR_PaladinForever_LIGHT_SEAL_SLOT
         end
     end
     if PigSet and PigSet.FH_SZJSP then
         local phase = WR_PaladinForever_CrusaderSealPhase or 0
-        if phase == 0 or phase == 1 or phase == 2 then
+        if WR_PaladinForever_BuffSealHolds(phase, judgeCD) then
             return WR_PaladinForever_CRUSADER_SEAL_NAME, WR_PaladinForever_CRUSADER_SEAL_SLOT
         end
     end
     if PigSet and PigSet.FH_ZHSP then
         local phase = WR_PaladinForever_WisdomJudgementPhase or 0
-        if phase == 0 or phase == 1 or phase == 2 then
+        if WR_PaladinForever_BuffSealHolds(phase, judgeCD) then
             return WR_PaladinForever_WISDOM_SEAL_NAME, WR_PaladinForever_WISDOM_SEAL_SLOT
         end
     end
@@ -311,6 +407,25 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
     end
 
     if phase == 0 then
+        -- ★★ 2026-11-12 用户口径：审判 CD 还有 2 秒以上时不切光明圣印，
+        --   继续维持面板「圣印」专区所选常驻圣印；只有进入「审判剩余 ≤ 2 秒」
+        --   窗口（含已就绪）且目标没有光明审判时，才切光明圣印去打审判。
+        if not WR_PaladinForever_JudgementSwitchDue(WR_PaladinForever_GetJudgeCooldown()) then
+            -- 兜底：身上若还挂着光明圣印（窗口外被手动切/上一轮残留），提示切回常驻圣印
+            if mainSeal ~= lightName and WR_PaladinForever_LightSealOnPlayer() then
+                local promptAt = WR_PaladinForever_LightSealMaintainPromptAt or 0
+                if (now - promptAt) >= 3.0 then
+                    WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
+                    if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
+                        WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
+                        WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                        WR_PaladinForever_LightSealMaintainPromptAt = now
+                        return true
+                    end
+                end
+            end
+            return false
+        end
         if not WR_PaladinForever_LightSealOnPlayer() then
             -- 需要切光明圣印：显式切印放行一次
             if WR_PaladinForever_CanApplySeal()
@@ -344,7 +459,8 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             -- ② 给切印留一个 GCD，再提示审判
             local judgeCD = WR_PaladinForever_GetJudgeCooldown()
             if WR_PaladinForever_Ready("审判", judgeCD)
-               and WR_PaladinForever_CanHitTarget("审判", "target") then
+               and WR_PaladinForever_CanHitTarget("审判", "target")
+               and WR_PaladinForever_JudgementAllowed(mainSeal) then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
                     WR_PaladinForever_MarkPrompt("审判", 2)
                     WR_PaladinForever_HideSkillLater("审判", 2, 1.5)
@@ -545,6 +661,24 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
     end
 
     if phase == 0 then
+        -- ★★ 2026-11-12 用户口径：审判 CD 还有 2 秒以上时不切十字军圣印，
+        --   继续维持面板「圣印」专区所选常驻圣印；只有进入「审判剩余 ≤ 2 秒」
+        --   窗口（含已就绪）且目标没有十字军审判时，才切十字军圣印去打审判。
+        if not WR_PaladinForever_JudgementSwitchDue(WR_PaladinForever_GetJudgeCooldown()) then
+            if mainSeal ~= crusaderName and WR_PaladinForever_CrusaderSealOnPlayer() then
+                local promptAt = WR_PaladinForever_CrusaderSealMaintainPromptAt or 0
+                if (now - promptAt) >= 3.0 then
+                    WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
+                    if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
+                        WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
+                        WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                        WR_PaladinForever_CrusaderSealMaintainPromptAt = now
+                        return true
+                    end
+                end
+            end
+            return false
+        end
         if not WR_PaladinForever_CrusaderSealOnPlayer() then
             -- 需要切十字军圣印：显式切印放行一次
             if WR_PaladinForever_CanApplySeal()
@@ -578,7 +712,8 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             -- ② 给切印留一个 GCD，再提示审判
             local judgeCD = WR_PaladinForever_GetJudgeCooldown()
             if WR_PaladinForever_Ready("审判", judgeCD)
-               and WR_PaladinForever_CanHitTarget("审判", "target") then
+               and WR_PaladinForever_CanHitTarget("审判", "target")
+               and WR_PaladinForever_JudgementAllowed(mainSeal) then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
                     WR_PaladinForever_MarkPrompt("审判", 2)
                     WR_PaladinForever_HideSkillLater("审判", 2, 1.5)
@@ -781,6 +916,24 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
     end
 
     if phase == 0 then
+        -- ★★ 2026-11-12 用户口径：审判 CD 还有 2 秒以上时不切智慧圣印，
+        --   继续维持面板「圣印」专区所选常驻圣印；只有进入「审判剩余 ≤ 2 秒」
+        --   窗口（含已就绪）且目标没有智慧审判时，才切智慧圣印去打审判。
+        if not WR_PaladinForever_JudgementSwitchDue(WR_PaladinForever_GetJudgeCooldown()) then
+            if mainSeal ~= wisdomName and WR_PaladinForever_WisdomSealOnPlayer() then
+                local promptAt = WR_PaladinForever_WisdomJudgementMaintainPromptAt or 0
+                if (now - promptAt) >= 3.0 then
+                    WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
+                    if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
+                        WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
+                        WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                        WR_PaladinForever_WisdomJudgementMaintainPromptAt = now
+                        return true
+                    end
+                end
+            end
+            return false
+        end
         if not WR_PaladinForever_WisdomSealOnPlayer() then
             -- 需要切智慧圣印：显式切印放行一次
             if WR_PaladinForever_CanApplySeal()
@@ -814,7 +967,8 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             -- ② 给切印留一个 GCD，再提示审判
             local judgeCD = WR_PaladinForever_GetJudgeCooldown()
             if WR_PaladinForever_Ready("审判", judgeCD)
-               and WR_PaladinForever_CanHitTarget("审判", "target") then
+               and WR_PaladinForever_CanHitTarget("审判", "target")
+               and WR_PaladinForever_JudgementAllowed(mainSeal) then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
                     WR_PaladinForever_MarkPrompt("审判", 2)
                     WR_PaladinForever_HideSkillLater("审判", 2, 1.5)
@@ -1262,8 +1416,9 @@ function WR_PaladinForeverProt()
         end
     end
 
-    -- 2.6 祝福（战斗外按菜单选择补，力量/智慧/王者/强效）
-    if WR_PaladinForever_ProtBlessing() then return true end
+    -- 2.6 祝福（2026-11-11：下拉框已删除，改走独立祝福设置列表 + 脱战自动补）
+    --   type 保护：离线夹具未加载 Paladin_Blessing.lua 时安全跳过，真实客户端该函数必存在
+    if type(WR_PaladinBlessing_Auto) == "function" and WR_PaladinBlessing_Auto() then return true end
 
     -- ============================================================
     -- 3. 常驻圣印（面板「圣印」专区所选，默认愤怒圣印）
@@ -1390,15 +1545,20 @@ function WR_PaladinForeverProt()
     --   主调度【让出审判】，把审判留给这条流程使用；phase 2 以后若审判已经提示过，
     --   主调度就不再占它（由提示防抖与本地 CD 兜底）。十字军审判、智慧审判、智慧圣印插入同理。
     --   insertSealRunning：光明圣印 / 十字军审判 / 智慧审判 / 智慧圣印插入四条流程共用同一个「让出审判」判断。
+    --   ★★ 2026-11-12 用户口径（切印时机）补充：只有状态机真的占着 buff 圣印
+    --     （phase 1/2，或 phase 0 已进入「审判剩余 ≤ 2 秒」窗口）时，主调度才让出审判；
+    --     窗口之外的 phase 0 视为「维持常驻圣印」——审判照常由主调度正常打。
+    --     否则旧逻辑会让审判被一条还没到窗口的流程长期占住 → 审判反而打不出去。
+    local judgeCDForYield = WR_PaladinForever_GetJudgeCooldown()
     local lightWaitingJudge = (PigSet and PigSet.FH_CRGMSY)
-        and ((WR_PaladinForever_LightSealPhase or 0) < 2)
+        and WR_PaladinForever_BuffSealHolds(WR_PaladinForever_LightSealPhase or 0, judgeCDForYield)
     local crusaderWaitingJudge = (PigSet and PigSet.FH_SZJSP)
-        and ((WR_PaladinForever_CrusaderSealPhase or 0) < 2)
+        and WR_PaladinForever_BuffSealHolds(WR_PaladinForever_CrusaderSealPhase or 0, judgeCDForYield)
     local wisdomWaitingJudge = (PigSet and PigSet.FH_ZHSP)
-        and ((WR_PaladinForever_WisdomJudgementPhase or 0) < 2)
+        and WR_PaladinForever_BuffSealHolds(WR_PaladinForever_WisdomJudgementPhase or 0, judgeCDForYield)
     local insertSealRunning = (PigSet and PigSet.FH_CRZHSY)
         or lightWaitingJudge or crusaderWaitingJudge or wisdomWaitingJudge
-    local judgeCD = WR_PaladinForever_GetJudgeCooldown()
+    local judgeCD = judgeCDForYield
 
     -- ============================================================
     -- ★★ 2026-11-10 用户口径：8 码内目标 ≥2 个 → 多目标固定优先级
@@ -1420,6 +1580,12 @@ function WR_PaladinForeverProt()
         and (sealState ~= "missing" or WR_PaladinForever_SealActive())
         and WR_PaladinForever_CanHitTarget("审判", "target")
         and WR_SpellUsable("审判")
+        -- ★★★ 2026-11-13 用户口径「光明/智慧审判互斥」：常驻圣印是光明/智慧
+        --   （或开着它们的 buff 维持开关）且目标身上已有光明审判或智慧审判时，
+        --   这一发审判会顶掉那条 debuff → 不提示审判。
+        --   放在 eligible 里（而不是只放 tryJudge 里），单体的 Ready-first 调度
+        --   与下面的兜底环节也会自动跟着跳过审判，不会绕道再点亮。
+        and WR_PaladinForever_JudgementAllowed(mainSeal)
     -- 神圣打击：射程门沿用原 hsRangeOK（<=8，读不到放行），行为不变
     -- ★★ 2026-11-10：不再用 WR_SpellUsable("神圣打击") 做前置门。
     --   本服神圣打击共 8 个 rank，旧版把 Rank3 的 1866 写死；角色升到 28 级后

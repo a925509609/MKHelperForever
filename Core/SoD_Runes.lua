@@ -263,6 +263,166 @@ function WR_SoD_ResolveSlot(skillName)
     return nil
 end
 
+-- ============================================================
+-- ★★★ 2026-11-12 用户口径：「技能不够蓝释放时，应当不亮色块，导致一直按按键」
+-- ------------------------------------------------------------
+-- 这是「蓝不够不亮色块」的【总闸层】：所有职业旋转都经由
+-- WR_ColorFrame_ShowSkill 点亮色块，即使某个循环忘了自己判 WR_SpellUsable，
+-- 也会在这里被拦下。
+--
+-- 两条独立证据（任一命中即判死）：
+--   ① 资源算术：技能消耗（GetSpellPowerCost）× 当前资源（UnitPower）
+--      —— 由 Core/Forever_Compat.lua 的 WR_Forever_NotEnoughPower 提供；
+--   ② 客户端回执：AHK 按键被客户端拒绝时弹出的「法力不足 / 能量不足…」
+--      错误文字。资源在战斗中可能是 secret 读不到，这时只有客户端知道
+--      到底缺不缺，所以把「刚亮过的那个技能」记进短期黑名单。
+-- 两者都「读不到就放行」——宁可少判，不可把整条循环误杀。
+-- ============================================================
+
+-- 技能名 → 解禁时刻。客户端明确回执「资源不足」后写入。
+WR_SoD_PowerBlocked = WR_SoD_PowerBlocked or {}
+-- 最近一次点亮色块时用的技能名（供错误回执归因）
+WR_SoD_LastShownSpell = WR_SoD_LastShownSpell or nil
+-- 回执黑名单时长（秒）。太长会漏放、太短会被 AHK 连按放大，取 2.5 秒。
+WR_SoD_POWER_BLOCK_SEC = 2.5
+
+-- ★ 每 tick 的「本轮是否点亮过」标记。
+-- 色块模型是「亮着 = 现在该按这个键」：一次 WR_ColorFrame_Show 会先把所有色块
+-- 隐藏再显示一个，所以「本轮没点亮任何色块」= 此刻不该按任何技能键。
+-- 但上一 tick 亮着的那个色块不会自己消失 → AHK 读到同色继续按。
+-- 这正是「蓝不够还在一直按」的直接成因，需要每 tick 收尾清扫（见下）。
+WR_SoD_TickSeq = 0
+WR_SoD_ShownTick = -1
+WR_SoD_ShownSkill = nil
+
+function WR_SoD_BeginTick()
+    WR_SoD_TickSeq = (WR_SoD_TickSeq or 0) + 1
+end
+
+-- 本 tick 没有任何提示点亮时，把「上一 tick 残留且现在资源不足」的色块熄灭。
+-- 只处理资源不足这一种情形：其它原因（CD 中 / 无目标 / 脱战）各有自己的
+-- ClearStalePrompts / HideSkillLater 机制，不在总闸层擅自扩大改动面。
+function WR_SoD_SweepPowerBlocked()
+    if WR_SoD_ShownTick == WR_SoD_TickSeq then return false end   -- 本轮亮过，交给正常覆盖
+    local name = WR_SoD_ShownSkill
+    if type(name) ~= "string" or name == "" then return false end
+    if not WR_SoD_NotEnoughPower(name) then return false end
+    WR_HideSkillColorSlot(name, nil)
+    WR_SoD_ShownSkill = nil
+    return true
+end
+
+-- 该技能此刻是否「资源不足」→ true 表示必须不亮（并熄灭残留色块）
+function WR_SoD_NotEnoughPower(skillName)
+    if type(skillName) ~= "string" or skillName == "" then return false end
+
+    -- ① 客户端回执黑名单
+    local t = WR_SoD_PowerBlocked
+    if type(t) == "table" then
+        local untilAt = t[skillName]
+        if type(untilAt) == "number" then
+            if GetTime() < untilAt then return true end
+            t[skillName] = nil          -- 过期即清，避免表无限增长
+        end
+    end
+
+    -- ② 资源算术（Core/Forever_Compat.lua 提供；离线夹具未加载时跳过）
+    --   用 pcall 探测而不是 type()=="function"：本仓库老坑 —— 夹具里 WoW/跨文件
+    --   可调用对象可能是 userdata，type 守卫会让整段静默跳过。
+    if WR_Forever_NotEnoughPower ~= nil then
+        local ok, notEnough = pcall(WR_Forever_NotEnoughPower, skillName)
+        if ok and notEnough == true then return true end
+    end
+    return false
+end
+
+-- 熄灭「某技能自己的」色块（两侧 + 技能图标框），不清别的槽位。
+-- 用途：资源不足时把上一 tick 已经亮着的色块收掉 —— 只 return false 不熄灭的话，
+-- 色块会一直挂着，AHK 读到同色就继续按，正是用户看到的「不够蓝还一直按」。
+function WR_HideSkillColorSlot(skillName, slot)
+    local s = slot
+    if not s and type(WR_SoD_ResolveSlot) == "function" then
+        s = WR_SoD_ResolveSlot(skillName)
+    end
+    if s ~= nil then
+        if ColorFrameArrayTopLeft and ColorFrameArrayTopLeft[s] then
+            ColorFrameArrayTopLeft[s]:Hide()
+        end
+        if ColorFrameArrayTopRight and ColorFrameArrayTopRight[s] then
+            ColorFrameArrayTopRight[s]:Hide()
+        end
+        if ColorTextArrayTopLeft and ColorTextArrayTopLeft[s] then
+            ColorTextArrayTopLeft[s]:Hide()
+        end
+        if ColorTextArrayTopRight and ColorTextArrayTopRight[s] then
+            ColorTextArrayTopRight[s]:Hide()
+        end
+    end
+    -- 技能图标框：当前显示的正是该技能时才收
+    local iconFrame = WR_SkillIconFrame
+    if iconFrame and iconFrame.Text and type(skillName) == "string" then
+        local ok, txt = pcall(iconFrame.Text.GetText, iconFrame.Text)
+        if ok and type(txt) == "string" and string.find(txt, skillName, 1, true) then
+            if iconFrame.Icon then iconFrame.Icon:Hide() end
+            iconFrame.Text:Hide()
+        end
+    end
+end
+
+-- 客户端「资源不足」回执监听：把刚亮过的技能记进短期黑名单并立刻熄灭。
+-- 覆盖 12.x / 无限 / 经典三种文案（中文 + 英文），不依赖 UI_ERROR_MESSAGE 的数字常量。
+--
+-- ★ 匹配必须「资源词 + 不足词」同时命中，不能只匹配「能量 / mana」：
+--   只匹配资源词的话，「能量涌动」「Mana Tide Totem」这类正常提示也会被当成
+--   缺资源 → 把刚亮过的技能误拉黑 2.5 秒 → 表现为「技能偶尔莫名不亮」。
+--   这里按「资源词 × 不足词」组合判定，宁可漏判（漏判只退化成本次空按一次，
+--   下一次资源算术闸仍会挡住）也不误判。
+do
+    local POWER_WORDS = { "法力", "魔法值", "能量", "怒气", "符文能量", "集中值" }
+    local LOW_WORDS   = { "不足", "不够", "缺少", "太低" }
+    local EN_POWER    = { "mana", "energy", "rage", "focus", "runic power" }
+    local EN_LOW      = { "not enough", "insufficient", "low on", "requires more" }
+
+    local function Lower(s) return string.lower(s) end
+
+    -- 对外暴露（夹具断言用；也让 /mk 诊断能查这条判定）
+    function WR_SoD_IsPowerError(message)
+        if type(message) ~= "string" or message == "" then return false end
+        -- 中文：资源词 + 不足词
+        for i = 1, #POWER_WORDS do
+            if string.find(message, POWER_WORDS[i], 1, true) then
+                for j = 1, #LOW_WORDS do
+                    if string.find(message, LOW_WORDS[j], 1, true) then return true end
+                end
+                return false
+            end
+        end
+        -- 英文：客户端 zhCN 缺译文时会回落英文
+        local low = Lower(message)
+        for i = 1, #EN_POWER do
+            if string.find(low, EN_POWER[i], 1, true) then
+                for j = 1, #EN_LOW do
+                    if string.find(low, EN_LOW[j], 1, true) then return true end
+                end
+                return false
+            end
+        end
+        return false
+    end
+
+    local frame = CreateFrame("Frame")
+    if frame and frame.RegisterEvent then
+        frame:RegisterEvent("UI_ERROR_MESSAGE")
+        frame:SetScript("OnEvent", function(_, _, _, message)
+            if not WR_SoD_IsPowerError(message) then return end
+            local name = WR_SoD_LastShownSpell
+            if type(name) ~= "string" or name == "" then return end
+            WR_SoD_PowerBlocked[name] = GetTime() + WR_SoD_POWER_BLOCK_SEC
+            WR_HideSkillColorSlot(name, nil)
+        end)
+    end
+end
+
 -- ★ 便捷封装：旋转统一调用，色块槽位优先来自职业 _Macros.lua
 --   skillName   ：技能中文名（同时作为色块显示文字）
 --   fallbackSlot：_Macros.lua 未登记时的回退槽位（建议保留原旋转里的数值）
@@ -285,7 +445,31 @@ function WR_ColorFrame_ShowSkill(skillName, fallbackSlot)
         end
         return false
     end
-    return WR_ColorFrame_Show(slot, skillName)
+
+    -- ★★★ 2026-11-12 用户口径：「技能不够蓝释放时，应当不亮色块，导致一直按按键」
+    -- ------------------------------------------------------------
+    -- 这是「蓝不够不亮」的【总闸】：所有职业旋转都经由本函数点亮色块，
+    -- 即使某个循环忘了自己判 WR_SpellUsable，也会在这里被拦下。
+    --
+    -- 关键点：拦下时必须【主动熄灭该槽位】。
+    --   色块是「上一 tick 亮着就一直亮」的模型 —— WR_ColorFrame_Show 只在
+    --   成功点亮时先隐藏全部再显示一个；如果本 tick 直接 return false 而不
+    --   熄灭，上一 tick 的色块会一直挂着，AHK 读到同色就继续按 → 正是用户
+    --   看到的「不够蓝还一直按」。所以这里必须 Hide 掉该技能自己的槽位。
+    if WR_SoD_NotEnoughPower(skillName) then
+        WR_HideSkillColorSlot(skillName, slot)
+        return false
+    end
+
+    local shown = WR_ColorFrame_Show(slot, skillName)
+    if shown then
+        -- 记录「最近一次点亮的技能名」：客户端弹出「法力不足」回执时据此归因，
+        -- 把该技能记进短期黑名单（资源在战斗中可能是 secret，只有客户端知道）。
+        WR_SoD_LastShownSpell = skillName
+        WR_SoD_ShownSkill = skillName
+        WR_SoD_ShownTick = WR_SoD_TickSeq
+    end
+    return shown
 end
 
 -- ============================================================

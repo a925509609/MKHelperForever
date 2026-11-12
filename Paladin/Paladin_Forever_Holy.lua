@@ -5,8 +5,9 @@
 -- ============================================================
 
 function WR_PaladinForeverHoly()
-    -- 0. 祝福（战斗外按菜单「祝福」下拉补）
-    if WR_PaladinForever_Blessing(PigSet and PigSet.SS_ZF) then return true end
+    -- 0. 祝福（2026-11-11：下拉框已删除，改走独立祝福设置列表 + 脱战自动补）
+    --   type 保护：离线夹具未加载 Paladin_Blessing.lua 时安全跳过，真实客户端该函数必存在
+    if type(WR_PaladinBlessing_Auto) == "function" and WR_PaladinBlessing_Auto() then return true end
     PlayerHP = WR_GetUnitHP("player")
     PlayerMP = WR_GetUnitMP("player")
     local lowUnit = WR_SoD_GetLowestFriendly(0.90)

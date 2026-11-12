@@ -272,17 +272,14 @@ end
 PigSet.FH_GMSY = nil
 PigSet.FH_ZYSY = nil
 
--- ★ 防骑祝福下拉索引迁移（2026-11-06：删除「庇护/强效庇护」两项，9 项 → 7 项）
---   旧: 1力量 2智慧 3王者 4庇护 5强效力量 6强效智慧 7强效王者 8强效庇护 9禁用
---   新: 1力量 2智慧 3王者 4强效力量 5强效智慧 6强效王者 7禁用
---   新旧值域重叠(1-7)，必须一次性执行，用 FH_ZF_V2 标记防重复映射。
---   旧 4/8（庇护类）与旧 9（禁用）统一回落到 7（禁用）。
-if not PigSet.FH_ZF_V2 then
-    local _oldFHZF = tonumber(PigSet.FH_ZF)
-    local _fhZFMap = { [1]=1, [2]=2, [3]=3, [4]=7, [5]=4, [6]=5, [7]=6, [8]=7, [9]=7 }
-    PigSet.FH_ZF = _fhZFMap[_oldFHZF] or 7
-    PigSet.FH_ZF_V2 = true
-end
+-- ★ 2026-11-11：祝福下拉框已删除（改为独立「祝福设置」列表 Paladin_Blessing.lua）。
+--   清理三专精旧下拉存档字段与 V2 迁移标记，避免残留影响。
+PigSet.CJ_ZF = nil
+PigSet.FH_ZF = nil
+PigSet.SS_ZF = nil
+PigSet.FH_ZF_V2 = nil
+-- 新祝福配置：惰性默认值在 WR_PaladinBlessing_Cfg() 内补齐，这里只保证表存在
+if type(PigSet.PAL_BLESS) ~= "table" then PigSet.PAL_BLESS = {} end
 if PigSet.DBM_PREPULL_POTION == nil then
     PigSet.DBM_PREPULL_POTION = false
 end

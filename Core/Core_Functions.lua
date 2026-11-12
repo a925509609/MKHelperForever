@@ -3666,6 +3666,14 @@ end
 
 -- ============================================================
 -- ★ 法术可用性判断
+-- ------------------------------------------------------------
+-- ★★★ 2026-11-12 用户口径「技能不够蓝释放时，应当不亮色块，导致一直按按键」：
+--   WR_IsSpellUsableCompat 现在会同时读 IsUsableSpell 的**第二返回值 noMana**
+--   和 12.x 的 table 形状 { isUsable, insufficientPower }，并在客户端没给信号时
+--   用 GetSpellPowerCost × UnitPower 自己比一次 —— 资源不够一律返回 false。
+--   本函数是全部职业循环的前置门（全仓 ~300 处调用），所以这一层修好后，
+--   「蓝不够还亮色块」在循环侧就被挡住；色块侧还有 WR_ColorFrame_ShowSkill
+--   的总闸 + 每 tick 清扫兜底（见 Core/SoD_Runes.lua）。
 -- ============================================================
 function WR_SpellUsable(Spell, GlobalCooldown)
     -- ★ 无限 12.x 适配：C_Spell.IsSpellUsable 只认 spellID，而本插件全传中文技能名。
