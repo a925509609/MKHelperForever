@@ -3,6 +3,8 @@
 -- ------------------------------------------------------------
 -- ★ 2026-11-10 用户口径：8 码内目标 ≥2 个时切换为「多目标固定优先级」
 --     奉献（≥3 目标时）→ 审判 → 神圣打击 → 驱邪术（可用就打）→ 神圣之盾
+--   ★★ 2026-11-13 追加口径：目标生命 <20% 时「愤怒之锤」插入 审判 之后、
+--     神圣打击 之前（30 码斩杀收尾；单体链插在 Ready-first 之后、驱邪术之前）。
 --   ★★ 2026-11-10 追加口径：奉献仅在 8 码内目标 ≥3 个时使用（2 个目标不铺奉献）。
 --   ★ 2026-11-11 追加口径：奉献蓝量下限 30%——蓝量百分比低于 30% 时不施放奉献。
 --   常驻圣印按面板「圣印」专区按钮（FH_SEAL：十字军/正义/愤怒/回血光明/回蓝智慧/公正）选择，默认愤怒圣印，
@@ -29,6 +31,8 @@
 --   ★★ 2026-11-11 用户口径：目标 ≤1 的链路里「神圣之盾」后移到「奉献」之后
 --     （实际顺序：驱邪术 → 奉献（单体链不可达）→ 神圣之盾）；自动循环删除
 --     「制裁之锤」提示，仅保留面板「插入 制裁之锤」一次性手动开关。
+--   ★★ 2026-11-13 用户口径：单体链新增「愤怒之锤」分支——目标生命 <20% 且
+--     审判/神圣打击都不可用时优先斩杀收尾（在驱邪术之前），受面板 FH_FNZC 控制。
 -- 说明：未学会/本服不存在的技能由 WR_SpellUsable / WR_Forever_IsSpellKnown
 --   自动跳过，不影响低等级阶段的循环。
 -- ★ 2026-11-06：战斗中 GetSpellCooldown 是 secret，WR_GetGCD 被收敛成 0，
@@ -129,6 +133,127 @@ WR_PaladinForever_SINGLE_JUDGEMENT_NAMES = {
 -- ★★ 2026-11-11 用户口径：奉献蓝量下限 30%。
 --   蓝量百分比（0~1）低于该值时不提示/不施放奉献；>= 0.30 才允许。
 WR_PaladinForever_PROT_CONSECRATION_MANA_MIN = 0.30
+-- ★★★ 2026-11-13：愤怒之锤（斩杀）蓝量下限 20%——目标生命 <20% 且蓝量 ≥20% 才点亮。
+--   本服 Rank1 耗蓝 295（截图实测 SpellID 24275 / 0.87 秒读条 / 6 秒 CD）；
+--   20% 档比奉献（30%）宽松，保证斩杀窗口内低蓝也优先收尾。
+--   ★ 如实说明（与奉献蓝量门同一口径）：战斗中 UnitPower 是 secret →
+--   WR_GetUnitMP 降级为 1（=满蓝），此门在战斗中恒通过；保留它是因为
+--   脱战/可读时仍然有效，且低蓝时能提前停止提示斩杀读条。
+WR_PaladinForever_PROT_HOW_MANA_MIN = 0.20
+
+-- ★★★ 2026-11-14 修复：愤怒之锤从未点亮（Forever 隐藏目标血量）
+-- ------------------------------------------------------------
+-- 现象：防骑「愤怒之锤」开关一直勾着，目标进斩杀线后也从不亮色块、从没打出去。
+-- 根因：无限/WoW Forever 的 UnitHealth / UnitHealthMax 对插件恒为 secret 值，
+--   WR_SafeHPPct 按安全层口径降级为 1（=满血）→ 旧门
+--   `WR_SafeHPPct("target") < 0.20` 永远不成立 → hammerEligible 恒 false。
+--   这不是触发条件写错，而是本服血量不可读。
+-- 修法（两条通道都不比较 secret 值）：
+--   · 血量可读（经典 / SoD / 离线夹具）→ 仍按 <20% 判定；
+--   · 血量不可读（Forever 常态）→ 用 C_Spell.IsSpellUsable(当前 rank) 判定。
+--     本服 IsUsableSpell 已映射到 C_Spell.IsSpellUsable（Core_Functions.lua:158），
+--     而「愤怒之锤」是仅斩杀期可施放的技能：客户端的可用性本身就是执行期信号，
+--     且该返回值在 12.x 里不是 secret（不能拿血量做比较，但可拿 IsSpellUsable 判）。
+--   · 再加 C_SpellActivationOverlay.IsSpellOverlayed（暴雪给执行期技能的原生发光）兜底。
+-- 说明：宁可少打一次，也不在非斩杀期空放读条（0.87 秒 / 295 蓝）。
+-- secret 检测：夹具里 WR_IsSecretValue 可能是 userdata，必须 pcall 探测
+local function WR_PaladinForever_IsSecret(v)
+    if WR_IsSecretValue == nil then return false end
+    local ok, r = pcall(WR_IsSecretValue, v)
+    return ok and r == true
+end
+
+function WR_PaladinForever_HammerRankIDs()
+    local ids = { 24275, 24274, 24239 }   -- 愤怒之锤 Rank1/2/3（Forever DB：44/52/60 级）
+    if WR_ResolveSpellID ~= nil then
+        local ok, cur = pcall(WR_ResolveSpellID, "愤怒之锤")
+        if ok and type(cur) == "number" then
+            -- ★ 当前 rank 必须放第一位：C_Spell.IsSpellUsable 对「未学会的 rank」返回 false，
+            --   若先用 Rank1 探测而角色已换到 Rank2/3，会误判为不可用而永远不点亮。
+            table.insert(ids, 1, cur)
+        end
+    end
+    return ids
+end
+
+-- 目标血量百分比：可读返回 0~1；secret / API 缺失 / 读失败返回 nil（绝不猜 0 或 1）
+function WR_PaladinForever_TargetHealthPctSafe()
+    if UnitHealth == nil or UnitHealthMax == nil then
+        return nil
+    end
+    local okH, hp = pcall(UnitHealth, "target")
+    local okM, maxHP = pcall(UnitHealthMax, "target")
+    if not okH or not okM then return nil end
+    if WR_PaladinForever_IsSecret(hp) or WR_PaladinForever_IsSecret(maxHP) then
+        return nil
+    end
+    hp = (type(hp) == "number") and hp or nil
+    maxHP = (type(maxHP) == "number") and maxHP or 0
+    if hp == nil or maxHP <= 0 then return nil end
+    return hp / maxHP
+end
+
+-- 愤怒之锤此刻是否处于「可提示」状态（执行期 + 学会 + 冷却 + 蓝量）
+--   ★ 全部在普通 number / boolean 上比较，绝不把 secret 值带进判断。
+function WR_PaladinForever_HammerExecuteReady()
+    -- ① 环境没有 UnitHealth（离线夹具 / 极旧客户端）：沿用 WR_SafeHPPct 桩判定
+    if UnitHealth == nil or UnitHealthMax == nil then
+        local pct = 1
+        if WR_SafeHPPct ~= nil then
+            local okP, v = pcall(WR_SafeHPPct, "target")
+            if okP and type(v) == "number" then pct = v end
+        end
+        if type(pct) == "number" and pct < 0.20 then
+            if WR_SpellUsable == nil then return false end
+            local okU, usable = pcall(WR_SpellUsable, "愤怒之锤", true)
+            return okU and usable == true
+        end
+        return false
+    end
+
+    -- ② 血量可读：传统 <20% 门（SoD / 经典）
+    local pct = WR_PaladinForever_TargetHealthPctSafe()
+    if pct ~= nil then
+        if pct >= 0.20 then return false end
+        if WR_SpellUsable == nil then return false end
+        local okU, usable = pcall(WR_SpellUsable, "愤怒之锤", true)
+        return okU and usable == true
+    end
+
+    -- ③ 血量不可读（Forever 常态）：C_Spell.IsSpellUsable 是执行期的权威非 secret 信号
+    local ids = WR_PaladinForever_HammerRankIDs()
+    if C_Spell ~= nil and C_Spell.IsSpellUsable ~= nil then
+        for i = 1, #ids do
+            local ok, usable, noMana = pcall(C_Spell.IsSpellUsable, ids[i])
+            if ok then
+                local u = usable
+                if type(u) == "table" then
+                    local raw = u.isUsable
+                    if raw == nil then raw = u.usable end
+                    if WR_PaladinForever_IsSecret(raw) then raw = nil end
+                    u = raw
+                end
+                if WR_PaladinForever_IsSecret(u) then u = nil end
+                if WR_PaladinForever_IsSecret(noMana) then noMana = nil end
+                if u == true then return true end
+                if u == false then
+                    -- false 可能是 CD / 蓝不够 / 不在斩杀线：本函数一律判死，
+                    -- 让主循环继续走别的技能；冷却由 ShowSkillCD 的本地记账再兜一层。
+                    return false
+                end
+            end
+        end
+    end
+
+    -- ④ 原生「技能发光」兜底（某些客户端只给按钮发光，不暴露 usable）
+    if C_SpellActivationOverlay ~= nil and C_SpellActivationOverlay.IsSpellOverlayed ~= nil then
+        for i = 1, #ids do
+            local ok, lit = pcall(C_SpellActivationOverlay.IsSpellOverlayed, ids[i])
+            if ok and lit == true then return true end
+        end
+    end
+    return false
+end
 
 local function WR_PaladinForever_StripSealRankSuffix(nm)
     if type(nm) ~= "string" then return nil end
@@ -192,21 +317,73 @@ function WR_PaladinForever_JudgementUsesSingleSlot(mainSeal)
     return false
 end
 
+-- ★★★ 2026-11-13（v2）：战斗中 target 光环是 secret，WR_GetUnitDebuffTime 读不到
+--   光明/智慧审判 debuff → 旧门控恒判「没有审判」，主调度照常打审判。
+--   常驻光明圣印时这一发就是光明审判，会把刚挂上的智慧审判顶掉（用户实测冲突）。
+--   修法：审判成功时按「施放瞬间身上的圣印」记一条 40 秒本地账（kind = light/wisdom），
+--   光环可读时以光环为准；不可读时用本地账兜底。换目标自动失效。
+WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS = 40
+
+function WR_PaladinForever_NoteSingleSlotJudgement(kind, untilAt)
+    if kind ~= "light" and kind ~= "wisdom" then return end
+    local t = tonumber(untilAt) or (GetTime() + WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS)
+    WR_PaladinForever_SingleSlotJudgementUntil = t
+    WR_PaladinForever_SingleSlotJudgementKind = kind
+    WR_PaladinForever_SingleSlotJudgementTarget = WR_PaladinForever_JudgementSealTargetKey()
+end
+
+function WR_PaladinForever_ClearSingleSlotJudgement()
+    WR_PaladinForever_SingleSlotJudgementUntil = nil
+    WR_PaladinForever_SingleSlotJudgementKind = nil
+    WR_PaladinForever_SingleSlotJudgementTarget = nil
+end
+
+-- 返回：kind（"light"/"wisdom"/nil）、剩余秒数、来源（"aura"/"local"/nil）
+function WR_PaladinForever_SingleSlotJudgementInfo()
+    local lightRemain = WR_PaladinForever_LightSealDebuffRemain()
+    if type(lightRemain) == "number" and lightRemain > 0 then
+        return "light", lightRemain, "aura"
+    end
+    local wisdomRemain = WR_PaladinForever_WisdomSealDebuffRemain()
+    if type(wisdomRemain) == "number" and wisdomRemain > 0 then
+        return "wisdom", wisdomRemain, "aura"
+    end
+    local untilAt = WR_PaladinForever_SingleSlotJudgementUntil
+    if type(untilAt) == "number" and GetTime() < untilAt then
+        local stored = WR_PaladinForever_SingleSlotJudgementTarget
+        local current = WR_PaladinForever_JudgementSealTargetKey()
+        -- 换目标（两边都能读到且不同）→ 旧账作废
+        if not (stored and current and stored ~= current) then
+            return WR_PaladinForever_SingleSlotJudgementKind or "unknown",
+                untilAt - GetTime(), "local"
+        end
+    end
+    return nil, 0, nil
+end
+
 -- 目标身上当前是否已有「光明审判」或「智慧审判」任意一条（同槽位占用）
 --   ★ 用基础名剥离等级后缀，兼容「光明审判（等级 2）」这类本服写法
 function WR_PaladinForever_SingleSlotJudgementUp()
-    if type(WR_PaladinForever_JudgementSealDebuffRemain) ~= "function" then return false end
-    local remain = WR_PaladinForever_JudgementSealDebuffRemain(
-        WR_PaladinForever_SINGLE_JUDGEMENT_NAMES)
-    return type(remain) == "number" and remain > 0
+    local kind = WR_PaladinForever_SingleSlotJudgementInfo()
+    return kind ~= nil
 end
 
 -- 审判门控（供主调度与三个 buff 维持状态机统一使用）
---   返回 true  = 此刻可以打审判（不会顶掉已有的光明/智慧审判）
---   返回 false = 目标已有光明/智慧审判且本次审判会占用同一槽位 → 先不打
-function WR_PaladinForever_JudgementAllowed(mainSeal)
+--   desiredKind：
+--     nil      = 主调度通用审判：任何已有的光明/智慧审判都不许顶
+--     "light"  = 本次要打光明审判：目标已有智慧审判 → 不许顶
+--     "wisdom" = 本次要打智慧审判：允许把光明审判顶成智慧审判（用户要的就是智慧）
+--   返回 true  = 此刻可以打审判
+function WR_PaladinForever_JudgementAllowed(mainSeal, desiredKind)
     if not WR_PaladinForever_JudgementUsesSingleSlot(mainSeal) then return true end
-    return not WR_PaladinForever_SingleSlotJudgementUp()
+    local kind = WR_PaladinForever_SingleSlotJudgementInfo()
+    if kind == nil then return true end
+    if desiredKind == "wisdom" then
+        -- 智慧审判可以顶掉光明审判；同类已有无需重复施放
+        return kind == "light"
+    end
+    -- 光明审判 / 主调度通用审判：存在光明或智慧审判时都不打
+    return false
 end
 
 -- 玩家身上是否某个圣印（优先读真实光环；光环不可读时用最近成功施放记账兜底）
@@ -383,19 +560,47 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
         return false
     end
     -- 脱战不干预：保留开关，但清空阶段，进战后从「需要光明」重新开始
+    -- ★★★ 2026-11-13 用户口径「战斗中怪没有在近战位置，打不到也会切审判 buff 对应的圣印，
+    --   导致和选择的圣印互顶，浪费了蓝」——状态机总门【打得到才切印】，（代码在下方脱战清零之后）：
+    --   切 buff 圣印的唯一目的是「马上打一发审判挂 debuff」。目标不在审判射程（10 码）内时
+    --   这一发根本打不出去，切过去只会白顶掉常驻圣印 + 白烧一次切印的蓝，零收益。
+    --   ★ 只拦「新点火」（phase 为 nil 或 0）；已进入 phase 1/2/3/4 的流程照常收尾。
     if not UnitAffectingCombat("player") then
+        WR_PaladinForever_ResetLightSealState()
+        return false
+    end
+
+    -- ★★★ 2026-11-13 用户口径「勾选后，当目标已死亡且显示为尸体时，仍会切换所选圣印
+    --   并尝试释放审判」——状态机总门【尸体不切印】：
+    --   目标已确认死亡（含 ghost 态尸体）→ 整条流程直接放弃：重置阶段、本 tick
+    --   不点亮任何色块——既不点火切 buff 圣印，也不会卡在 phase1~4 对着尸体空等超时；
+    --   常驻圣印由主循环的圣印维持逻辑（CanApplySeal）自行恢复。
+    --   口径：只拦【确认死亡】——读不到（secret / API 缺失）一律放行，与射程门一致。
+    if WR_PaladinForever_UnitIsDeadOrGhost("target") then
         WR_PaladinForever_ResetLightSealState()
         return false
     end
 
     local now = GetTime()
     local phase = WR_PaladinForever_LightSealPhase or 0
+    -- ★ 打得到才切印总门（2026-11-13，完整说明见上方 2026-11-13 注释块）：
+    --   新点火（phase 0）且目标不在审判射程内 → 本 tick 直接不切印，维持常驻圣印。
+    if phase == 0
+       and not WR_PaladinForever_CanHitTarget("审判", "target") then
+        return false
+    end
     local lightName = WR_PaladinForever_LIGHT_SEAL_NAME
     local lightSlot = WR_PaladinForever_LIGHT_SEAL_SLOT
 
     -- 0 → 首次判定：目标可能已经有光明审判（例如开关刚打开 / 重载插件）
     if phase == 0 then
         local remain = WR_PaladinForever_LightSealDebuffRemain()
+        -- ★★★ 2026-11-13（v2）：战斗中目标光环不可读 → 用单审判槽位本地账兜底，
+        --   已有光明审判就别再切光明圣印重打（避免 phase1 空等 / 白顶常驻圣印）。
+        if type(remain) ~= "number" or remain <= 0 then
+            local kind, localRemain = WR_PaladinForever_SingleSlotJudgementInfo()
+            if kind == "light" then remain = localRemain end
+        end
         if type(remain) == "number" and remain > 0 then
             WR_PaladinForever_LightSealPhase = 4
             WR_PaladinForever_LightSealDebuffUntil = now
@@ -460,7 +665,7 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             local judgeCD = WR_PaladinForever_GetJudgeCooldown()
             if WR_PaladinForever_Ready("审判", judgeCD)
                and WR_PaladinForever_CanHitTarget("审判", "target")
-               and WR_PaladinForever_JudgementAllowed(mainSeal) then
+               and WR_PaladinForever_JudgementAllowed(mainSeal, "light") then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
                     WR_PaladinForever_MarkPrompt("审判", 2)
                     WR_PaladinForever_HideSkillLater("审判", 2, 1.5)
@@ -495,6 +700,7 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             end
             WR_PaladinForever_LightSealDebuffUntil = untilAt
             WR_PaladinForever_LightSealTarget = WR_PaladinForever_LightSealTargetKey()
+            WR_PaladinForever_NoteSingleSlotJudgement("light", untilAt)
             if mainSeal == WR_PaladinForever_LIGHT_SEAL_NAME then
                 -- 常驻就是光明圣印：无需切回，直接进入维持期
                 WR_PaladinForever_LightSealPhase = 4
@@ -642,8 +848,29 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
         return false
     end
 
+    -- ★★★ 2026-11-13 用户口径「勾选后，当目标已死亡且显示为尸体时，仍会切换所选圣印
+    --   并尝试释放审判」——状态机总门【尸体不切印】：
+    --   目标已确认死亡（含 ghost 态尸体）→ 整条流程直接放弃：重置阶段、本 tick
+    --   不点亮任何色块——既不点火切 buff 圣印，也不会卡在 phase1~4 对着尸体空等超时；
+    --   常驻圣印由主循环的圣印维持逻辑（CanApplySeal）自行恢复。
+    --   口径：只拦【确认死亡】——读不到（secret / API 缺失）一律放行，与射程门一致。
+    if WR_PaladinForever_UnitIsDeadOrGhost("target") then
+        WR_PaladinForever_ResetCrusaderSealState()
+        return false
+    end
+
     local now = GetTime()
     local phase = WR_PaladinForever_CrusaderSealPhase or 0
+    -- ★★★ 2026-11-13 用户口径「战斗中怪没有在近战位置，打不到也会切审判 buff 对应的圣印，
+    --   导致和选择的圣印互顶，浪费了蓝」——状态机总门【打得到才切印】：
+    --   切 buff 圣印的唯一目的是「马上打一发审判挂 debuff」。目标不在审判射程（10 码）内时
+    --   这一发根本打不出去，切过去只会白顶掉常驻圣印 + 白烧一次切印的蓝，零收益。
+    --   ★ 只拦「新点火」（phase 为 nil 或 0）；已进入 phase 1/2/3/4 的流程照常收尾。
+    --   ★ 口径与主调度 judgeEligible 的 CanHitTarget 一致：距离读不到（999/secret）→ 放行。
+    if phase == 0
+       and not WR_PaladinForever_CanHitTarget("审判", "target") then
+        return false
+    end
     local crusaderName = WR_PaladinForever_CRUSADER_SEAL_NAME
     local crusaderSlot = WR_PaladinForever_CRUSADER_SEAL_SLOT
 
@@ -897,14 +1124,41 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
         return false
     end
 
+    -- ★★★ 2026-11-13 用户口径「勾选后，当目标已死亡且显示为尸体时，仍会切换所选圣印
+    --   并尝试释放审判」——状态机总门【尸体不切印】：
+    --   目标已确认死亡（含 ghost 态尸体）→ 整条流程直接放弃：重置阶段、本 tick
+    --   不点亮任何色块——既不点火切 buff 圣印，也不会卡在 phase1~4 对着尸体空等超时；
+    --   常驻圣印由主循环的圣印维持逻辑（CanApplySeal）自行恢复。
+    --   口径：只拦【确认死亡】——读不到（secret / API 缺失）一律放行，与射程门一致。
+    if WR_PaladinForever_UnitIsDeadOrGhost("target") then
+        WR_PaladinForever_ResetWisdomJudgementState()
+        return false
+    end
+
     local now = GetTime()
     local phase = WR_PaladinForever_WisdomJudgementPhase or 0
+    -- ★★★ 2026-11-13 用户口径「战斗中怪没有在近战位置，打不到也会切审判 buff 对应的圣印，
+    --   导致和选择的圣印互顶，浪费了蓝」——状态机总门【打得到才切印】：
+    --   切 buff 圣印的唯一目的是「马上打一发审判挂 debuff」。目标不在审判射程（10 码）内时
+    --   这一发根本打不出去，切过去只会白顶掉常驻圣印 + 白烧一次切印的蓝，零收益。
+    --   ★ 只拦「新点火」（phase 为 nil 或 0）；已进入 phase 1/2/3/4 的流程照常收尾。
+    --   ★ 口径与主调度 judgeEligible 的 CanHitTarget 一致：距离读不到（999/secret）→ 放行。
+    if phase == 0
+       and not WR_PaladinForever_CanHitTarget("审判", "target") then
+        return false
+    end
     local wisdomName = WR_PaladinForever_WISDOM_SEAL_NAME
     local wisdomSlot = WR_PaladinForever_WISDOM_SEAL_SLOT
 
     -- 0 → 首次判定：目标可能已经有智慧审判（例如开关刚打开 / 重载插件）
     if phase == 0 then
         local remain = WR_PaladinForever_WisdomSealDebuffRemain()
+        -- ★★★ 2026-11-13（v2）：战斗中目标光环不可读 → 用单审判槽位本地账兜底，
+        --   已有智慧审判就别再切智慧圣印重打（避免 phase1 空等 / 白顶常驻圣印）。
+        if type(remain) ~= "number" or remain <= 0 then
+            local kind, localRemain = WR_PaladinForever_SingleSlotJudgementInfo()
+            if kind == "wisdom" then remain = localRemain end
+        end
         if type(remain) == "number" and remain > 0 then
             WR_PaladinForever_WisdomJudgementPhase = 4
             WR_PaladinForever_WisdomJudgementDebuffUntil = now
@@ -968,7 +1222,7 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             local judgeCD = WR_PaladinForever_GetJudgeCooldown()
             if WR_PaladinForever_Ready("审判", judgeCD)
                and WR_PaladinForever_CanHitTarget("审判", "target")
-               and WR_PaladinForever_JudgementAllowed(mainSeal) then
+               and WR_PaladinForever_JudgementAllowed(mainSeal, "wisdom") then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
                     WR_PaladinForever_MarkPrompt("审判", 2)
                     WR_PaladinForever_HideSkillLater("审判", 2, 1.5)
@@ -1003,6 +1257,7 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             end
             WR_PaladinForever_WisdomJudgementDebuffUntil = untilAt
             WR_PaladinForever_WisdomJudgementTarget = WR_PaladinForever_JudgementSealTargetKey()
+            WR_PaladinForever_NoteSingleSlotJudgement("wisdom", untilAt)
             if mainSeal == WR_PaladinForever_WISDOM_SEAL_NAME then
                 -- 常驻就是智慧圣印：无需切回，直接进入维持期
                 WR_PaladinForever_WisdomJudgementPhase = 4
@@ -1269,6 +1524,11 @@ function WR_PaladinForeverProt()
             if WR_ProtOneShot("FH_ZZJZ", "拯救之手", 35) then return true end
         end
     end
+
+    -- ★★ 2026-11-14：清洁术「优先」模式 + 防护独立「自己/目标」复选框
+    --   面板 FH_QJS=2 勾选后走这里，高于圣印维持/生存；复选框则勾选即生效。
+    if WR_PaladinForever_CleanseStep("FH_QJS", "priority", "FH_QJS_Player", "FH_QJS_Target") then return true end
+
     -- ★★ 2026-11-11：开启「智慧审判」buff 维持开关时，一次性「插入智慧圣印」没有意义
     --   （持续维持已覆盖回蓝需求），自动取消勾选，避免两条流程抢同一个审判。
     if PigSet and PigSet.FH_ZHSP and PigSet.FH_CRZHSY then
@@ -1384,6 +1644,9 @@ function WR_PaladinForeverProt()
     if PlayerHP < 0.35 and WR_SpellUsable("圣佑术", true) then
         if WR_PaladinForever_ShowSkillCD("圣佑术", 78, 300) then return true end
     end
+
+    -- ★★ 2026-11-14：清洁术「常规 / 目标 / 指向」模式（生存之后，不抢圣疗/圣盾）
+    if WR_PaladinForever_CleanseStep("FH_QJS", "normal", "FH_QJS_Player", "FH_QJS_Target") then return true end
 
     -- 2. 常驻光环与仇恨姿态
     --    有「惩罚光环」优先（NGA 防骑仇恨机制：惩罚光环反伤提升仇恨）；
@@ -1580,6 +1843,11 @@ function WR_PaladinForeverProt()
         and (sealState ~= "missing" or WR_PaladinForever_SealActive())
         and WR_PaladinForever_CanHitTarget("审判", "target")
         and WR_SpellUsable("审判")
+        -- ★★★ 2026-11-13（v2）：光明圣印 / 智慧审判 buff 维持开关开启时，
+        --   审判由对应状态机独占，主调度任何时刻都不再自己打审判。
+        --   否则主调度会按「当前圣印」打出一发（常驻光明 → 光明审判），
+        --   把状态机刚挂好的智慧审判顶掉（用户实测的冲突根因之一）。
+        and not (PigSet and (PigSet.FH_CRGMSY or PigSet.FH_ZHSP))
         -- ★★★ 2026-11-13 用户口径「光明/智慧审判互斥」：常驻圣印是光明/智慧
         --   （或开着它们的 buff 维持开关）且目标身上已有光明审判或智慧审判时，
         --   这一发审判会顶掉那条 debuff → 不提示审判。
@@ -1601,6 +1869,35 @@ function WR_PaladinForeverProt()
     local exorcismEligible = WR_PaladinForever_IsUndeadOrDemon("target")
         and WR_PaladinForever_CanHitTarget("驱邪术", "target")
         and WR_SpellUsable("驱邪术", true)
+    -- 愤怒之锤（斩杀收尾；受面板「愤怒之锤」FH_FNZC 控制，默认开）
+    --   ★★ 2026-11-13 用户口径「新增愤怒之锤的使用分支，明确触发条件/冷却/资源限制」：
+    --   触发条件（全部满足才点亮）：
+    --     ① 面板开关 FH_FNZC（默认勾选，关闭后主链与兜底都不再提示）；
+    --     ② 目标进入斩杀期：
+    --        · 血量可读（SoD/经典/夹具）→ 目标生命 <20%；
+    --        · 血量不可读（Forever 常态，UnitHealth 是 secret）→ 由
+    --          C_Spell.IsSpellUsable(愤怒之锤) 判定（该技能仅斩杀期可施放，
+    --          客户端可用性即执行期信号，且该返回值不是 secret）；
+    --        见 WR_PaladinForever_HammerExecuteReady。
+    --     ③ 目标存在/可攻击/存活（TargetCastable，斩杀读条不打尸体）；
+    --     ④ 30 码射程（WR_PaladinForever_SPELL_RANGE["愤怒之锤"]=30，
+    --        近战位丢失/卡位时 30 码内仍能收尾）；
+    --     ⑤ 已学会 + 冷却就绪（C_Spell.IsSpellUsable / WR_SpellUsable）；
+    --     ⑥ 蓝量 ≥20%（WR_PaladinForever_PROT_HOW_MANA_MIN，资源下限见常量区说明）。
+    --   冷却：本地 6 秒记账（ShowSkillCD 三层判定：① 成功施放 +6 秒 →
+    --     ② 客户端冷却 → ③ 提示保持窗口兜底，与其它循环技能一致）。
+    --   优先级衔接：多目标链插在 审判 之后、神圣打击 之前；单体链插在
+    --     Ready-first 之后、驱邪术 之前；原第 11 档兜底保留并同样受开关控制。
+    -- ★★★ 2026-11-14 修复：不再直接写 `WR_SafeHPPct("target") < 0.20`。
+    --   本服 UnitHealth 恒为 secret → WR_SafeHPPct 恒 1（满血），该门永远不成立，
+    --   愤怒之锤从未点亮过。改为统一走 WR_PaladinForever_HammerExecuteReady：
+    --   血量可读走 <20%，血量不可读走 C_Spell.IsSpellUsable（执行期信号，非 secret）。
+    local hammerEligible = (PigSet == nil or PigSet.FH_FNZC ~= false)
+        and WR_PaladinForever_HammerExecuteReady()
+        and WR_SpellUsable("愤怒之锤", true)   -- 保留原 GCD/读条/客户端冷却门
+        and WR_PaladinForever_TargetCastable("target")
+        and WR_PaladinForever_CanHitTarget("愤怒之锤", "target")
+        and PlayerMP >= WR_PaladinForever_PROT_HOW_MANA_MIN
     -- 神圣之盾（防护核心减伤；受面板 FH_SZS 开关控制，默认开）
     --   ★ 自身 Buff 类技能，不判射程、也不要求敌方目标（防骑要能给自己套盾）。
     local holyShieldEligible = (PigSet == nil or PigSet.FH_SZS ~= false)
@@ -1645,9 +1942,30 @@ function WR_PaladinForeverProt()
         if not WR_PaladinForever_CanHitTarget("驱邪术", "target") then return false end
         return WR_PaladinForever_ShowSkillCD("驱邪术", 20, 15)
     end
+    local function tryHammer()
+        if not hammerEligible then return false end
+        if not WR_PaladinForever_CanHitTarget("愤怒之锤", "target") then return false end
+        return WR_PaladinForever_ShowSkillCD("愤怒之锤", 1, 6)
+    end
     local function tryHolyShield()
         if not holyShieldEligible then return false end
         return WR_PaladinForever_ShowSkillCD("神圣之盾", 24, 10)
+    end
+
+    -- ★★★ 2026-11-13：愤怒之锤 0.87 秒读条保护（读条不被自己人打断）。
+    --   WR_ColorFrame_ShowSkill 会先隐藏所有色块：读条期间只要任何环节点亮
+    --   别的技能，AHK 按下新按键 = 打断愤怒之锤读条 → 白烧 295 蓝零收益。
+    --   处理：点亮后的 PROMPT_HOLD（1.5 秒 ≥ 0.87 秒读条 + GCD）窗口内，
+    --   两条主链整体让路——只尝试重亮愤怒之锤自身（读条中 ShowSkillCD 按防抖
+    --   返回 false，色块由 HideSkillLater 保持常亮），窗口走完或施放成功
+    --   （成功事件 HideNow + 6 秒本地 CD 记账）后自动恢复常规调度。
+    --   与单体「神圣打击提示保持窗口不让审判抢块」同一处理模式（见下方方案 2）。
+    local hammerHolding = WR_PaladinForever_PromptCD["愤怒之锤"] ~= nil
+        and (GetTime() - WR_PaladinForever_PromptCD["愤怒之锤"])
+            < (WR_PaladinForever_PROMPT_HOLD or 1.5)
+    if hammerHolding then
+        if tryHammer() then return true end
+        return false
     end
 
     if aoeMode then
@@ -1655,6 +1973,11 @@ function WR_PaladinForeverProt()
         -- ★★ 2026-11-10 用户口径「奉献改为3目标使用」：2 个目标不铺奉献，从审判开始。
         if tryConsecrate(3) then return true end
         if tryJudge() then return true end
+        -- ★★★ 2026-11-13：愤怒之锤（<20% 斩杀）插在审判之后、神圣打击之前：
+        --   审判仍是仇恨/嘲讽 backbone 第一位；目标进入斩杀线后，6 秒 CD 的
+        --   愤怒之锤尽快打出，加快击杀、减少小怪存活期间的输出窗口；
+        --   目标 ≥20% 时本分支整体跳过，多目标链行为与改动前完全一致。
+        if tryHammer() then return true end
         if tryHolyStrike() then return true end
         if tryExorcism() then return true end
         if tryHolyShield() then return true end
@@ -1717,6 +2040,13 @@ function WR_PaladinForeverProt()
             end
         end
 
+        -- 7.5 愤怒之锤（<20% 斩杀；本地 6 秒 CD）
+        --   ★ 2026-11-13 单体链衔接：方案 2 的「神圣打击 CD 好了永远优先」不动
+        --     （上面已先试），审判/神圣打击 Ready-first 也不动；愤怒之锤插在
+        --     它们之后、驱邪术之前——两个填充技能都在 CD 的间隙里尽快斩杀收尾，
+        --     30 码射程在近战位丢失时也够得着。
+        if tryHammer() then return true end
+
         -- 8. 驱邪术（亡灵/恶魔，30 码内；本地 15 秒 CD）
         if tryExorcism() then return true end
 
@@ -1737,11 +2067,12 @@ function WR_PaladinForeverProt()
         if tryHolyShield() then return true end
     end
 
-    -- 11. 愤怒之锤（<20% 斩杀；本地 6 秒 CD）
-    --   ★★ 2026-11-10：补射程门（30 码）。
-    if WR_SafeHPPct("target") < 0.20
-       and WR_PaladinForever_CanHitTarget("愤怒之锤", "target")
-       and WR_SpellUsable("愤怒之锤", true) then
+    -- 11. 愤怒之锤兜底（<20% 斩杀；本地 6 秒 CD）
+    --   ★★ 2026-11-13：已接入上面两条主链（多目标：审判之后；单体：Ready-first
+    --     之后、驱邪术之前）。这里保留为最后兜底——两条链全部不可用时
+    --     （例如插入流程占住审判、目标超近战位等）仍能完成斩杀收尾；
+    --     触发条件与主链完全一致（hammerEligible，含 FH_FNZC 开关/血量/射程/蓝量）。
+    if hammerEligible then
         if WR_PaladinForever_ShowSkillCD("愤怒之锤", 1, 6) then return true end
     end
 

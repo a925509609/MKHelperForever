@@ -6,11 +6,47 @@
 
 if WR_PlayerClass ~= "PALADIN" then return end
 
+-- ★★★ 2026-11-13 修复（奶骑自动焦点污染防骑）：
+--   Paladin_Macros.lua 是圣骑士三系共享的宏模板。奶骑自动焦点需要
+--   121-145 / 176-179 / 147 / 192 这 31 条「设焦点」宏在战斗中可执行；
+--   但防护/惩戒并不需要它们。若把共享宏全局解锁，防骑的共享祝福模块
+--   （Paladin_Blessing.lua）在直施失败回落焦点流程时点亮 176-179，
+--   AHK 按键就会真的 /focus 队友（历史 bug：ALT-SHIFT-PAGEUP → /focus party2）。
+--   因此这里按当前专精二选一注册：
+--     · 神圣：活跃版 [target=partyN/raidN]（奶骑自动焦点正常）；
+--     · 防护/惩戒：恢复 2026-11-08 安全版 [@partyN/raidN,...,nocombat]
+--       （跟随关闭时被 WR_ShouldGateFocusMacro 降级为空宏，战斗中也不执行）。
+local function WR_PaladinIsHolySpec()
+    local fn = WR_GetMyTalent
+    -- type(fn)=="userdata" 兼容离线夹具里的 Python 可调用对象（同 WR_PalBless_Fn 口径）
+    if type(fn) ~= "function" and type(fn) ~= "userdata" then return false end
+    local ok, spec = pcall(fn)
+    return ok and spec == "神圣"
+end
+
+local function WR_PaladinFocusText(token, kind)
+    local holy = WR_PaladinIsHolySpec()
+    if kind == "player" then
+        return holy and "/focus [@player]" or "/focus [@player,nocombat]"
+    elseif kind == "target" then
+        return holy and "/focus [@target,exists,nodead,help]"
+                    or "/focus [@target,exists,nodead,nocombat]"
+    end
+    if holy then
+        return "/focus [target=" .. token .. ",exists,nodead]"
+    end
+    return "/focus [@" .. token .. ",exists,nodead,nocombat]"
+end
+
 local function CreateClassesMacro()
     WR_CreateMacro("NUMPAD1", "/CAST 愤怒之锤") -- 1
     WR_CreateMacro("NUMPAD2", "/CAST 审判") -- 2
     WR_CreateMacro("NUMPAD3", "/CAST 十字军打击") -- 3
-    WR_CreateMacro("NUMPAD4", "") -- 4（原「神圣风暴」：本版本无此技能，已清理；键位与色块保留占位，供后续技能使用）
+    -- ★ 2026-11-13：槽 4 由空占位改为「光之守夜」（神圣骑 Holy 天赋技能）。
+    --   原注释「本版本无此技能，已清理」指的是神圣风暴；无限服确实没有神圣风暴，
+    --   但 Holy 天赋给的是「光之守夜」，两者不冲突。
+    --   宏写成两段：焦点优先（治疗目标模型一致），无焦点时退回当前目标。
+    WR_CreateMacro("NUMPAD4", "/cast [@focus,help,nodead] 光之守夜; 光之守夜") -- 4（神圣骑：光之守夜）
     WR_CreateMacro("NUMPAD5", "/CAST 奉献") -- 5
     WR_CreateMacro("NUMPAD6", "/CAST 驱邪术") -- 6
     WR_CreateMacro("NUMPAD7", "/CAST 神圣愤怒") -- 7
@@ -177,36 +213,46 @@ local function CreateClassesMacro()
     WR_CreateMacro("ALT-CTRL-SHIFT-=", "/target 凯雷塞斯王子") -- 118
     WR_CreateMacro("CTRL-SHIFT-=", "/target 塔达拉姆王子") -- 119
     WR_CreateMacro("ALT-CTRL-=", "/target 瓦拉纳王子") -- 120
-    WR_CreateMacro("ALT-SHIFT-=", "/focus [@raid1,exists,nodead,nocombat]") -- 121
-    WR_CreateMacro("CTRL-=", "/focus [@raid2,exists,nodead,nocombat]") -- 122
-    WR_CreateMacro("SHIFT-=", "/focus [@raid3,exists,nodead,nocombat]") -- 123
-    WR_CreateMacro("ALT-=", "/focus [@raid4,exists,nodead,nocombat]") -- 124
-    WR_CreateMacro("ALT-CTRL-SHIFT-[", "/focus [@raid5,exists,nodead,nocombat]") -- 125
-    WR_CreateMacro("CTRL-SHIFT-[", "/focus [@raid6,exists,nodead,nocombat]") -- 126
-    WR_CreateMacro("ALT-CTRL-[", "/focus [@raid7,exists,nodead,nocombat]") -- 127
-    WR_CreateMacro("ALT-SHIFT-[", "/focus [@raid8,exists,nodead,nocombat]") -- 128
-    WR_CreateMacro("CTRL-[", "/focus [@raid9,exists,nodead,nocombat]") -- 129
-    WR_CreateMacro("SHIFT-[", "/focus [@raid10,exists,nodead,nocombat]") -- 130
-    WR_CreateMacro("ALT-[", "/focus [@raid11,exists,nodead,nocombat]") -- 131
-    WR_CreateMacro("ALT-CTRL-SHIFT-]", "/focus [@raid12,exists,nodead,nocombat]") -- 132
-    WR_CreateMacro("CTRL-SHIFT-]", "/focus [@raid13,exists,nodead,nocombat]") -- 133
-    WR_CreateMacro("ALT-CTRL-]", "/focus [@raid14,exists,nodead,nocombat]") -- 134
-    WR_CreateMacro("ALT-SHIFT-]", "/focus [@raid15,exists,nodead,nocombat]") -- 135
-    WR_CreateMacro("CTRL-]", "/focus [@raid16,exists,nodead,nocombat]") -- 136
-    WR_CreateMacro("SHIFT-]", "/focus [@raid17,exists,nodead,nocombat]") -- 137
-    WR_CreateMacro("ALT-]", "/focus [@raid18,exists,nodead,nocombat]") -- 138
-    WR_CreateMacro("ALT-CTRL-SHIFT-\\", "/focus [@raid19,exists,nodead,nocombat]") -- 139
-    WR_CreateMacro("CTRL-SHIFT-\\", "/focus [@raid20,exists,nodead,nocombat]") -- 140
-    WR_CreateMacro("ALT-CTRL-\\", "/focus [@raid21,exists,nodead,nocombat]") -- 141
-    WR_CreateMacro("ALT-SHIFT-\\", "/focus [@raid22,exists,nodead,nocombat]") -- 142
-    WR_CreateMacro("CTRL-\\", "/focus [@raid23,exists,nodead,nocombat]") -- 143
-    WR_CreateMacro("SHIFT-\\", "/focus [@raid24,exists,nodead,nocombat]") -- 144
-    WR_CreateMacro("ALT-\\", "/focus [@raid25,exists,nodead,nocombat]") -- 145
+    -- ★★★ 2026-11-13（修复：奶骑自动焦点污染防骑）：
+    --   以下 121-145 是**奶骑自动焦点专用**的 raid1-25 焦点宏，但本文件是三系共享模板。
+    --   必须按当前专精选择注册文本：
+    --     · 神圣：使用 [target=raidN]（不含 [@raid 字面量，不会被门控降级）→ 奶骑可用；
+    --     · 防护/惩戒：恢复 2026-11-08 的安全文本 [@raidN,exists,nodead,nocombat]
+    --       → 跟随关闭时被 Core/UI_ColorFrame.lua 的 WR_ShouldGateFocusMacro 降级为空宏，
+    --       战斗中 nocombat 也直接不执行 —— 共享祝福模块回落焦点流程也不会设焦点。
+    --   禁止再把 121-145 全局去 nocombat / 全局换成 [target=...]，否则防骑会被牵连。
+    WR_CreateMacro("ALT-SHIFT-=", WR_PaladinFocusText("raid1")) -- 121
+    WR_CreateMacro("CTRL-=", WR_PaladinFocusText("raid2")) -- 122
+    WR_CreateMacro("SHIFT-=", WR_PaladinFocusText("raid3")) -- 123
+    WR_CreateMacro("ALT-=", WR_PaladinFocusText("raid4")) -- 124
+    WR_CreateMacro("ALT-CTRL-SHIFT-[", WR_PaladinFocusText("raid5")) -- 125
+    WR_CreateMacro("CTRL-SHIFT-[", WR_PaladinFocusText("raid6")) -- 126
+    WR_CreateMacro("ALT-CTRL-[", WR_PaladinFocusText("raid7")) -- 127
+    WR_CreateMacro("ALT-SHIFT-[", WR_PaladinFocusText("raid8")) -- 128
+    WR_CreateMacro("CTRL-[", WR_PaladinFocusText("raid9")) -- 129
+    WR_CreateMacro("SHIFT-[", WR_PaladinFocusText("raid10")) -- 130
+    WR_CreateMacro("ALT-[", WR_PaladinFocusText("raid11")) -- 131
+    WR_CreateMacro("ALT-CTRL-SHIFT-]", WR_PaladinFocusText("raid12")) -- 132
+    WR_CreateMacro("CTRL-SHIFT-]", WR_PaladinFocusText("raid13")) -- 133
+    WR_CreateMacro("ALT-CTRL-]", WR_PaladinFocusText("raid14")) -- 134
+    WR_CreateMacro("ALT-SHIFT-]", WR_PaladinFocusText("raid15")) -- 135
+    WR_CreateMacro("CTRL-]", WR_PaladinFocusText("raid16")) -- 136
+    WR_CreateMacro("SHIFT-]", WR_PaladinFocusText("raid17")) -- 137
+    WR_CreateMacro("ALT-]", WR_PaladinFocusText("raid18")) -- 138
+    WR_CreateMacro("ALT-CTRL-SHIFT-F9", WR_PaladinFocusText("raid19")) -- 139
+    WR_CreateMacro("CTRL-SHIFT-F9", WR_PaladinFocusText("raid20")) -- 140
+    WR_CreateMacro("ALT-CTRL-F9", WR_PaladinFocusText("raid21")) -- 141
+    WR_CreateMacro("ALT-SHIFT-F9", WR_PaladinFocusText("raid22")) -- 142
+    WR_CreateMacro("CTRL-F9", WR_PaladinFocusText("raid23")) -- 143
+    WR_CreateMacro("SHIFT-F9", WR_PaladinFocusText("raid24")) -- 144
+    WR_CreateMacro("ALT-F9", WR_PaladinFocusText("raid25")) -- 145
     -- ★ 2026-11-08：三个「通用型」焦点宏加 nocombat 守卫
     --   这三条不指定具体队员（player/target/mouseover），最容易在战斗中被动触发；
     --   加 nocombat 后战斗中一律不执行，避免误把当前目标/鼠标指向设成焦点。
     WR_CreateMacro("ALT-CTRL-SHIFT-,", "/focus [@player,nocombat]") -- 146
-    WR_CreateMacro("CTRL-SHIFT-,", "/focus [@target,exists,nodead,nocombat]") -- 147
+    -- ★ 2026-11-13：奶骑自动焦点会点亮 147（权重最高的是当前目标时）。
+    --   仅神圣骑注册 help 活跃版；防护/惩戒恢复 nocombat 守卫（AHK 误发也不执行）。
+    WR_CreateMacro("CTRL-SHIFT-,", WR_PaladinFocusText("target", "target")) -- 147
     WR_CreateMacro("ALT-CTRL-,", "/focus [@mouseover,exists,nodead,nocombat]") -- 148
     WR_CreateMacro("ALT-SHIFT-,", "/cast [@focus] 救赎") -- 149
     WR_CreateMacro("CTRL-,", "/cast [@focus] 圣疗术") -- 150
@@ -235,15 +281,14 @@ local function CreateClassesMacro()
     WR_CreateMacro("ALT-INSERT", "/focus [@raid23target,exists,nodead,nocombat]") -- 173
     WR_CreateMacro("ALT-CTRL-SHIFT-PAGEUP", "/focus [@raid24target,exists,nodead,nocombat]") -- 174
     WR_CreateMacro("CTRL-SHIFT-PAGEUP", "/focus [@raid25target,exists,nodead,nocombat]") -- 175
-    -- ★★ 2026-11-08：这 4 个 partyN 焦点宏加 nocombat 守卫。
-    --   实证：AHK 在战斗中/脱战后连按 6 次 ALT-SHIFT-PAGEUP（=/focus party2），
-    --   而插件当时没有点亮任何焦点色块 → 属 AHK 主动误发键，把队伍第 2 名反复设成焦点。
-    --   注意：本文件在 Global_Macros.lua 之后加载，会**覆盖**同名键位的注册，
-    --   因此必须在这里也加守卫，否则改了 Global_Macros 也无效。
-    WR_CreateMacro("ALT-CTRL-PAGEUP", "/focus [@party1,exists,nodead,nocombat]") -- 176
-    WR_CreateMacro("ALT-SHIFT-PAGEUP", "/focus [@party2,exists,nodead,nocombat]") -- 177
-    WR_CreateMacro("CTRL-PAGEUP", "/focus [@party3,exists,nodead,nocombat]") -- 178
-    WR_CreateMacro("SHIFT-PAGEUP", "/focus [@party4,exists,nodead,nocombat]") -- 179
+    -- ★★ 2026-11-08 / 2026-11-13：party1-4 焦点宏按专精隔离。
+    --   历史实证：AHK 在战斗中/脱战后连按 6 次 ALT-SHIFT-PAGEUP（=/focus party2），
+    --   曾把队伍第 2 名反复设成焦点。奶骑自动焦点需要这 4 个槽，
+    --   但防护/惩戒必须恢复安全文本（否则共享祝福模块的焦点回落会再次触发）。
+    WR_CreateMacro("ALT-CTRL-PAGEUP", WR_PaladinFocusText("party1")) -- 176
+    WR_CreateMacro("ALT-SHIFT-PAGEUP", WR_PaladinFocusText("party2")) -- 177
+    WR_CreateMacro("CTRL-PAGEUP", WR_PaladinFocusText("party3")) -- 178
+    WR_CreateMacro("SHIFT-PAGEUP", WR_PaladinFocusText("party4")) -- 179
     WR_CreateMacro("ALT-PAGEUP", "/use 10") -- 180
     WR_CreateMacro("ALT-CTRL-SHIFT-PAGEDOWN", "/cast 血性狂怒\n/cast 狂暴\n/cast 狮心") -- 181
     WR_CreateMacro("CTRL-SHIFT-PAGEDOWN", "/use 13\n/use 14\n/cast 狮心") -- 182
@@ -256,7 +301,9 @@ local function CreateClassesMacro()
     WR_CreateMacro("ALT-CTRL-NUMPADDIVIDE", "/use 8") -- 189
     WR_CreateMacro("CTRL-NUMPADDIVIDE", "/startattack") -- 190
     WR_CreateMacro("ALT-NUMPADDIVIDE", "/cancelaura 保护之手\n/cancelaura 能量灌注\n/cancelaura 专注魔法") -- 191
-    WR_CreateMacro("ALT-CTRL-NUMPADMULTIPLY", "/focus [@player,nocombat]") -- 192
+    -- ★ 2026-11-13：奶骑自动焦点「最该治的是自己」时点亮此槽。
+    --   仅神圣骑注册活跃版；防护/惩戒保留 nocombat 守卫（原 2026-11-08 行为）。
+    WR_CreateMacro("ALT-CTRL-NUMPADMULTIPLY", WR_PaladinFocusText("player", "player")) -- 192
     WR_CreateMacro("CTRL-NUMPADMULTIPLY", "") -- 193
     WR_CreateMacro("ALT-NUMPADMULTIPLY", "") -- 194
     WR_CreateMacro("ALT-CTRL-NUMPADMINUS", "") -- 195
@@ -270,6 +317,9 @@ end
 local WR_EventFrame = CreateFrame("Frame")
 WR_EventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 WR_EventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- ★★★ 2026-11-13：切换专精后必须重注册整套宏（神圣 ↔ 防护/惩戒 的焦点宏文本不同）
+WR_EventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+WR_EventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 WR_EventFrame:SetScript("OnEvent", function(self, event, ...)
     if UnitClassBase("player") == "PALADIN" and not InCombatLockdown() then
         CreateClassesMacro()
@@ -337,7 +387,8 @@ WR_SkillColor["PALADIN"] = {
     --   循环里改为走 PigAlert 文字提示，彻底避免与跟随/焦点键位撞车。
     --   如需恢复色块提示，必须另选 ≥ 241 的空闲槽位并同步 AHK ColorMap。
     ["真理之声"] = nil,       -- 原 115（与旧「目标跟随」撞车）
-    ["光之守夜"] = nil,       -- 原 116（与旧「设置焦点」撞车）
+    -- ["光之守夜"] 原 116（与旧「设置焦点」撞车）→ 2026-11-13 已迁到空闲职业槽 4，
+    --   见本表末尾的 ["光之守夜"] = 4；此处留注释仅为保留「为什么原来不能用 116」的结论。
     ["迅捷审判"] = nil,       -- 原 117（与旧「焦点跟随」撞车）
     -- ★★★ 2026-11-10 修复：圣殿壁垒原写 118，注释说「118 无冲突」是错的。
     --   118 在本文件 :132 已绑定 /target 凯雷塞斯王子（纳克萨玛斯 BOSS）：
@@ -363,4 +414,22 @@ WR_SkillColor["PALADIN"] = {
     -- ★ 2026-11-09：智慧圣印（已学，可插入；回复法力）—— 与宏 ALT-SHIFT-F8 一致
     --   槽 108 颜色 0x892888 → AHK ColorMap "!+{F8}"，链路已核对一致
     ["智慧圣印"] = 108,
+    -- ★★★ 2026-11-13：神圣骑（奶骑）治疗目标槽位别名
+    -- ------------------------------------------------------------
+    -- 奶骑的治疗目标固定是焦点，但同一技能名在不同专精下要落不同按键：
+    --   · 「圣光闪现」10 = /CAST 圣光闪现（无目标限定，惩戒/防护语境）
+    --     → 奶骑必须走 109 = /cast [@focus] 圣光闪现，故用别名区分，不改原值，
+    --       避免动到惩戒与 SoD 分支的既有映射。
+    --   · 「圣疗术」48 = /cast [target=player] 圣疗术（自施，防护也在用）
+    --     → 奶骑救队友要走 150 = /cast [@focus] 圣疗术。
+    --   · 「清洁术」27 = /cast [target=targettarget] 清洁术（惩戒在用）
+    --     → 奶骑按用途拆成 43 自施 / 63 焦点 / 59 指向。
+    -- 这些别名只被 Paladin_Forever_Holy.lua 引用，其他专精不受影响。
+    ["圣光闪现(焦点)"] = 109,   -- 宏 ALT-SHIFT-F12
+    ["圣疗术(队友)"]   = 150,   -- 宏 CTRL-,
+    ["清洁术(自己)"]   = 43,    -- 宏 SHIFT-F3
+    ["清洁术(目标)"]   = 44,    -- 宏 SHIFT-F11
+    ["清洁术(焦点)"]   = 63,    -- 宏 ALT-CTRL-F3
+    ["清洁术(指向)"]   = 59,    -- 宏 CTRL-F12
+    ["光之守夜"]       = 4,     -- 宏 NUMPAD4（2026-11-13 由空占位改为光之守夜）
 }

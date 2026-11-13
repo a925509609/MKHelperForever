@@ -80,7 +80,7 @@ Paladin_Menu = {
                     { text = "|cffF58CBA指向|r" },
                     { text = "|cffF58CBA禁用|r" },
                 },
-                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r",
+                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r\n|cffff5040（清洁术只能驱散中毒/疾病/魔法，不能解诅咒）|r",
                 saveVariable = "CJ_QJS",
                 defaultID = 5
             },
@@ -174,7 +174,7 @@ Paladin_Menu = {
                     { text = "|cffF58CBA指向|r" },
                     { text = "|cffF58CBA禁用|r" },
                 },
-                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r",
+                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r\n|cffff5040（清洁术只能驱散中毒/疾病/魔法，不能解诅咒）|r",
                 saveVariable = "FH_QJS",
                 defaultID = 5
             },
@@ -264,6 +264,8 @@ Paladin_Menu = {
             { row = 1, column = 3, IconID = 135970, text = "|cffF58CBA智慧审判|r", tooltipText = "智慧审判|cff00adf0 buff 维持开关|r（智慧圣印，宏 ALT-SHIFT-F8 / 颜色槽 108）\n\n|cffaaffaa勾选后一直生效（不会自动取消）：|r\n1. 平时维持面板「圣印」专区所选常驻圣印（仇恨/嘲讽来源不断档）\n2. |cff00adf0审判 CD 只剩 2 秒（含已就绪）|r 且目标没有「智慧审判」debuff 时，才切智慧圣印 → 提示|cff00adf0审判|r 挂 debuff（攻击/法术有几率回蓝）\n3. 目标已有「智慧审判」debuff 时，自动提示切回当前常驻圣印\n4. 智慧审判持续 40 秒，到期后重新等下一个「审判 CD ≤2 秒」窗口\n\n|cffff5040注意|r：圣印同一时间只能有一个，切智慧会暂时顶掉常驻圣印（仇恨/嘲讽来源），\n|cffaaffaa切印时机已修正|r：不再一勾选就切印干等审判 CD，只在审判快好时才切；\n与「光明圣印」「十字军审判」开关互斥（同时只能开一个），\n但可与「圣印」专区所选圣印共存（常驻已选智慧圣印时同样有效）。\n未学会智慧圣印或审判时自动跳过，不影响循环。", saveVariable = "FH_ZHSP", section = "审判buff", defaultState = false, exclusiveGroup = "PAL_PROT_JUDGEMENT_SEAL" },
             -- ★ 2026-11-08：神圣之盾开关（常驻；默认开 = 保持原有行为）
             { row = 7, column = 1, IconID = 135880, text = "|cffF58CBA神圣之盾|r", tooltipText = "开启后，防护循环会在|cff00adf0神圣之盾|r冷却好时提示施放（防护核心减伤/仇恨）。\n\n|cffaaffaa默认勾选|r，与加入此开关之前的行为一致。\n关闭后循环不再提示神圣之盾，适合想手动控制、或该技能浪费蓝量时。\n未学会神圣之盾时不会提示（与开关无关）。", saveVariable = "FH_SZS", defaultState = true },
+            -- ★★ 2026-11-13：愤怒之锤斩杀开关（默认开 = 目标 <20% 自动收尾）
+            { row = 7, column = 2, IconID = 132326, text = "|cffF58CBA愤怒之锤|r", tooltipText = "开启后，目标进入|cff00adf0斩杀期|r时自动提示|cff00adf0愤怒之锤|r斩杀收尾（30 码，宏 NUMPAD1 / 颜色槽 1，本地 6 秒 CD，读条 0.87 秒，耗蓝 295）。\n\n|cffaaffaa触发条件：|r面板开关开 + 目标进入斩杀期（本服隐藏目标血量：血量可读时按 <20%，不可读时按客户端「愤怒之锤可用」判定，等价于生命 <20%）+ 目标可攻击且存活 + 30 码内 + 冷却转好 + 蓝量 ≥20%（低于 20% 不点亮，防止斩杀读条拖垮资源）。\n\n|cffaaffaa优先级衔接：|r多目标链：奉献（≥3 目标）→ 审判 → 愤怒之锤 → 神圣打击 → 驱邪术 → 神圣之盾；\n单体链：神圣打击（CD 好永远优先）→ 审判/神圣打击 Ready-first → 愤怒之锤 → 驱邪术 → 奉献 → 神圣之盾。\n\n|cffaaffaa读条保护：|r读条 0.87 秒 + 提示保持 1.5 秒窗口内整条循环让路，其它技能色块不会覆盖打断（打断 = 白烧 295 蓝零收益）。\n\n|cffff5040关闭后|r：主链与兜底环节都不再提示愤怒之锤。", saveVariable = "FH_FNZC", defaultState = true },
 
             -- ==========================================================
             -- ★★ 2026-11-11：圣印专区（按钮，可折叠；位于「审判buff」专区下方）
@@ -300,7 +302,7 @@ Paladin_Menu = {
                     { text = "|cffF58CBA指向|r" },
                     { text = "|cffF58CBA禁用|r" },
                 },
-                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r",
+                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r\n|cffff5040（清洁术只能驱散中毒/疾病/魔法，不能解诅咒）|r",
                 saveVariable = "SS_QJS",
                 defaultID = 2
             },

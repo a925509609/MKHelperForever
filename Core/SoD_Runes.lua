@@ -299,17 +299,27 @@ function WR_SoD_BeginTick()
     WR_SoD_TickSeq = (WR_SoD_TickSeq or 0) + 1
 end
 
--- 本 tick 没有任何提示点亮时，把「上一 tick 残留且现在资源不足」的色块熄灭。
+-- 资源不足色块的统一收口：
+--   force=false → 每 tick 收尾清扫（MainLoop 调用）：本轮没点亮任何色块时，
+--                 把「上一 tick 残留且现在资源不足」的色块熄灭；
+--   force=true  → 资源变化事件立即刷新（2026-11-13）：跳过「本轮已亮过」短路 ——
+--                 蓝量在点亮之后又被其它动作吃掉时，本 tick 刚亮的色块同样要
+--                 立即熄灭，tick 间隙里 AHK 仍会读色按键，等下一个 tick 就是空按。
 -- 只处理资源不足这一种情形：其它原因（CD 中 / 无目标 / 脱战）各有自己的
 -- ClearStalePrompts / HideSkillLater 机制，不在总闸层擅自扩大改动面。
-function WR_SoD_SweepPowerBlocked()
-    if WR_SoD_ShownTick == WR_SoD_TickSeq then return false end   -- 本轮亮过，交给正常覆盖
+function WR_SoD_RefreshPowerBlocks(force)
+    if not force and WR_SoD_ShownTick == WR_SoD_TickSeq then return false end   -- 本轮亮过，交给正常覆盖
     local name = WR_SoD_ShownSkill
     if type(name) ~= "string" or name == "" then return false end
     if not WR_SoD_NotEnoughPower(name) then return false end
     WR_HideSkillColorSlot(name, nil)
     WR_SoD_ShownSkill = nil
     return true
+end
+
+-- 每 tick 收尾清扫（保持旧签名，MainLoop 的调用点不变）
+function WR_SoD_SweepPowerBlocked()
+    return WR_SoD_RefreshPowerBlocks(false)
 end
 
 -- 该技能此刻是否「资源不足」→ true 表示必须不亮（并熄灭残留色块）
@@ -419,6 +429,45 @@ do
             if type(name) ~= "string" or name == "" then return end
             WR_SoD_PowerBlocked[name] = GetTime() + WR_SoD_POWER_BLOCK_SEC
             WR_HideSkillColorSlot(name, nil)
+        end)
+    end
+end
+
+-- ============================================================
+-- ★★★ 2026-11-13 用户口径「确保在蓝量变化、技能消耗变化或相关状态更新时，
+--   及时刷新所有技能色块的显示」—— 资源变化事件驱动的立即刷新层。
+-- ------------------------------------------------------------
+-- 色块的亮/灭判定本来就每 tick 重算（0.1 秒），事件层补的是 tick 间隙：
+--   · 蓝量下降 → 此刻亮着的技能已经付不起 → 立即熄灭（AHK 在 tick 间隙也在
+--     读色按键，等下一个 tick 就是一到两次空按）；
+--   · 蓝量回升 → 判定自然放行，下一 tick 循环照常重新点亮；事件层绝不做
+--     「主动点亮」，点亮权始终在职业循环手里（与总闸「宁灭不误亮」口径一致）。
+-- 事件名按客户端代际并集注册（注册不存在的 event 新客户端会抛错，所以逐个
+-- pcall）：UNIT_POWER_UPDATE（新）/ UNIT_POWER（中间代）/ UNIT_MANA /
+-- UNIT_RAGE / UNIT_ENERGY（经典）。
+-- 事件带 unitToken 时只关心玩家自己的资源变化；战斗中资源读不到（secret）
+-- 时判定自动放行，不会误灭 —— 与总闸「宁可少判不可误挡」口径一致。
+-- ============================================================
+do
+    local POWER_EVENTS = {
+        "UNIT_POWER_UPDATE", "UNIT_POWER", "UNIT_MANA", "UNIT_RAGE", "UNIT_ENERGY",
+    }
+    local frame = CreateFrame("Frame")
+    if frame and frame.RegisterEvent then
+        for i = 1, #POWER_EVENTS do
+            pcall(frame.RegisterEvent, frame, POWER_EVENTS[i])
+        end
+        frame:SetScript("OnEvent", function(_, event, unit)
+            if unit ~= nil and unit ~= "player" then return end
+            -- 立即失效「当前资源」的 0.05 秒帧缓存：事件已证明资源变了，缓存里
+            -- 的旧读数不能再喂给判定（冻结时钟的离线夹具也依赖这一步生效）。
+            if type(WR_Forever_PowerNowCache) == "table" then
+                for k in pairs(WR_Forever_PowerNowCache) do
+                    WR_Forever_PowerNowCache[k] = nil
+                end
+            end
+            -- force=true：本 tick 刚点亮的色块同样复查（点亮之后蓝被吃掉的情况）
+            WR_SoD_RefreshPowerBlocks(true)
         end)
     end
 end

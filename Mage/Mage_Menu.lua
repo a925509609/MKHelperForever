@@ -216,7 +216,7 @@ Mage_Menu = {
     CB = {
       { row = 1, column = 1, IconID = 136082, text = "|cff69CCF0全局|r", tooltipText = "对被|cff00adf0麻痹诅咒|r或者|cff00adf0MC1老1诅咒|r的队友使用|cff00adf0解除诅咒|r\n", saveVariable = "BF_JCZZ", defaultState = true },
       { row = 1, column = 2, IconID = 135729, text = "|cff69CCF0全局|r", tooltipText = "自动|cff00adf0法术偷取|r", saveVariable = "BF_ZDFSTQ", defaultState = true },
-      { row = 1, column = 5, IconID = 135851, text = "|cff69CCF0智能\nAOE模式|r", tooltipText = "开启后 8 码内目标 ≥3 个时铺|cff00adf0暴风雪|r，≥2 个且贴身时打|cff00adf0冰锥术|r；\n没触发 AOE 条件时用|cff00adf0寒冰箭|r填充。", saveVariable = "BF_JZMODE", defaultState = true },
+      { row = 1, column = 5, IconID = 135851, text = "|cff69CCF0智能\nAOE模式|r", tooltipText = "开启后 8 码内目标 ≥3 个时铺|cff00adf0暴风雪|r（本开关只门控暴风雪）。\n|cff00adf0冰锥术|r按 10 秒 CD 在贴身 10 码内收尾（含单体，不受本开关控制，强化冰锥术 +35%、深冬之寒再 +20%）。\n其余情况用|cff00adf0寒冰箭|r填充。", saveVariable = "BF_JZMODE", defaultState = true },
       { row = 2, column = 1, IconID = 135994, text = "|cff69CCF0自动|r", tooltipText = "自动使用|cff00adf0镜像|r", saveVariable = "BF_ZDJX", defaultState = true },
       { row = 2, column = 2, IconID = 135838, text = "|cff69CCF0自动|r", tooltipText = "自动使用|cff00adf0冰冷血脉|r", saveVariable = "BF_BLXM", defaultState = true },
       { row = 2, column = 3, IconID = 236871, text = "|cff69CCF0自动|r", tooltipText = "使用|cff00adf0速度药水|r", saveVariable = "BF_ZDSDYS", section = "爆发", defaultState = false },

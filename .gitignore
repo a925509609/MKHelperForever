@@ -2,6 +2,7 @@
 .workbuddy/
 outputs/
 *.bak
+*.bak-*
 
 # 过时的阶段性计划文档（非代码）
 UpdatePlan_*.md

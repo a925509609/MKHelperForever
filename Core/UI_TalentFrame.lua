@@ -15,7 +15,10 @@ function WR_TalentFrame(Menu, Talent_Name, Talent_Id)
             TianFu_Text:SetPoint("TOP", WR_ClassMenuRegion or WR_ClassRegion or WR_ConfigFrame, "TOP", 0, -4)
         end
         for i = 1, 4 do
-            if Frame[i] then Frame[i]:Hide() end
+            if Frame[i] then
+                Frame[i]:Hide()
+                if Frame[i].menuBox and Frame[i].menuBox ~= Frame[i] then Frame[i].menuBox:Hide() end
+            end
         end
         return
     end
@@ -72,11 +75,14 @@ function WR_TalentFrame(Menu, Talent_Name, Talent_Id)
             if Frame[i] then
                 if i == Talent_Id then
                     Frame[i]:Show()
+                    -- ★ 2026-11-13：菜单容器独立于天赋 Frame，跟随当前专精显隐
+                    if Frame[i].menuBox and Frame[i].menuBox ~= Frame[i] then Frame[i].menuBox:Show() end
                     if type(WR_SetActiveTalentDropdowns) == "function" then
                         WR_SetActiveTalentDropdowns(Frame[i])
                     end
                 else
                     Frame[i]:Hide()
+                    if Frame[i].menuBox and Frame[i].menuBox ~= Frame[i] then Frame[i].menuBox:Hide() end
                 end
             end
         end

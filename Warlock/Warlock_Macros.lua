@@ -201,6 +201,10 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-NUMPADPLUS", "/cast 召唤地狱猎犬") -- 198  -- [BExt] 脱战自动召唤宠物
   WR_CreateMacro("CTRL-NUMPADPLUS", "") -- 199
   WR_CreateMacro("ALT-NUMPADPLUS", "") -- 200
+  -- ★ 2026-11-13 术士无限服循环新增槽位（键位经全表核对空闲）：
+  WR_CreateMacro("ALT-CTRL-SHIFT-NUMPAD2", "/cast 折磨") -- 91
+  WR_CreateMacro("ALT-CTRL-SHIFT-NUMPAD3", "/cast 灼热之痛") -- 92
+  WR_CreateMacro("ALT-CTRL-SHIFT-NUMPAD4", "/cast 恶魔皮肤") -- 93
 end
 
 local WR_EventFrame = CreateFrame("Frame")
@@ -244,4 +248,19 @@ WR_SkillColor["WARLOCK"] = {
     ["灵魂链接"] = 307,
     ["暗影灼烧"] = 308,
     ["浩劫诅咒"] = 309,
+    -- ★ 2026-11-13 新循环登记（槽位与上方宏一一对应；1/9/25/35/40/76/77/86/190 复用现有宏）
+    ["折磨"] = 91,
+    ["灼热之痛"] = 92,
+    ["恶魔皮肤"] = 93,
+    ["邪甲术"] = 1,
+    ["魔甲术"] = 9,
+    ["吸取生命"] = 86,
+    ["火焰之雨"] = 76,
+    ["地狱烈焰"] = 77,
+    ["地狱火"] = 25,
+    ["灵魂碎裂"] = 40,
+    ["魔杖射击"] = 190,
+    ["邪能治疗石"] = 35,
+    ["宠物攻击"] = 30,
+    ["切目标"] = 56,
 }

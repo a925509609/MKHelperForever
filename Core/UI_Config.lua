@@ -75,6 +75,10 @@ local SECTION_COLLAPSE_KEYS = {
     ["审判buff"] = "FH_JUDGEMENT_BUFF_SECTION_COLLAPSED",
     ["圣印"] = "FH_SEAL_SECTION_COLLAPSED",
     ["插入"] = "FH_INSERT_SECTION_COLLAPSED",
+    -- ★ 2026-11-13：主面板左右两个顶层分区也支持折叠
+    --   用户口径：「目前全局，设置无法折叠，全局折叠向右」→ 标题条右侧显示折叠符，点击折叠/展开。
+    ["全局"] = "UI_GLOBAL_SECTION_COLLAPSED",
+    ["设置"] = "UI_SETTINGS_SECTION_COLLAPSED",
 }
 
 -- ★ 宏索引缓存（避免重复查找）
@@ -164,8 +168,11 @@ local function ApplyDropdownDisplayText(dropdown, text, boxW)
         nativeText:SetJustifyH("LEFT")
         nativeText:SetText(text)
         -- 使用 STANDARD_TEXT_FONT 彻底避免 UIDropDownMenuTemplate 原生阴影
-        nativeText:SetFont(STANDARD_TEXT_FONT, 14, "")
-        nativeText:SetTextColor(classColor.r, classColor.g, classColor.b)
+        nativeText:SetFont(STANDARD_TEXT_FONT, 13, "")
+        do
+            local pal_nativeText = WR_UI_P()
+            nativeText:SetTextColor(pal_nativeText.text[1], pal_nativeText.text[2], pal_nativeText.text[3], 1)
+        end
         nativeText:SetAlpha(1)
         nativeText:Show()
     end
@@ -197,81 +204,69 @@ local function HideIconGlow(iconFrame, iconTexture)
     if iconFrame.procGlow then iconFrame.procGlow:Hide() end
     if iconFrame.procShine then iconFrame.procShine:Hide() end
     if iconFrame.procAnim then iconFrame.procAnim:Stop() end
-    if iconTexture then iconTexture:SetAlpha(0.8) end
+    if iconTexture then iconTexture:SetAlpha(0.3) end
 end
 
 -- 更新复选框的高亮/光环（根据是否选中）
+-- ★ 2026-11-13 UI 现代化：金色四角光芒 + 旋转星辉 → 扁平 1px 职业色描边框。
+--   交互逻辑（勾选/取消/互斥/同步）完全不变，仅视觉表现收敛为静态描边，
+--   动画组不再创建（保留 glowFrame 字段名兼容旧引用）。
 local function UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
     local checked = checkbox:GetChecked()
     local iconSize = iconFrame:GetWidth() or ICON_BASE_SIZE
     local pad = math.max(2, iconSize * 0.1)
+    local classColor = RAID_CLASS_COLORS[playerClass] or { r = 1, g = 0.82, b = 0 }
+    local pal = WR_UI_P()
 
     if checked then
-        -- 如果选中且高亮框架未创建，则创建
         if not iconFrame.glowFrame then
             local glowFrame = CreateFrame("Frame", nil, iconFrame)
             glowFrame:SetFrameLevel(iconFrame:GetFrameLevel() + 3)
             iconFrame.glowFrame = glowFrame
 
-            -- 四角光芒纹理
-            local corners = glowFrame:CreateTexture(nil, "ARTWORK")
-            corners:SetTexture("Interface\\Buttons\\UI-AutoCastableOverlay")
-            corners:SetTexCoord(0.19, 0.81, 0.19, 0.81)
-            corners:SetBlendMode("ADD")
-            corners:SetVertexColor(1, 0.82, 0.15, 1)   -- 金色
-            iconFrame.glowCorners = corners
-
-            -- 旋转星辉纹理
-            local spin = glowFrame:CreateTexture(nil, "OVERLAY")
-            spin:SetTexture("Interface\\Cooldown\\star4")
-            spin:SetBlendMode("ADD")
-            spin:SetVertexColor(1, 0.78, 0.12, 0.42)
-            iconFrame.glowSpin = spin
-
-            -- 旋转动画组
-            local agRot = glowFrame:CreateAnimationGroup()
-            agRot:SetLooping("REPEAT")
-            local rot = agRot:CreateAnimation("Rotation")
-            rot:SetTarget(spin)
-            rot:SetOrigin("CENTER", 0, 0)
-            rot:SetDegrees(360)
-            rot:SetDuration(2.6)
-            iconFrame.glowRotate = agRot
-
-            -- 呼吸脉冲动画组
-            local agPulse = glowFrame:CreateAnimationGroup()
-            agPulse:SetLooping("BOUNCE")
-            local pulse = agPulse:CreateAnimation("Alpha")
-            pulse:SetTarget(corners)
-            pulse:SetFromAlpha(0.4)
-            pulse:SetToAlpha(1)
-            pulse:SetDuration(0.7)
-            pulse:SetSmoothing("IN_OUT")
-            iconFrame.glowPulse = agPulse
+            -- 扁平描边：四条 1px 边组成方框（勾选态用职业色，未选中态用弱灰）
+            glowFrame.edges = {}
+            for i = 1, 4 do
+                local t = glowFrame:CreateTexture(nil, "OVERLAY")
+                t:SetTexture("Interface\\Buttons\\WHITE8x8")
+                glowFrame.edges[i] = t
+            end
+            local ed = glowFrame.edges
+            ed[1]:SetPoint("TOPLEFT", glowFrame, "TOPLEFT", 0, 0)
+            ed[1]:SetPoint("TOPRIGHT", glowFrame, "TOPRIGHT", 0, 0)
+            ed[1]:SetHeight(1)          -- top
+            ed[2]:SetPoint("BOTTOMLEFT", glowFrame, "BOTTOMLEFT", 0, 0)
+            ed[2]:SetPoint("BOTTOMRIGHT", glowFrame, "BOTTOMRIGHT", 0, 0)
+            ed[2]:SetHeight(1)          -- bottom
+            ed[3]:SetPoint("TOPLEFT", glowFrame, "TOPLEFT", 0, 0)
+            ed[3]:SetPoint("BOTTOMLEFT", glowFrame, "BOTTOMLEFT", 0, 0)
+            ed[3]:SetWidth(1)           -- left
+            ed[4]:SetPoint("TOPRIGHT", glowFrame, "TOPRIGHT", 0, 0)
+            ed[4]:SetPoint("BOTTOMRIGHT", glowFrame, "BOTTOMRIGHT", 0, 0)
+            ed[4]:SetWidth(1)           -- right
+            for _, t in ipairs(ed) do t:SetVertexColor(classColor.r, classColor.g, classColor.b, 0.95) end
         end
 
         -- 设置高亮框架的位置和大小
         iconFrame.glowFrame:ClearAllPoints()
         iconFrame.glowFrame:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", -pad, pad)
         iconFrame.glowFrame:SetPoint("BOTTOMRIGHT", iconFrame, "BOTTOMRIGHT", pad, -pad)
-        iconFrame.glowCorners:SetAllPoints(iconFrame.glowFrame)
-        iconFrame.glowSpin:SetAllPoints(iconFrame.glowFrame)
         iconFrame.glowFrame:Show()
 
-        -- 播放动画（如果未播放）
-        if iconFrame.glowRotate and not iconFrame.glowRotate:IsPlaying() then
-            iconFrame.glowRotate:Play()
+        -- 勾选态：图标保持彩色亮度 + 图标框描边转职业色
+        iconTexture:SetAlpha(0.9)
+        iconTexture:SetVertexColor(1, 1, 1)
+        if iconFrame.SetBackdropBorderColor and iconFrame.WR_hasBackdrop then
+            iconFrame:SetBackdropBorderColor(classColor.r, classColor.g, classColor.b, 0.95)
         end
-        if iconFrame.glowPulse and not iconFrame.glowPulse:IsPlaying() then
-            iconFrame.glowPulse:Play()
-        end
-        iconTexture:SetAlpha(0.8)                 -- 勾选 alpha 0.8（ZZHELPER 勾选态 0.8 / 0.3）
-        iconTexture:SetVertexColor(1, 1, 1)   -- 恢复彩色
     else
-        -- 未选中：隐藏高亮光环，图标降低透明度（ZZHELPER 方案：alpha 0.3，保持彩色不置灰）
+        -- 未选中：隐藏描边框，图标降低透明度（保持彩色不置灰）
         HideIconGlow(iconFrame, iconTexture)
-        iconTexture:SetVertexColor(1, 1, 1)   -- 保持彩色（ZZHELPER：仅调透明度，不置灰）
-        iconTexture:SetAlpha(0.3)             -- 未勾选 alpha 0.3（ZZHELPER 勾选态 0.8 / 0.3）
+        iconTexture:SetVertexColor(1, 1, 1)
+        iconTexture:SetAlpha(0.3)
+        if iconFrame.SetBackdropBorderColor and iconFrame.WR_hasBackdrop then
+            iconFrame:SetBackdropBorderColor(pal.dim[1], pal.dim[2], pal.dim[3], pal.dim[4])
+        end
     end
 end
 
@@ -662,8 +657,63 @@ function WR_ApplyIconScale()
     end
 end
 
+-- ============================================================
+-- ★ 2026-11-13：主面板顶层分区折叠（全局 / 设置）
+-- ------------------------------------------------------------
+-- 用户口径：「目前全局，设置无法折叠，全局折叠向右」。
+-- 「全局」：标题条右侧折叠符可点击，折叠时隐藏左区全部控件（标题保留），
+--           左区高度收缩到仅容纳标题条；
+-- 「设置」：标题条右侧折叠符可点击，折叠时隐藏右区下拉/滑块/按钮与天赋标题，
+--           图标网格紧贴「设置」标题条下方。
+-- ============================================================
+function WR_LayoutGlobal()
+    local region = WR_GlobalRegion
+    if not region then return end
+    local header = region.header
+    if header then header:Show() end
+    local collapsed = (PigSet["UI_GLOBAL_SECTION_COLLAPSED"] == true)
+    local widgets = region.contentWidgets
+    if not widgets then
+        widgets = {}
+        for _, child in ipairs({region:GetChildren()}) do
+            if child ~= header then table.insert(widgets, child) end
+        end
+        for _, textRegion in ipairs({region:GetRegions()}) do table.insert(widgets, textRegion) end
+        region.contentWidgets = widgets
+    end
+    for _, widget in ipairs(widgets) do
+        if collapsed then widget:Hide() else widget:Show() end
+    end
+end
+
+function WR_ApplySettingsCollapse(shownFrame, collapsed)
+    -- ★ 2026-11-13 修复：菜单控件独立容器统一显隐，避免逐个 widget 被旧状态残留、
+    --   或随天赋 Frame 的显隐被连带隐藏，导致「设置」区整片空白。
+    if shownFrame and shownFrame.menuBox and shownFrame.menuBox ~= shownFrame then
+        if collapsed then shownFrame.menuBox:Hide() else shownFrame.menuBox:Show() end
+    end
+    if shownFrame then
+        -- 兼容：menuBox 上线前创建的面板或旧存档，仍按清单逐个恢复
+        if not shownFrame.menuWidgets then shownFrame.menuWidgets = {} end
+        if #shownFrame.menuWidgets == 0 then
+            for _, widget in pairs(shownFrame.dmLabels or {}) do table.insert(shownFrame.menuWidgets, widget) end
+            for _, widget in pairs(shownFrame.dmDropdowns or {}) do table.insert(shownFrame.menuWidgets, widget) end
+            for _, widget in ipairs(shownFrame.menuButtons or {}) do table.insert(shownFrame.menuWidgets, widget) end
+        end
+        for _, widget in ipairs(shownFrame.menuWidgets) do
+            if collapsed then widget:Hide() else widget:Show() end
+        end
+    end
+    local tianFuText = (WR_ConfigFrame and WR_ConfigFrame.tianFuText) or _G.TianFu_Text
+    if tianFuText then
+        if collapsed then tianFuText:Hide() else tianFuText:Show() end
+    end
+end
+
 -- 刷新配置界面（外部调用）
 function WR_RefreshConfigUI()
+    -- ★ 2026-11-13：先应用「全局」分区折叠（显隐左区全部控件），再重排面板尺寸
+    if WR_LayoutGlobal then WR_LayoutGlobal() end
     if WR_ApplyIconScale then
         WR_ApplyIconScale()
     elseif WR_LayoutConfigFrame then
@@ -861,8 +911,13 @@ function WR_LayoutConfigFrame()
     --   （旧公式 MENU_TITLE_H+(dmCount+1)*MENU_ROW_H = 54+dmCount*32，低估 12px）
     -- 先按「网格 + 分节标题」测算图标区像素高度（doLayout=false 仅测量）
     local iconPixelH = WR_LayoutTalentCheckboxes(shownFrame, rightW, false)
-    -- ★ 2026-08-21：取消全部折叠功能，右区菜单区（下拉框/滑块）始终显示
-    local menuRegionH = MENU_TOP_PAD + (math.max(0, dmCount) + 2) * MENU_ROW_H + MENU_BOTTOM_PAD
+    -- ★ 2026-11-13：右区「设置」分区折叠（用户口径：设置无法折叠）
+    --   折叠时菜单区高度归零，下拉/滑块全部隐藏，图标区紧贴「设置」标题条下方。
+    local settingsCollapsed = (PigSet["UI_SETTINGS_SECTION_COLLAPSED"] == true)
+    local menuRegionH = 0
+    if not settingsCollapsed then
+        menuRegionH = MENU_TOP_PAD + (math.max(0, dmCount) + 2) * MENU_ROW_H + MENU_BOTTOM_PAD
+    end
     local iconRegionH = math.max(ICON_REGION_MIN_H, iconPixelH + ICON_REGION_TOP_PAD + ICON_REGION_BOTTOM_PAD)
     -- 右区内容高度：始终为 settings 标题条预留 SECTION_HEADER_H
     local rightContentH = (menuRegionH + iconRegionH) + SECTION_HEADER_H
@@ -870,10 +925,12 @@ function WR_LayoutConfigFrame()
     -- 左区内容高度（下限）：由左侧控件链实际深度决定。
     -- ★ 2026-11-11：删除全局区 AOE 分类后，整条控件链上移约 86px；
     -- ★ 2026-11-12：又删除「倒数偷药」复选框，链再上移约 26px。
-    --   实测链（globalRegion 顶向下）：调试模式→自动救人→偷药时间滑块→爆发总闸→
+    --   实测链（globalRegion 顶向下）：调试模式→自动救人→偷药时间滑块→
     --   启用怪物屏蔽→职业屏蔽标题→近战/远程/坦克屏蔽→开关提示→图标缩放滑块→窗口透明度滑块
     --   →自动跟随复选框→跟随目标下拉（最深控件）。真实深度≈594px，仍取 660（余量约 66px）。
-    local leftContentH = 660
+    -- ★ 2026-11-13：「全局」分区折叠时左区只剩标题条，高度同步收缩。
+    local globalCollapsed = (PigSet["UI_GLOBAL_SECTION_COLLAPSED"] == true)
+    local leftContentH = globalCollapsed and SECTION_HEADER_H or 660
     local frameHeight = TOP_BAR_H + math.max(leftContentH, rightContentH)
     -- 限制最大默认高度，防止超高职业撑爆屏幕
     if not PigSet["FrameUserSized"] then
@@ -883,7 +940,12 @@ function WR_LayoutConfigFrame()
             local maxRightContentH = MAX_FRAME_HEIGHT - TOP_BAR_H
             local availableForMenuIcon = math.max(MENU_TITLE_H + ICON_REGION_MIN_H, maxRightContentH)
             iconRegionH = math.max(ICON_REGION_MIN_H, math.min(iconRegionH, availableForMenuIcon * 0.80))
-            menuRegionH = availableForMenuIcon - iconRegionH
+            -- ★ 2026-11-13 修复：设置已折叠时不能再把 menuRegionH 抬回正数（否则菜单区留一大片空白）
+            if settingsCollapsed then
+                menuRegionH = 0
+            else
+                menuRegionH = availableForMenuIcon - iconRegionH
+            end
             rightContentH = menuRegionH + iconRegionH
         end
     end
@@ -893,7 +955,9 @@ function WR_LayoutConfigFrame()
     FrameWide = frameWidth
     PigSet["FrameWide"] = frameWidth
 
-    if PigSet["FrameUserSized"] and not PigSet["_IconScaleCommit"] then
+    -- ★ 2026-11-13：顶层「全局/设置」折叠属于用户主动收缩，应突破 FrameUserSized 的"只增不减"锁定。
+    local forceShrink = PigSet["_IconScaleCommit"] or settingsCollapsed or globalCollapsed
+    if PigSet["FrameUserSized"] and not forceShrink then
         -- ★ 2026-08-21：用户手动拖拽改过窗口尺寸时，默认"只增不减"锁定高度，
         --   防止切换专精（图标变少）时把用户拉大的窗口自动压回去。
         --   但图标缩放定稿（_IconScaleCommit=true）属于用户主动的尺寸变化，应突破锁定、自由跟随缩小/放大。
@@ -910,7 +974,12 @@ function WR_LayoutConfigFrame()
     -- ★ 2026-08-21 修复：图标区由「贴右框架底边」改为「紧贴菜单区下方」，
     --   避免右框架高度被左区撑高时，整块「自动/爆发/插入」复选框被甩到右框架最底沿（中间留大段空档、像脱离框架/被底边切掉）。
     --   空档统一留到右框架底部，复选框紧跟下拉框，定位更直观也远离屏幕底边。
-    if WR_ClassMenuRegion then WR_ClassMenuRegion:Show() end
+    if WR_ClassMenuRegion then
+        WR_ClassMenuRegion:Show()
+        WR_ClassMenuRegion:SetHeight(menuRegionH)
+    end
+    -- ★ 2026-11-13：「设置」折叠时隐藏菜单控件与天赋标题；图标区锚在菜单区下方，自然上移。
+    WR_ApplySettingsCollapse(shownFrame, settingsCollapsed)
     if WR_ClassIconRegion then
         WR_ClassIconRegion:ClearAllPoints()
         WR_ClassIconRegion:SetPoint("TOPLEFT", WR_ClassMenuRegion, "BOTTOMLEFT", 0, 0)
@@ -950,8 +1019,11 @@ local function CreateDropdownMenu(config)
 
     -- 创建标签文字（使用 STANDARD_TEXT_FONT 避免模板自带阴影导致重影）
     local textFrame = config.parentFrame:CreateFontString(nil, "ARTWORK")
-    textFrame:SetFont(STANDARD_TEXT_FONT, 14, "")
-    textFrame:SetTextColor(classColor.r, classColor.g, classColor.b)
+    textFrame:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local palL = WR_UI_P()
+        textFrame:SetTextColor(palL.text[1], palL.text[2], palL.text[3], 1)
+    end
     textFrame:SetText(config.text)
 
     -- 创建下拉菜单对象
@@ -1041,13 +1113,19 @@ local function CreateDropdownMenu(config)
     -- 覆盖按钮的高亮和提示
     overlayBtn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
     overlayBtn:SetScript("OnEnter", function(self)
-        textFrame:SetTextColor(1, 1, 1)
+        do
+            local palH1 = WR_UI_P()
+            textFrame:SetTextColor(palH1.accent[1], palH1.accent[2], palH1.accent[3], 1)
+        end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(config.tooltipText .. "\n宏/" .. config.saveVariable .. " 这个是切换宏\n宏/" .. config.saveVariable .. "空格+数字，可以调到你填的数字那项")
         GameTooltip:Show()
     end)
     overlayBtn:SetScript("OnLeave", function(self)
-        textFrame:SetTextColor(classColor.r, classColor.g, classColor.b)
+        do
+            local palH2 = WR_UI_P()
+            textFrame:SetTextColor(palH2.text[1], palH2.text[2], palH2.text[3], 1)
+        end
         GameTooltip:Hide()
     end)
 
@@ -1500,7 +1578,8 @@ local function CreateCheckbox(config)
     if config.exclusiveGroup and config.saveVariable then
         WR_ConfigExclusive_Register(config.saveVariable, config.exclusiveGroup, config.text)
     end
-    local iconFrame = CreateFrame("Button", nil, config.parentFrame)
+    -- ★ 2026-11-13：加 BackdropTemplate（扁平描边依赖 SetBackdrop/SetBackdropBorderColor）
+    local iconFrame = CreateFrame("Button", nil, config.parentFrame, "BackdropTemplate")
     iconFrame:SetSize(ICON_BASE_SIZE, ICON_BASE_SIZE)
     iconFrame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
@@ -1510,14 +1589,21 @@ local function CreateCheckbox(config)
     iconTexture:SetAlpha(0.8)
     iconTexture:SetTexture(config.IconID)
 
-    -- ★ 2026-08-21：ZZHELPER 风格外框 UI-Quickslot2（职业色，OVERLAY，四边内收 1px）
-    local iconBorder = iconFrame:CreateTexture(nil, "OVERLAY")
-    iconBorder:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-    iconBorder:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", -1, 1)
-    iconBorder:SetPoint("BOTTOMRIGHT", iconFrame, "BOTTOMRIGHT", 1, -1)
-    iconBorder:SetTexCoord(0.2, 0.8, 0.2, 0.8)
-    iconBorder:SetVertexColor(classColor.r, classColor.g, classColor.b, 1)
-    iconFrame.iconBorder = iconBorder
+    -- ★ 2026-11-13 UI 现代化：UI-Quickslot2 金属外框 → 扁平 1px 描边（BackdropTemplate）
+    --   描边颜色随勾选态切换（职业色亮 / 弱灰暗），由 UpdateCheckboxGlow 统一驱动
+    iconFrame.WR_hasBackdrop = true
+    iconFrame:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+        tile = false,
+        insets = { left = 0, right = 0, top = 0, bottom = 0 },
+    })
+    do
+        local palB = WR_UI_P()
+        iconFrame:SetBackdropColor(0, 0, 0, 0.35)
+        iconFrame:SetBackdropBorderColor(palB.dim[1], palB.dim[2], palB.dim[3], palB.dim[4])
+    end
 
     -- 图标上的文字标签（先 SetFont 再 SetText，必须显式关阴影，否则出现重影）
     -- ★ 2026-08-21：对齐 ZZHELPER —— GameFontNormalSmall 字体 + OUTLINE + 职业色 + CENTER
@@ -1705,21 +1791,28 @@ end
 -- ============================================================
 local function CreateSectionHeader(parentFrame, text, collapseKey)
     -- 可点击折叠的分类标题条；collapseKey 为 PigSet 持久化键（nil 表示静态标题，不可折叠）
-    -- ★ 2026-08-21：对齐 ZZHELPER —— 金色标题(1,0.82,0) + 1px 灰色分隔线(0.35)，无半透明金底
+    -- ★ 2026-11-13 UI 现代化：金色大字 → 白字 + 左侧 2px 职业色强调竖条 + 弱分隔线
     local f = CreateFrame("Frame", nil, parentFrame)
     f:SetSize(10, SECTION_HEADER_H)
     if collapseKey then f:EnableMouse(true) end
+    local pal = WR_UI_P()
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("LEFT", f, "LEFT", 6, 0)
-    title:SetFont(STANDARD_TEXT_FONT, 14, "")
+    title:SetPoint("LEFT", f, "LEFT", 10, 0)
+    title:SetFont(STANDARD_TEXT_FONT, 13, "")
     title:SetShadowOffset(0, 0)
     title:SetShadowColor(0, 0, 0, 0)
-    title:SetTextColor(1, 0.82, 0, 1)   -- 金色（ZZHELPER 标题金 1,0.82,0）
+    title:SetTextColor(pal.text[1], pal.text[2], pal.text[3], 1)
     title:SetText(text)
-    -- 1px 分隔线（ZZHELPER：WHITE8X8 色 0.35,0.35,0.35，位于标题条底部）
+    -- 左侧 2px 职业色竖条（分区层次标记，扁平）
+    local accentBar = f:CreateTexture(nil, "BACKGROUND")
+    accentBar:SetTexture("Interface\\Buttons\\WHITE8X8")
+    accentBar:SetVertexColor(classColor.r, classColor.g, classColor.b, 0.9)
+    accentBar:SetPoint("LEFT", f, "LEFT", 0, 0)
+    accentBar:SetSize(2, SECTION_HEADER_H - 8)
+    -- 1px 分隔线（主题弱分隔色，位于标题条底部）
     local divider = f:CreateTexture(nil, "BACKGROUND")
     divider:SetTexture("Interface\\Buttons\\WHITE8X8")
-    divider:SetVertexColor(0.35, 0.35, 0.35, 1)
+    divider:SetVertexColor(pal.divider[1], pal.divider[2], pal.divider[3], 1)
     divider:Show()
     divider:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
     divider:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
@@ -1729,8 +1822,8 @@ local function CreateSectionHeader(parentFrame, text, collapseKey)
     if collapseKey then
         local indicator = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         indicator:SetPoint("RIGHT", f, "RIGHT", -6, 0)
-        indicator:SetFont(STANDARD_TEXT_FONT, 14, "")
-        indicator:SetTextColor(1, 0.82, 0, 1)
+        indicator:SetFont(STANDARD_TEXT_FONT, 13, "")
+        indicator:SetTextColor(pal.textDim[1], pal.textDim[2], pal.textDim[3], 1)
         f.indicator = indicator
         f.RefreshIndicator = function(self)
             local collapsed = (PigSet[collapseKey] == true)
@@ -1764,8 +1857,11 @@ local function CreateMenuSlider(config)
 
     -- 标签文字（使用 STANDARD_TEXT_FONT 避免模板自带阴影）
     local textFrame = config.parentFrame:CreateFontString(nil, "ARTWORK")
-    textFrame:SetFont(STANDARD_TEXT_FONT, 14, "")
-    textFrame:SetTextColor(classColor.r, classColor.g, classColor.b)
+    textFrame:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local palL = WR_UI_P()
+        textFrame:SetTextColor(palL.text[1], palL.text[2], palL.text[3], 1)
+    end
     textFrame:SetText(config.text)
     local labelX = config.x or GLOBAL_INNER_PAD
     textFrame:SetPoint("TOPLEFT", config.parentFrame, "TOPLEFT", labelX, yOffset)
@@ -1798,13 +1894,19 @@ local function CreateMenuSlider(config)
     -- 背景轨道（与左侧全局区滑块统一：深灰底）
     local track = slider:CreateTexture(nil, "BACKGROUND")
     track:SetTexture("Interface\\Buttons\\WHITE8x8")
-    track:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    do
+        local palT = WR_UI_P()
+        track:SetVertexColor(palT.track[1], palT.track[2], palT.track[3], 1)
+    end
     track:SetAllPoints()
 
     -- 边框
     local border = slider:CreateTexture(nil, "BACKGROUND", nil, -1)
     border:SetTexture("Interface\\Buttons\\WHITE8x8")
-    border:SetVertexColor(classColor.r, classColor.g, classColor.b, 0.5)   -- 职业色弱描边
+    do
+        local palB2 = WR_UI_P()
+        border:SetVertexColor(palB2.borderDim[1], palB2.borderDim[2], palB2.borderDim[3], 1)
+    end
     border:SetPoint("TOPLEFT", slider, "TOPLEFT", -1, 1)
     border:SetPoint("BOTTOMRIGHT", slider, "BOTTOMRIGHT", 1, -1)
 
@@ -1815,18 +1917,24 @@ local function CreateMenuSlider(config)
     fill:SetPoint("TOPLEFT", slider, "TOPLEFT", 0, 0)
     fill:SetPoint("BOTTOMLEFT", slider, "BOTTOMLEFT", 0, 0)
 
-    -- 可见拖动手柄（白色小方块，与左侧「偷药时间」滑块风格一致）
+    -- 可见拖动手柄（浅灰小方块，与左侧滑块风格一致）
     slider:SetThumbTexture("Interface\\Buttons\\WHITE8x8")
     local thumb = slider:GetThumbTexture()
     if thumb then
         thumb:SetSize(6, 14)
-        thumb:SetVertexColor(1, 1, 1)   -- 白色手柄
+        do
+            local palTh = WR_UI_P()
+            thumb:SetVertexColor(palTh.thumb[1], palTh.thumb[2], palTh.thumb[3], 1)
+        end
     end
 
     -- 显示当前数值的文字（放在滑块右侧，右端与下拉框右端对齐）
     local valText = slider:CreateFontString(nil, "ARTWORK")
-    valText:SetFont(STANDARD_TEXT_FONT, 14, "")
-    valText:SetTextColor(classColor.r, classColor.g, classColor.b)
+    valText:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local palV = WR_UI_P()
+        valText:SetTextColor(palV.textDim[1], palV.textDim[2], palV.textDim[3], 1)
+    end
     valText:SetPoint("LEFT", slider, "RIGHT", VAL_GAP, 0)
     valText:SetWidth(VAL_TEXT_W)
     valText:SetJustifyH("RIGHT")
@@ -1922,7 +2030,10 @@ local function CreateMenuSlider(config)
 
     slider:SetScript("OnEnter", function(self)
         highlight:Show()
-        textFrame:SetTextColor(1, 1, 1)
+        do
+            local palH3 = WR_UI_P()
+            textFrame:SetTextColor(palH3.accent[1], palH3.accent[2], palH3.accent[3], 1)
+        end
         if config.tooltipText then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             local tipText = config.tooltipText
@@ -1936,7 +2047,10 @@ local function CreateMenuSlider(config)
 
     slider:SetScript("OnLeave", function(self)
         highlight:Hide()
-        textFrame:SetTextColor(classColor.r, classColor.g, classColor.b)
+        do
+            local palH4 = WR_UI_P()
+            textFrame:SetTextColor(palH4.text[1], palH4.text[2], palH4.text[3], 1)
+        end
         if config.tooltipText then
             GameTooltip:Hide()
         end
@@ -2053,7 +2167,20 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
     Frame.dmList = DM_List
     Frame.dmDropdowns = {}
     Frame.dmLabels = {}
+    Frame.menuButtons = {}
+    Frame.menuWidgets = {}
     Frame.menuAnchor = nil
+    -- ★ 2026-11-13：菜单控件独立容器（挂在 WR_ClassMenuRegion 下，不跟随天赋 Frame 显隐）。
+    --   修复：天赋 Frame 被 Show/Hide 或高度收缩时，下拉框/滑块/按钮被连带隐藏，右区菜单整片空白。
+    local MenuBox
+    if WR_ClassMenuRegion then
+        MenuBox = CreateFrame("Frame", nil, WR_ClassMenuRegion)
+        MenuBox:SetPoint("TOPLEFT", WR_ClassMenuRegion, "TOPLEFT", 0, -1 * MENU_ROW_H)
+        MenuBox:SetPoint("BOTTOMRIGHT", WR_ClassMenuRegion, "BOTTOMRIGHT", 0, 0)
+    else
+        MenuBox = Frame
+    end
+    Frame.menuBox = MenuBox
     if WR_ClassMenuRegion then
         -- 右职业区菜单区：填满菜单区，给下拉菜单/滑块提供真实宽度参考
         -- 顶部偏移 -1*MENU_ROW_H：原 WCL 模式下拉（row=2）已移除，职业下拉上移一行紧贴天赋标题下方，
@@ -2075,7 +2202,7 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
             if config.isSlider then
                 -- 创建滑块
                 DM_Text, WR_Dropdown[config.saveVariable] = CreateMenuSlider({
-                    parentFrame = Frame,
+                    parentFrame = MenuBox,
                     row = row,
                     text = config.text,
                     saveVariable = config.saveVariable,
@@ -2091,16 +2218,19 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
                 -- ★ 2026-08-21：支持 DM 列表内的复选框行（ZZ 移植条目，如愈合坦模式/荆棘术）
                 --   布局与滑块一致：标签 TOPLEFT + 复选框在标签右侧
                 local yOffset = -MENU_TOP_PAD - MENU_ROW_H * (row - 1)
-                local label = Frame:CreateFontString(nil, "ARTWORK")
-                label:SetFont(STANDARD_TEXT_FONT, 16, "")
-                label:SetTextColor(classColor.r, classColor.g, classColor.b)
+                local label = MenuBox:CreateFontString(nil, "ARTWORK")
+                label:SetFont(STANDARD_TEXT_FONT, 13, "")
+                do
+                    local pal_label = WR_UI_P()
+                    label:SetTextColor(pal_label.text[1], pal_label.text[2], pal_label.text[3], 1)
+                end
                 label:SetText(config.text)
                 local labelX = config.x or GLOBAL_INNER_PAD
-                label:SetPoint("TOPLEFT", Frame, "TOPLEFT", labelX, yOffset)
+                label:SetPoint("TOPLEFT", MenuBox, "TOPLEFT", labelX, yOffset)
                 label:SetSize(config.labelWidth or MENU_LABEL_W, 16)
                 label:SetJustifyH("LEFT")
 
-                local chk = CreateFrame("CheckButton", (config.saveVariable or "WR_DM_CB") .. "_F" .. frameId, Frame, "UICheckButtonTemplate")
+                local chk = CreateFrame("CheckButton", (config.saveVariable or "WR_DM_CB") .. "_F" .. frameId, MenuBox, "UICheckButtonTemplate")
                 chk:SetSize(CB_BASE_SIZE, CB_BASE_SIZE)
                 chk:SetPoint("LEFT", label, "RIGHT", 4, -2)
                 chk:SetAlpha(0.95)
@@ -2130,16 +2260,19 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
                 --   按钮行不带 saveVariable，故不写入 dmDropdowns（nil 键会报错），
                 --   也不会被「重置」逻辑处理（那里用 if config.saveVariable 跳过）。
                 local yOffset = -MENU_TOP_PAD - MENU_ROW_H * (row - 1)
-                local label = Frame:CreateFontString(nil, "ARTWORK")
-                label:SetFont(STANDARD_TEXT_FONT, 14, "")
-                label:SetTextColor(classColor.r, classColor.g, classColor.b)
+                local label = MenuBox:CreateFontString(nil, "ARTWORK")
+                label:SetFont(STANDARD_TEXT_FONT, 13, "")
+                do
+                    local pal_label = WR_UI_P()
+                    label:SetTextColor(pal_label.text[1], pal_label.text[2], pal_label.text[3], 1)
+                end
                 label:SetText(config.text)
                 local labelX = config.x or GLOBAL_INNER_PAD
-                label:SetPoint("TOPLEFT", Frame, "TOPLEFT", labelX, yOffset)
+                label:SetPoint("TOPLEFT", MenuBox, "TOPLEFT", labelX, yOffset)
                 label:SetSize(config.labelWidth or MENU_LABEL_W, 16)
                 label:SetJustifyH("LEFT")
 
-                local btn = CreateFrame("Button", nil, Frame, "UIPanelButtonTemplate")
+                local btn = CreateFrame("Button", nil, MenuBox, "UIPanelButtonTemplate")
                 btn:SetSize(config.buttonWidth or 110, 20)
                 btn:SetPoint("LEFT", label, "RIGHT", 8, 0)
                 btn:SetText(config.buttonText or config.text)
@@ -2157,10 +2290,11 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
                 end
                 DM_Text = label
                 Frame.dmLabels[config.buttonName or ("btn" .. row)] = label
+                table.insert(Frame.menuButtons, btn)
             else
                 -- 创建下拉菜单
                 DM_Text, WR_Dropdown[config.saveVariable] = CreateDropdownMenu({
-                    parentFrame = Frame,
+                    parentFrame = MenuBox,
                     row = row,
                     text = config.text,
                     dropdownName = config.saveVariable .. "_DM_F" .. frameId,
@@ -2178,6 +2312,11 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
         end
         Frame.dmCount = #DM_List
         Frame.menuAnchor = DM_Text
+        -- ★ 2026-11-13：收集「设置」菜单区所有控件（下拉/滑块/复选框/按钮 + 标签），
+        --   供「设置」分区折叠时统一显隐；图标/复选框网格不在此列。
+        for _, widget in pairs(Frame.dmLabels) do table.insert(Frame.menuWidgets, widget) end
+        for _, widget in pairs(Frame.dmDropdowns) do table.insert(Frame.menuWidgets, widget) end
+        for _, widget in ipairs(Frame.menuButtons) do table.insert(Frame.menuWidgets, widget) end
 
         -- 如果有复选框配置，则创建复选框
         if CB_List then
@@ -2294,6 +2433,7 @@ local function CreateTalentFrame(DM_List, CB_List, specName)
     -- 使用底部"功能设置"按钮统一进入
 
     Frame:Hide()
+    if Frame.menuBox and Frame.menuBox ~= Frame then Frame.menuBox:Hide() end
 
     -- 应用当前图标缩放
     if Frame.cbItems and #Frame.cbItems > 0 then
@@ -2398,19 +2538,24 @@ local function ConfigFrame()
         configFrame:SetPoint("LEFT", UIParent, "LEFT", 16, 0)
     end
     -- 仅背景色，无外框边线（用户要求去掉外框体线条）
+    -- ★ 2026-11-13 UI 现代化：花纹底 → 纯色扁平底 + 1px 描边（色板见 Core/UI_Theme.lua）
     if configFrame.SetBackdrop then
         configFrame:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-            edgeFile = nil,
-            tile = true,
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+            tile = false,
             insets = { left = 0, right = 0, top = 0, bottom = 0 },
         })
-        configFrame:SetBackdropColor(0.28, 0.28, 0.28, 1)
+        local pal = WR_UI_P()
+        configFrame:SetBackdropColor(pal.bg[1], pal.bg[2], pal.bg[3], pal.bg[4])
+        configFrame:SetBackdropBorderColor(pal.border[1], pal.border[2], pal.border[3], pal.border[4])
     else
         -- 回退：手工绘制深色底（无边框）
         local darkBg = configFrame:CreateTexture(nil, "BACKGROUND")
         darkBg:SetTexture("Interface\\Buttons\\WHITE8X8")
-        darkBg:SetVertexColor(0.28, 0.28, 0.28, 1)
+        local pal = WR_UI_P()
+        darkBg:SetVertexColor(pal.bg[1], pal.bg[2], pal.bg[3], pal.bg[4])
         darkBg:SetAllPoints(configFrame)
     end
 
@@ -2477,10 +2622,13 @@ local function ConfigFrame()
 
     configFrame.title = configFrame:CreateFontString(nil, "OVERLAY")
     -- ★ 2026-08-21 v7：MKH 标题放左上角，并在顶栏深色条内垂直居中
-    configFrame.title:SetPoint("LEFT", configFrame, "TOPLEFT", 8, -TOP_BAR_H / 2)
-    configFrame.title:SetFont(STANDARD_TEXT_FONT, 14, "OUTLINE")
+    configFrame.title:SetPoint("LEFT", configFrame, "TOPLEFT", 10, -TOP_BAR_H / 2)
+    configFrame.title:SetFont(STANDARD_TEXT_FONT, 14, "")
     configFrame.title:SetText("MKH")  -- ★ 用户要求：标题简化为 "MKH"
-    configFrame.title:SetTextColor(0, 0.68, 0.94, 1)  -- 天蓝 00adf0（ZZHELPER 标题色）
+    do
+        local pal = WR_UI_P()
+        configFrame.title:SetTextColor(pal.accent[1], pal.accent[2], pal.accent[3], 1)
+    end
 
     -- 关闭按钮（自定义：WR_ConfigFrame 用的是 BackdropTemplate，无自带关闭按钮，需自建）
     local closeBtn = CreateFrame("Button", "WR_ConfigCloseBtn", configFrame)
@@ -2490,28 +2638,29 @@ local function ConfigFrame()
     closeBtn:SetNormalFontObject(GameFontNormalSmall)
     closeBtn:SetText("✕")  -- 叉号
     closeBtn:GetFontString():SetTextColor(0.9, 0.9, 0.9, 1)
-    -- 背景：半透明圆角方块，常态微暗，悬停变红
+    -- 背景：扁平暗色方块，常态微暗，悬停变红
+    local palC = WR_UI_P()
     local closeBg = closeBtn:CreateTexture(nil, "BACKGROUND")
     closeBg:SetAllPoints()
     closeBg:SetTexture("Interface\\Buttons\\WHITE8x8")
-    closeBg:SetVertexColor(0.15, 0.15, 0.15, 0.85)
+    closeBg:SetVertexColor(0.16, 0.18, 0.21, 0.90)
     local closeBorder = closeBtn:CreateTexture(nil, "BORDER")
     closeBorder:SetAllPoints()
     closeBorder:SetTexture("Interface\\Buttons\\WHITE8x8")
-    closeBorder:SetVertexColor(0.6, 0.6, 0.6, 0.9)
+    closeBorder:SetVertexColor(palC.border[1], palC.border[2], palC.border[3], 0.9)
     -- 内缩 1px 形成描边效果
     closeBg:ClearAllPoints()
     closeBg:SetPoint("TOPLEFT", closeBtn, "TOPLEFT", 1, -1)
     closeBg:SetPoint("BOTTOMRIGHT", closeBtn, "BOTTOMRIGHT", -1, 1)
     closeBtn:SetScript("OnEnter", function(self)
-        closeBg:SetVertexColor(0.7, 0.1, 0.1, 0.95)
+        closeBg:SetVertexColor(palC.danger[1], palC.danger[2], palC.danger[3], palC.danger[4])
         self:GetFontString():SetTextColor(1, 1, 1, 1)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:SetText("关闭界面")
         GameTooltip:Show()
     end)
     closeBtn:SetScript("OnLeave", function(self)
-        closeBg:SetVertexColor(0.15, 0.15, 0.15, 0.85)
+        closeBg:SetVertexColor(0.16, 0.18, 0.21, 0.90)
         self:GetFontString():SetTextColor(0.9, 0.9, 0.9, 1)
         GameTooltip:Hide()
     end)
@@ -2521,45 +2670,57 @@ local function ConfigFrame()
     -- ★ 左右分区：左侧全局区 / 右侧职业区
     -- ============================================================
     -- 左侧全局区（固定宽，承载跨职业通用开关，仅构建一次）
-    local globalRegion = CreateFrame("Frame", "WR_GlobalRegion", configFrame)
+    local globalRegion = CreateFrame("Frame", "WR_GlobalRegion", configFrame, "BackdropTemplate")
     globalRegion:SetPoint("TOPLEFT", configFrame, "TOPLEFT", GLOBAL_OUTER_PAD, -TOP_BAR_H)
     globalRegion:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", GLOBAL_OUTER_PAD, BOTTOM_BAR_H)
     globalRegion:SetWidth(GLOBAL_REGION_W)
     globalRegion:EnableMouse(true)
     WR_GlobalRegion = globalRegion
 
-    -- ★ 2026-08-21 v6：取消全部折叠功能，「全局」标题条改为静态（不可点击折叠）
-    --   图标将放在标题条左侧（全局左上角），"全局"文字右对齐到标题条右侧
+    -- ★ 2026-11-13：「全局」标题条恢复可折叠（用户口径：全局无法折叠，全局折叠向右）
+    --   折叠符固定在标题条右侧；图标在标题左侧，"全局"文字右对齐并留出折叠符宽度
     --   标题条从 globalRegion 顶边开始（y=0 偏移），与右侧「设置」标题条顶部对齐、底部横线同高
-    local globalHeader = CreateSectionHeader(globalRegion, "全局", nil)
+    local globalHeader = CreateSectionHeader(globalRegion, "全局", SECTION_COLLAPSE_KEYS["全局"])
     globalHeader:ClearAllPoints()
     globalHeader:SetPoint("TOPLEFT", globalRegion, "TOPLEFT", GLOBAL_INNER_PAD, 0)
     globalHeader:SetPoint("TOPRIGHT", globalRegion, "TOPRIGHT", -GLOBAL_INNER_PAD, 0)
     globalHeader:SetHeight(SECTION_HEADER_H)
     globalHeader:Show()
-    -- 将「全局」标题文字改为右对齐（图标将占据左侧）
+    -- 将「全局」标题文字改为右对齐（图标占据左侧；右侧预留折叠符位置）
     for _, region in ipairs({globalHeader:GetRegions()}) do
         if region.GetText and region:GetText() == "全局" then
             region:ClearAllPoints()
-            region:SetPoint("RIGHT", globalHeader, "RIGHT", -6, 0)
+            region:SetPoint("RIGHT", globalHeader, "RIGHT", -22, 0)
             region:SetJustifyH("RIGHT")
         end
     end
+    globalRegion.header = globalHeader
 
     -- 左右分隔线
     local divider = configFrame:CreateTexture("WR_Divider", "ARTWORK")
-    divider:SetColorTexture(0.6, 0.6, 0.6, 0.45)
+    do
+        local palD = WR_UI_P()
+        divider:SetColorTexture(palD.divider[1], palD.divider[2], palD.divider[3], 1)
+    end
     divider:SetPoint("TOPLEFT", globalRegion, "TOPRIGHT", 0, 0)
     divider:SetPoint("BOTTOMLEFT", globalRegion, "BOTTOMRIGHT", 0, 0)
     divider:SetWidth(1)
     WR_Divider = divider
 
     -- 右侧职业区（自适应宽，承载当前专精天赋面板）
-    local classRegion = CreateFrame("Frame", "WR_ClassRegion", configFrame)
+    local classRegion = CreateFrame("Frame", "WR_ClassRegion", configFrame, "BackdropTemplate")
     classRegion:SetPoint("TOPLEFT", globalRegion, "TOPRIGHT", DIV_GAP, 0)
     classRegion:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -RIGHT_OUTER_PAD, BOTTOM_BAR_H)
     classRegion:EnableMouse(true)
     WR_ClassRegion = classRegion
+
+    -- ★ 2026-11-13 UI 现代化：左右区块各自带一层浅底 + 1px 弱描边（层次感，扁平）
+    if globalRegion.SetBackdrop then
+        WR_UI_ApplyBackdrop(globalRegion, "region")
+    end
+    if classRegion.SetBackdrop then
+        WR_UI_ApplyBackdrop(classRegion, "region")
+    end
 
     -- 右区顶部菜单区（下拉菜单/滑块）
     local classMenuRegion = CreateFrame("Frame", "WR_ClassMenuRegion", classRegion)
@@ -2576,8 +2737,8 @@ local function ConfigFrame()
     classIconRegion:SetHeight(ICON_REGION_MIN_H)
     WR_ClassIconRegion = classIconRegion
 
-    -- ★ 2026-08-21：取消全部折叠功能，「设置」标题条改为静态（不可点击折叠），菜单区始终显示
-    local settingsHeader = CreateSectionHeader(classRegion, "设置", nil)
+    -- ★ 2026-11-13：「设置」标题条支持折叠（用户口径：设置无法折叠）
+    local settingsHeader = CreateSectionHeader(classRegion, "设置", SECTION_COLLAPSE_KEYS["设置"])
     settingsHeader:ClearAllPoints()
     settingsHeader:SetPoint("TOPLEFT", classRegion, "TOPLEFT", 0, 0)
     settingsHeader:SetPoint("TOPRIGHT", classRegion, "TOPRIGHT", 0, 0)
@@ -2588,23 +2749,21 @@ local function ConfigFrame()
     configFrame.iconLayoutAnchor = CreateFrame("Frame", "WR_IconLayoutAnchor", classIconRegion)
     configFrame.iconLayoutAnchor:SetSize(1, 1)
 
-    -- 插件图标（★ 2026-08-21 v5：从顶栏移到左全局区「全局」标题条左侧）
-    --   历史：顶栏 (8,-12)；现改为 globalHeader 左侧，与右对齐的"全局"文字同行。
-    local iconTexture = configFrame:CreateTexture("MKHelperForeverIcon", "OVERLAY")
-    iconTexture:SetSize(22, 22)
-    iconTexture:SetPoint("TOPLEFT", globalHeader, "TOPLEFT", 4, -1)
+    -- 插件图标（★ 2026-11-13 v6：修复被左区背景遮挡成黑块 + 分隔线切底）
+    --   根因：图标纹理原先挂在 configFrame 上，绘制层级低于子框架 WR_GlobalRegion
+    --   的 region 底色（alpha 0.90），整块图标被左区背景压暗；且 22px 图标与 22px
+    --   标题条等高，底边正好被标题条底部1px分隔线切过。
+    --   修复：改挂 globalHeader（标题条自身）的 OVERLAY 层，绘制层级高于左区底色；
+    --   尺寸缩到 18×18 并在标题条内垂直居中，四周留 2px，图标完整可见。
+    local iconTexture = globalHeader:CreateTexture("MKHelperForeverIcon", "OVERLAY")
+    iconTexture:SetSize(18, 18)
+    iconTexture:SetPoint("LEFT", globalHeader, "LEFT", 4, 0)
     iconTexture:SetTexture("Interface\\AddOns\\MKHelperForever\\MKHelperForever.tga")
 
     -- ★ 2026-11-11：删除左侧全局区的 AOE 分类与两个 AOE 开关
     --   （用户口径：「删除全局区下的，AOE功能和选项」）。
     --   AOE 判定逻辑 Core/SmartAOE.lua（WR_ShouldUseAOE 等）同步删除；
     --   旧存档的两个全局 AOE 开关字段由 ZZ_Features_Migration 清理。
-
-    -- 左区全局内容始终显示（取消全部折叠功能），保留该函数供初始化时调用
-    function WR_LayoutGlobal()
-        if not globalRegion then return end
-        if globalHeader then globalHeader:Show() end
-    end
 
     -- ★ 2026-08-21：取消全部折叠功能，WR_CollapseAllCategories / 折叠全部·展开全部按钮 已移除
 
@@ -2632,8 +2791,11 @@ local function ConfigFrame()
 
     -- ★ 2026-08-21：文本标签改为 globalRegion 子级，确保全局折叠时随左区一起隐藏
     local TSMS_Text = globalRegion:CreateFontString("TSMS_Text", "ARTWORK")
-    TSMS_Text:SetFont(STANDARD_TEXT_FONT, 16, "")
-    TSMS_Text:SetTextColor(classColor.r, classColor.g, classColor.b)
+    TSMS_Text:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_TSMS_Text = WR_UI_P()
+        TSMS_Text:SetTextColor(pal_TSMS_Text.text[1], pal_TSMS_Text.text[2], pal_TSMS_Text.text[3], 1)
+    end
     TSMS_Text:SetText("调试模式")
     TSMS_Text:SetPoint("LEFT", checkbox, "RIGHT", 0, 0)
 
@@ -2662,8 +2824,11 @@ local function ConfigFrame()
     end)
     iconChk:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
     local iconChkText = globalRegion:CreateFontString("WR_SkillIconShowText", "ARTWORK")
-    iconChkText:SetFont(STANDARD_TEXT_FONT, 15, "")
-    iconChkText:SetTextColor(classColor.r, classColor.g, classColor.b)
+    iconChkText:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_iconChkText = WR_UI_P()
+        iconChkText:SetTextColor(pal_iconChkText.text[1], pal_iconChkText.text[2], pal_iconChkText.text[3], 1)
+    end
     iconChkText:SetText("技能图标")
     iconChkText:SetPoint("LEFT", iconChk, "RIGHT", 0, 0)
     globalRegion.skillIconCheckbox = iconChk
@@ -2675,19 +2840,45 @@ local function ConfigFrame()
     --   （1=怪物屏蔽 / 2=爆发列表 / 3=更新公告）
 
     local function CreateTopBarButton(text, tooltip, sectionIdx, width)
-        local btn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
-        -- ★ 2026-08-19：按钮尺寸与重置按钮一致（65×22，视觉统一）
+        -- ★ 2026-11-13 UI 现代化：UIPanelButtonTemplate → 自绘扁平按钮
+        --   （纯色底 + 1px 描边，悬停提亮；OnClick/tooltip 交互不变）
+        local palBtn = WR_UI_P()
+        local btn = CreateFrame("Button", nil, configFrame, "BackdropTemplate")
         btn:SetSize(width or 65, 22)
+        btn:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8x8",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            edgeSize = 1,
+            tile = false,
+            insets = { left = 0, right = 0, top = 0, bottom = 0 },
+        })
+        btn:SetBackdropColor(palBtn.inset[1], palBtn.inset[2], palBtn.inset[3], 1)
+        btn:SetBackdropBorderColor(palBtn.border[1], palBtn.border[2], palBtn.border[3], 1)
+        btn:SetNormalFontObject(GameFontHighlightSmall)
         btn:SetText(text)
-        btn:SetScript("OnClick", function()
-            ZZ_OpenMonsterBlockSection(sectionIdx)
-        end)
+        do
+            local fs = btn:GetFontString()
+            if fs then
+                fs:SetFont(STANDARD_TEXT_FONT, 12, "")
+                fs:SetTextColor(palBtn.text[1], palBtn.text[2], palBtn.text[3], 1)
+            end
+        end
+        btn:SetHighlightTexture("Interface\\Buttons\\WHITE8x8", "ADD")
+        local hl = btn:GetHighlightTexture()
+        if hl then hl:SetVertexColor(1, 1, 1, 0.06) end
         btn:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(palBtn.hover[1], palBtn.hover[2], palBtn.hover[3], 1)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetText(tooltip)
             GameTooltip:Show()
         end)
-        btn:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
+        btn:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(palBtn.inset[1], palBtn.inset[2], palBtn.inset[3], 1)
+            GameTooltip:Hide()
+        end)
+        btn:SetScript("OnClick", function()
+            ZZ_OpenMonsterBlockSection(sectionIdx)
+        end)
         return btn
     end
 
@@ -2715,13 +2906,17 @@ local function ConfigFrame()
     --   修复：FontString 无 SetFrameStrata（那是 Frame 方法），改用 SetDrawLayer("OVERLAY", 7)
     --   + 16 号 OUTLINE + 黑色阴影，确保始终在所有控件之上可见。
     local TianFu_Text = configFrame:CreateFontString("TianFu_Text", "OVERLAY")
-    TianFu_Text:SetFont(STANDARD_TEXT_FONT, 16, "OUTLINE")
-    TianFu_Text:SetShadowOffset(1, -1)
-    TianFu_Text:SetShadowColor(0, 0, 0, 1)
+    -- ★ 2026-11-13 UI 现代化：16 号 OUTLINE+阴影 → 14 号净字（保留 OVERLAY 层级防下拉覆盖）
+    TianFu_Text:SetFont(STANDARD_TEXT_FONT, 14, "")
+    do
+        local palTF = WR_UI_P()
+        TianFu_Text:SetTextColor(palTF.text[1], palTF.text[2], palTF.text[3], 1)
+    end
     TianFu_Text:SetDrawLayer("OVERLAY", 7)
     TianFu_Text:SetText("")
     TianFu_Text:SetPoint("TOP", classMenuRegion, "TOP", 0, -4)
     TianFu_Text:SetJustifyH("CENTER")
+    configFrame.tianFuText = TianFu_Text
 
     -- ============================================================
     -- ★ 底部区域重新布局（自下而上），垂直间距22像素
@@ -2754,8 +2949,11 @@ local function ConfigFrame()
 
     -- ★ 2026-08-21：文本标签改为 globalRegion 子级，确保全局折叠时随左区一起隐藏
     local followLabel = globalRegion:CreateFontString(nil, "ARTWORK")
-    followLabel:SetFont(STANDARD_TEXT_FONT, 16, "")
-    followLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    followLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_followLabel = WR_UI_P()
+        followLabel:SetTextColor(pal_followLabel.text[1], pal_followLabel.text[2], pal_followLabel.text[3], 1)
+    end
     followLabel:SetText("跟随")
     followLabel:SetPoint("LEFT", followCheckbox, "RIGHT", 5, 0)
 
@@ -2913,15 +3111,28 @@ local function ConfigFrame()
     --   写入 PigSet["FrameScale"] 与右下角 scaleGrabber 拖拽缩放共享同一缩放值
     --   标签与输入框水平同行（标签在左，输入框紧贴右侧）
     local uiScaleLabel = globalRegion:CreateFontString(nil, "ARTWORK")
-    uiScaleLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
-    uiScaleLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    uiScaleLabel:SetFont(STANDARD_TEXT_FONT, 12, "")
+    do
+        local pal_uiScaleLabel = WR_UI_P()
+        uiScaleLabel:SetTextColor(pal_uiScaleLabel.textDim[1], pal_uiScaleLabel.textDim[2], pal_uiScaleLabel.textDim[3], 1)
+    end
     -- ★ 按左区标准行距 GLOBAL_ROW_H 排布：跟随下拉框已回到「跟随」复选框下方独占行，
     --   界面缩放行锚在跟随下拉框底下方 GLOBAL_ROW_H（即「跟随」+下拉框两行之后）
     uiScaleLabel:SetPoint("TOPLEFT", followDropdown, "BOTTOMLEFT", 16, -GLOBAL_ROW_H)
     uiScaleLabel:SetText("界面缩放(%):")
 
-    local uiScaleEdit = CreateFrame("EditBox", "WR_UIScaleEdit", globalRegion, "InputBoxTemplate")
+    -- ★ 2026-11-13 UI 现代化：InputBoxTemplate → 自绘扁平输入框
+    local uiScaleEdit = CreateFrame("EditBox", "WR_UIScaleEdit", globalRegion, "BackdropTemplate")
     uiScaleEdit:SetSize(42, 20)
+    if uiScaleEdit.SetBackdrop then
+        WR_UI_ApplyBackdrop(uiScaleEdit, "inset")
+    end
+    uiScaleEdit:SetFont(STANDARD_TEXT_FONT, 12, "")
+    do
+        local palE = WR_UI_P()
+        uiScaleEdit:SetTextColor(palE.text[1], palE.text[2], palE.text[3], 1)
+    end
+    uiScaleEdit:SetTextInsets(4, 4, 0, 0)
     uiScaleEdit:SetPoint("LEFT", uiScaleLabel, "RIGHT", 6, 0)
     -- 默认值：从 PigSet["FrameScale"] 反推百分比
     local defaultScale = PigSet["FrameScale"] or 1
@@ -3012,8 +3223,11 @@ local function ConfigFrame()
     end)
     rescueCheckbox:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
     local rescueLabel = globalRegion:CreateFontString(nil, "ARTWORK")
-    rescueLabel:SetFont(STANDARD_TEXT_FONT, 16, "")
-    rescueLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    rescueLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_rescueLabel = WR_UI_P()
+        rescueLabel:SetTextColor(pal_rescueLabel.text[1], pal_rescueLabel.text[2], pal_rescueLabel.text[3], 1)
+    end
     rescueLabel:SetText("自动救人")
     rescueLabel:SetPoint("LEFT", rescueCheckbox, "RIGHT", -2, 1)
 
@@ -3034,7 +3248,10 @@ local function ConfigFrame()
     touyaoSlider:SetObeyStepOnDrag(true)
     local touyaoTrack = touyaoSlider:CreateTexture(nil, "BACKGROUND")
     touyaoTrack:SetTexture("Interface\\Buttons\\WHITE8x8")
-    touyaoTrack:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    do
+        local palTk = WR_UI_P()
+        touyaoTrack:SetVertexColor(palTk.track[1], palTk.track[2], palTk.track[3], 1)
+    end
     touyaoTrack:SetAllPoints()
     local touyaoFill = touyaoSlider:CreateTexture(nil, "ARTWORK")
     touyaoFill:SetTexture("Interface\\Buttons\\WHITE8x8")
@@ -3045,8 +3262,11 @@ local function ConfigFrame()
     -- ★ 显式设置拇指尺寸，使其与滑动条等高（否则用默认缩略图尺寸，会比 10px 滑块高）
     local touyaoThumb = touyaoSlider:GetThumbTexture()
     if touyaoThumb then
-        touyaoThumb:SetVertexColor(1, 1, 1, 1)
-        touyaoThumb:SetSize(10, touyaoSlider:GetHeight())
+        do
+            local palTh2 = WR_UI_P()
+            touyaoThumb:SetVertexColor(palTh2.thumb[1], palTh2.thumb[2], palTh2.thumb[3], 1)
+        end
+        touyaoThumb:SetSize(6, touyaoSlider:GetHeight() + 4)
     end
     touyaoSlider:SetValue(PigSet["TOUYAO_TIME"])
     local function UpdateTouyaoFill(val)
@@ -3056,13 +3276,19 @@ local function ConfigFrame()
     end
     UpdateTouyaoFill(PigSet["TOUYAO_TIME"])
     local touyaoText = touyaoSlider:CreateFontString(nil, "ARTWORK")
-    touyaoText:SetFont(STANDARD_TEXT_FONT, 14, "")
-    touyaoText:SetTextColor(classColor.r, classColor.g, classColor.b)
+    touyaoText:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_touyaoText = WR_UI_P()
+        touyaoText:SetTextColor(pal_touyaoText.textDim[1], pal_touyaoText.textDim[2], pal_touyaoText.textDim[3], 1)
+    end
     touyaoText:SetPoint("LEFT", touyaoSlider, "RIGHT", 4, 0)
     touyaoText:SetText(PigSet["TOUYAO_TIME"] .. "s")
     local touyaoLabel = globalRegion:CreateFontString(nil, "ARTWORK")
-    touyaoLabel:SetFont(STANDARD_TEXT_FONT, 14, "")
-    touyaoLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    touyaoLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_touyaoLabel = WR_UI_P()
+        touyaoLabel:SetTextColor(pal_touyaoLabel.text[1], pal_touyaoLabel.text[2], pal_touyaoLabel.text[3], 1)
+    end
     touyaoLabel:SetPoint("BOTTOMLEFT", touyaoSlider, "TOPLEFT", 0, 2)
     touyaoLabel:SetText("偷药时间")
     touyaoSlider:SetScript("OnValueChanged", function(self, value)
@@ -3072,36 +3298,13 @@ local function ConfigFrame()
         UpdateTouyaoFill(val)
     end)
 
-    -- ★ 爆发总闸（全局 UI 总开关，纯 UI，不迁移各职业爆发判定逻辑）
-    if PigSet["GLOBAL_BURST"] == nil then PigSet["GLOBAL_BURST"] = true end
-    local burstCheckbox = CreateFrame("CheckButton", "WR_GlobalBurstCheckbox", globalRegion, "UICheckButtonTemplate")
-    burstCheckbox:SetSize(20, 20)
-    burstCheckbox:SetPoint("TOPLEFT", touyaoSlider, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
-    burstCheckbox:SetChecked(PigSet["GLOBAL_BURST"])
-    burstCheckbox:SetScript("OnClick", function(self)
-        PigSet["GLOBAL_BURST"] = self:GetChecked()
-        local status = self:GetChecked() and "|cff00ff00开启|r" or "|cffff0000关闭|r"
-        PrintToVisible(string.format("|cff00adf0[爆发]|r 全局爆发总闸: %s", status))
-    end)
-    burstCheckbox:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("爆发总闸\n一键总开关：关闭后全局禁止自动爆发（各职业爆发总闸仍保留在右区）。\n开启则按各职业设置正常触发。")
-        GameTooltip:Show()
-    end)
-    burstCheckbox:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
-    local burstLabel = globalRegion:CreateFontString(nil, "ARTWORK")
-    burstLabel:SetFont(STANDARD_TEXT_FONT, 16, "")
-    burstLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
-    burstLabel:SetText("爆发总闸")
-    burstLabel:SetPoint("LEFT", burstCheckbox, "RIGHT", -2, 1)
-
-    -- ★ 怪物屏蔽总开关 / 职业屏蔽（从功能设置面板迁至左侧全局面板，位于爆发总闸下方）
-    -- 普通复选框形态，与「爆发总闸」「开关提示」一致；功能逻辑、状态存储、原有行为完全不变
+    -- ★ 怪物屏蔽总开关 / 职业屏蔽（从功能设置面板迁至左侧全局面板，位于偷药时间滑块下方）
+    -- 普通复选框形态，与「开关提示」一致；功能逻辑、状态存储、原有行为完全不变
     -- 启用怪物屏蔽：仍走 ZZ_SetMonsterBlock（写入 MONSTER_BLOCK_ENABLED + 打印 + 同步主控框）；/monster 命令亦同步本框
     if PigSet["MONSTER_BLOCK_ENABLED"] == nil then PigSet["MONSTER_BLOCK_ENABLED"] = false end
     local monsterChk = CreateFrame("CheckButton", "WR_MonsterBlockChk", globalRegion, "UICheckButtonTemplate")
     monsterChk:SetSize(20, 20)
-    monsterChk:SetPoint("TOPLEFT", burstCheckbox, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
+    monsterChk:SetPoint("TOPLEFT", touyaoSlider, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
     monsterChk:SetChecked(PigSet["MONSTER_BLOCK_ENABLED"])
     monsterChk:SetScript("OnClick", function(self)
         ZZ_SetMonsterBlock(self:GetChecked())
@@ -3113,8 +3316,11 @@ local function ConfigFrame()
     end)
     monsterChk:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
     local monsterLabel = globalRegion:CreateFontString(nil, "ARTWORK")
-    monsterLabel:SetFont(STANDARD_TEXT_FONT, 16, "")
-    monsterLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    monsterLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_monsterLabel = WR_UI_P()
+        monsterLabel:SetTextColor(pal_monsterLabel.text[1], pal_monsterLabel.text[2], pal_monsterLabel.text[3], 1)
+    end
     monsterLabel:SetText("启用怪物屏蔽")
     monsterLabel:SetPoint("LEFT", monsterChk, "RIGHT", -2, 1)
     ZZ_MonsterBlockMasterChk = monsterChk   -- 供 ZZ_SetMonsterBlock / /monster 命令同步勾选态（ZZ_Features_Migration.lua 引用，已改为全局）
@@ -3125,8 +3331,11 @@ local function ConfigFrame()
     if PigSet["TANK_BLACKLIST"] == nil then PigSet["TANK_BLACKLIST"] = false end
 
     local blTitle = globalRegion:CreateFontString(nil, "ARTWORK")
-    blTitle:SetFont(STANDARD_TEXT_FONT, 14, "")
-    blTitle:SetTextColor(classColor.r, classColor.g, classColor.b)
+    blTitle:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_blTitle = WR_UI_P()
+        blTitle:SetTextColor(pal_blTitle.accent[1], pal_blTitle.accent[2], pal_blTitle.accent[3], 1)
+    end
     blTitle:SetText("|cffffd700职业屏蔽|r")
     blTitle:SetPoint("TOPLEFT", monsterChk, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
 
@@ -3146,8 +3355,11 @@ local function ConfigFrame()
         end)
         chk:SetScript("OnLeave", function(self) GameTooltip:Hide() end)
         local lbl = globalRegion:CreateFontString(nil, "ARTWORK")
-        lbl:SetFont(STANDARD_TEXT_FONT, 16, "")
-        lbl:SetTextColor(classColor.r, classColor.g, classColor.b)
+        lbl:SetFont(STANDARD_TEXT_FONT, 13, "")
+        do
+            local pal_lbl = WR_UI_P()
+            lbl:SetTextColor(pal_lbl.text[1], pal_lbl.text[2], pal_lbl.text[3], 1)
+        end
         lbl:SetText(label)
         lbl:SetPoint("LEFT", chk, "RIGHT", -2, 1)
         return chk
@@ -3160,7 +3372,7 @@ local function ConfigFrame()
     local tankBlChk = MakeBLToggle("TANK_BLACKLIST", "坦克屏蔽")
     tankBlChk:SetPoint("TOPLEFT", rangedBlChk, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
 
-    -- ★ 4. 屏幕文字提示总闸（迁入左侧全局区，位于爆发总闸下方）
+    -- ★ 4. 屏幕文字提示总闸（迁入左侧全局区，位于职业屏蔽子项下方）
     --    2026-11-11 用户口径：「把插件中屏幕文字提示都关闭了」→ 默认关闭。
     --    一个开关覆盖：PigAlert 屏幕中央大字、色块/技能图标上的技能名文字、
     --    聊天框开关提示、WR_MessageWindows 弹窗、调试 HUD 文字。
@@ -3170,8 +3382,11 @@ local function ConfigFrame()
     noticeCheckbox:SetPoint("TOPLEFT", tankBlChk, "BOTTOMLEFT", 0, -GLOBAL_ROW_H)
 
     local noticeLabel = noticeCheckbox:CreateFontString(nil, "ARTWORK")
-    noticeLabel:SetFont(STANDARD_TEXT_FONT, 16, "")
-    noticeLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    noticeLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_noticeLabel = WR_UI_P()
+        noticeLabel:SetTextColor(pal_noticeLabel.text[1], pal_noticeLabel.text[2], pal_noticeLabel.text[3], 1)
+    end
     noticeLabel:SetText("屏幕文字提示")
     noticeLabel:SetPoint("LEFT", noticeCheckbox, "RIGHT", -2, 1)
 
@@ -3212,12 +3427,18 @@ local function ConfigFrame()
     -- 滑块组件（轨道、填充条、拇指）
     local iconTrack = iconScaleSlider:CreateTexture(nil, "BACKGROUND")
     iconTrack:SetTexture("Interface\\Buttons\\WHITE8x8")
-    iconTrack:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    do
+        local palTk2 = WR_UI_P()
+        iconTrack:SetVertexColor(palTk2.track[1], palTk2.track[2], palTk2.track[3], 1)
+    end
     iconTrack:SetAllPoints()
 
     local iconBorder = iconScaleSlider:CreateTexture(nil, "BACKGROUND", nil, -1)
     iconBorder:SetTexture("Interface\\Buttons\\WHITE8x8")
-    iconBorder:SetVertexColor(0, 0, 0, 1)
+    do
+        local palBd = WR_UI_P()
+        iconBorder:SetVertexColor(palBd.borderDim[1], palBd.borderDim[2], palBd.borderDim[3], 1)
+    end
     iconBorder:SetPoint("TOPLEFT", iconScaleSlider, "TOPLEFT", -1, 1)
     iconBorder:SetPoint("BOTTOMRIGHT", iconScaleSlider, "BOTTOMRIGHT", 1, -1)
 
@@ -3229,7 +3450,14 @@ local function ConfigFrame()
 
     iconScaleSlider:SetThumbTexture("Interface\\Buttons\\WHITE8x8")
     local iconThumb = iconScaleSlider:GetThumbTexture()
-    iconThumb:SetAlpha(0)
+    if iconThumb then
+        do
+            local palTh3 = WR_UI_P()
+            iconThumb:SetVertexColor(palTh3.thumb[1], palTh3.thumb[2], palTh3.thumb[3], 1)
+            iconThumb:SetAlpha(1)
+        end
+        iconThumb:SetSize(6, iconScaleSlider:GetHeight() + 4)
+    end
 
     -- 更新填充条
     local function UpdateIconScaleFill(val)
@@ -3248,14 +3476,20 @@ local function ConfigFrame()
 
     -- 显示数值的文字
     local iconScaleText = iconScaleSlider:CreateFontString(nil, "ARTWORK")
-    iconScaleText:SetFont(STANDARD_TEXT_FONT, 14, "")
-    iconScaleText:SetTextColor(classColor.r, classColor.g, classColor.b)
+    iconScaleText:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_iconScaleText = WR_UI_P()
+        iconScaleText:SetTextColor(pal_iconScaleText.textDim[1], pal_iconScaleText.textDim[2], pal_iconScaleText.textDim[3], 1)
+    end
     iconScaleText:SetPoint("LEFT", iconScaleSlider, "RIGHT", 8, 0)
     iconScaleText:SetText(PigSet["IconScale"] .. "%")
 
     local iconScaleLabel = iconScaleSlider:CreateFontString(nil, "ARTWORK")
-    iconScaleLabel:SetFont(STANDARD_TEXT_FONT, 14, "")
-    iconScaleLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    iconScaleLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_iconScaleLabel = WR_UI_P()
+        iconScaleLabel:SetTextColor(pal_iconScaleLabel.text[1], pal_iconScaleLabel.text[2], pal_iconScaleLabel.text[3], 1)
+    end
     iconScaleLabel:SetPoint("BOTTOM", iconScaleSlider, "TOP", 0, 5)
     iconScaleLabel:SetText("图标大小缩放")
 
@@ -3268,14 +3502,20 @@ local function ConfigFrame()
 
     iconScaleSlider:SetScript("OnEnter", function(self)
         iconScaleHighlight:Show()
-        iconScaleLabel:SetTextColor(1, 1, 1)
+        do
+            local palH5 = WR_UI_P()
+            iconScaleLabel:SetTextColor(palH5.accent[1], palH5.accent[2], palH5.accent[3], 1)
+        end
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
         GameTooltip:SetText("图标大小缩放\n调整技能图标显示大小。\n范围：50% - 200%\n\n|cff00adf0快捷命令：/run PigSet.IconScale=数值|r")
         GameTooltip:Show()
     end)
     iconScaleSlider:SetScript("OnLeave", function(self)
         iconScaleHighlight:Hide()
-        iconScaleLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+        do
+            local palH6 = WR_UI_P()
+            iconScaleLabel:SetTextColor(palH6.text[1], palH6.text[2], palH6.text[3], 1)
+        end
         GameTooltip:Hide()
     end)
 
@@ -3342,8 +3582,11 @@ local function ConfigFrame()
     iconScaleEdit:SetCursorPosition(0)
 
     local iconScaleEditLabel = iconScaleEdit:CreateFontString(nil, "ARTWORK")
-    iconScaleEditLabel:SetFont(STANDARD_TEXT_FONT, 14, "")
-    iconScaleEditLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    iconScaleEditLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_iconScaleEditLabel = WR_UI_P()
+        iconScaleEditLabel:SetTextColor(pal_iconScaleEditLabel.text[1], pal_iconScaleEditLabel.text[2], pal_iconScaleEditLabel.text[3], 1)
+    end
     iconScaleEditLabel:SetPoint("LEFT", iconScaleEdit, "RIGHT", 8, 0)
     iconScaleEditLabel:SetText("%（直接输入数值）")
 
@@ -3414,12 +3657,18 @@ local function ConfigFrame()
     -- 组件
     local track = alphaSlider:CreateTexture(nil, "BACKGROUND")
     track:SetTexture("Interface\\Buttons\\WHITE8x8")
-    track:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    do
+        local palTk3 = WR_UI_P()
+        track:SetVertexColor(palTk3.track[1], palTk3.track[2], palTk3.track[3], 1)
+    end
     track:SetAllPoints()
 
     local border = alphaSlider:CreateTexture(nil, "BACKGROUND", nil, -1)
     border:SetTexture("Interface\\Buttons\\WHITE8x8")
-    border:SetVertexColor(0, 0, 0, 1)
+    do
+        local palBd3 = WR_UI_P()
+        border:SetVertexColor(palBd3.borderDim[1], palBd3.borderDim[2], palBd3.borderDim[3], 1)
+    end
     border:SetPoint("TOPLEFT", alphaSlider, "TOPLEFT", -1, 1)
     border:SetPoint("BOTTOMRIGHT", alphaSlider, "BOTTOMRIGHT", 1, -1)
 
@@ -3431,7 +3680,14 @@ local function ConfigFrame()
 
     alphaSlider:SetThumbTexture("Interface\\Buttons\\WHITE8x8")
     local thumb = alphaSlider:GetThumbTexture()
-    thumb:SetAlpha(0)
+    if thumb then
+        do
+            local palTh4 = WR_UI_P()
+            thumb:SetVertexColor(palTh4.thumb[1], palTh4.thumb[2], palTh4.thumb[3], 1)
+            thumb:SetAlpha(1)
+        end
+        thumb:SetSize(6, alphaSlider:GetHeight() + 4)
+    end
 
     -- 更新填充条
     local function UpdateAlphaFill(val)
@@ -3460,14 +3716,20 @@ local function ConfigFrame()
     UpdateAlphaFill(PigSet["FrameAlpha"])
 
     local alphaText = alphaSlider:CreateFontString(nil, "ARTWORK")
-    alphaText:SetFont(STANDARD_TEXT_FONT, 14, "")
-    alphaText:SetTextColor(classColor.r, classColor.g, classColor.b)
+    alphaText:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_alphaText = WR_UI_P()
+        alphaText:SetTextColor(pal_alphaText.textDim[1], pal_alphaText.textDim[2], pal_alphaText.textDim[3], 1)
+    end
     alphaText:SetPoint("LEFT", alphaSlider, "RIGHT", 8, 0)
     alphaText:SetText(PigSet["FrameAlpha"] .. "%")
 
     local alphaLabel = alphaSlider:CreateFontString(nil, "ARTWORK")
-    alphaLabel:SetFont(STANDARD_TEXT_FONT, 14, "")
-    alphaLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+    alphaLabel:SetFont(STANDARD_TEXT_FONT, 13, "")
+    do
+        local pal_alphaLabel = WR_UI_P()
+        alphaLabel:SetTextColor(pal_alphaLabel.text[1], pal_alphaLabel.text[2], pal_alphaLabel.text[3], 1)
+    end
     alphaLabel:SetPoint("BOTTOM", alphaSlider, "TOP", 0, 5)
     alphaLabel:SetText("窗口透明度")
 
@@ -3479,14 +3741,20 @@ local function ConfigFrame()
 
     alphaSlider:SetScript("OnEnter", function(self)
         alphaHighlight:Show()
-        alphaLabel:SetTextColor(1, 1, 1)
+        do
+            local palH7 = WR_UI_P()
+            alphaLabel:SetTextColor(palH7.accent[1], palH7.accent[2], palH7.accent[3], 1)
+        end
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
         GameTooltip:SetText("窗口透明度\n调整配置窗口背景透明度。\n范围：10% - 100%\n\n|cff00adf0快捷命令：/run PigSet.FrameAlpha=数值|r")
         GameTooltip:Show()
     end)
     alphaSlider:SetScript("OnLeave", function(self)
         alphaHighlight:Hide()
-        alphaLabel:SetTextColor(classColor.r, classColor.g, classColor.b)
+        do
+            local palH8 = WR_UI_P()
+            alphaLabel:SetTextColor(palH8.text[1], palH8.text[2], palH8.text[3], 1)
+        end
         GameTooltip:Hide()
     end)
 
@@ -3512,7 +3780,8 @@ local function ConfigFrame()
         uiScaleLabel:SetPoint("TOPLEFT", followDropdown, "BOTTOMLEFT", 16, -GLOBAL_ROW_H)
     end
 
-    -- 应用左区全局初始化状态（WR_LayoutGlobal 仅负责显示全局标题条）
+    -- 建立左区全局折叠控件清单并应用初始化状态（此前的控件已全部创建完毕）
+    globalRegion.contentWidgets = nil
     if WR_LayoutGlobal then WR_LayoutGlobal() end
 
     -- 右下角整体缩放手柄（等比缩放整个框架，含文字与控件一起放大/缩小）
@@ -3520,16 +3789,35 @@ local function ConfigFrame()
     scaleGrabber:SetSize(18, 18)
     scaleGrabber:SetPoint("BOTTOMRIGHT", configFrame, "BOTTOMRIGHT", -1, 1)
     scaleGrabber:SetFrameLevel(configFrame:GetFrameLevel() + 10)
-    scaleGrabber:SetNormalTexture("Interface\\Buttons\\UI-AutoCastableOverlay")
-    local sgTex = scaleGrabber:GetNormalTexture()
-    if sgTex then sgTex:SetTexCoord(0, 0.5, 0, 0.5) end
-    scaleGrabber:SetHighlightTexture("Interface\\Buttons\\UI-AutoCastableOverlay", "ADD")
+    -- ★ 2026-11-13 UI 现代化：旋转光环贴图 → 三点式缩放把手（扁平）
+    local grabDots = scaleGrabber:CreateFontString(nil, "OVERLAY")
+    grabDots:SetPoint("CENTER", scaleGrabber, "CENTER", 0, 0)
+    do
+        local palG = WR_UI_P()
+        grabDots:SetFont(STANDARD_TEXT_FONT, 12, "")
+        grabDots:SetTextColor(palG.textDim[1], palG.textDim[2], palG.textDim[3], 1)
+        grabDots:SetText("◢")
+    end
     scaleGrabber:SetScript("OnEnter", function(self)
+        if grabDots then
+            do
+                local palGH = WR_UI_P()
+                grabDots:SetTextColor(palGH.text[1], palGH.text[2], palGH.text[3], 1)
+            end
+        end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:SetText("拖动等比缩放整个窗口（含文字与控件一起放大/缩小，0.5x~2x）")
         GameTooltip:Show()
     end)
-    scaleGrabber:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    scaleGrabber:SetScript("OnLeave", function()
+        if grabDots then
+            do
+                local palGL = WR_UI_P()
+                grabDots:SetTextColor(palGL.textDim[1], palGL.textDim[2], palGL.textDim[3], 1)
+            end
+        end
+        GameTooltip:Hide()
+    end)
     scaleGrabber:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" then return end
         local startX, startY = GetCursorPosition()

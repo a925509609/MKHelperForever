@@ -103,6 +103,24 @@ function WR_WarlockAutoSummonPet_BExt(selectedPet)
         return false
     end
 
+    -- ★ 2026-11-13 参考图语义追加三门：
+    --   ① 站着不动才召（移动中不召）；
+    --   ② 吃喝不召（喝水/进食等 buff 期间不打断恢复）；
+    --   ③ 点了恶魔牺牲把召唤关掉（牺牲 buff 存在时不召）。
+    --   ★ nil 判定而非 type()=="function"（仓库老坑：可调用对象可能是 userdata）
+    if WR_PlayerMove ~= nil and WR_PlayerMove() then
+        return false
+    end
+    local eatDrink = { "喝水", "进食", "饮用", "进食饮水", "食物", "饮料", "饮水" }
+    if WR_GetUnitBuffTime ~= nil
+       and WR_GetUnitBuffTime("player", eatDrink, nil, "NAME") > 0 then
+        return false
+    end
+    if WR_GetUnitBuffTime ~= nil
+       and WR_GetUnitBuffTime("player", "恶魔牺牲") > 0 then
+        return false
+    end
+
     -- ★ 冷却：8 秒间隔，防止频繁尝试（卡 GCD）
     local now = GetTime and GetTime() or 0
     if now < WR_WarlockAutoPetNextSummonTime_BExt then

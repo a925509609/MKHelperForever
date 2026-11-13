@@ -553,6 +553,43 @@ function WR_PaladinBlessing_InCastRange(unit, spellName, greater)
     return true
 end
 
+-- ★★★ 2026-11-13 用户口径「小队祝福只作用于范围内的队友」——射程**确认**闸：
+--   InCastRange 的旧口径是「三层全部读不到 → 放行」（11-12 为保补祝福速度定的）。
+--   但真机证据表明：目标超程 / 条件回退时友善法术会退化落到玩家自己身上
+--   （选中敌方目标时尤甚）——「读不到」再放行就等于允许盲施。
+--   本函数按同一套三层判定，但语义反过来：**必须有一层明确回答「在射程内」**
+--   才算确认；明确超程或全部读不到 → false（调用方跳过该单位，宁可不补不误施）。
+function WR_PaladinBlessing_RangeConfirmed(unit, spellName, greater)
+    if type(unit) ~= "string" or unit == "" then return false end
+    if unit == "player" then return true end               -- 自己永远够得着
+    local range = WR_PaladinBlessing_CastRange(spellName, greater)
+    -- ① 按技能查射程：读到 1/0 都算「拿到了明确答案」
+    if type(spellName) == "string" and spellName ~= "" then
+        local fn = nil
+        if WR_PalBless_Fn(IsSpellInRange) then
+            fn = IsSpellInRange
+        elseif type(C_Spell) == "table" and WR_PalBless_Fn(C_Spell.IsSpellInRange) then
+            fn = C_Spell.IsSpellInRange
+        end
+        if fn then
+            local ok, v = WR_PalSafe_Call(2, fn, spellName, unit)
+            v = WR_PalBless_Num(v, nil)
+            if ok and v ~= nil then return v == 1 end
+        end
+    end
+    -- ③ 数值距离（LibRangeCheck 分桶）：读到 → 与射程+余量比较，拿到明确答案
+    if WR_PalBless_Fn(WR_UnitRange) then
+        local ok, d = WR_PalSafe_Call(2, WR_UnitRange, unit)
+        d = WR_PalBless_Num(d, nil)
+        if ok and d ~= nil and d < 900 then
+            return d <= range + (WR_PAL_BLESS_RANGE_SLACK or 2)
+        end
+    end
+    -- ② UnitInRange 只有「否决」能力（false=超40码），给不出「在射程内」的确认
+    -- 全部读不到 → 无法确认 → 按超程处理（strict，不再放行）
+    return false
+end
+
 -- 该单位应有的祝福种类（返回 0/nil = 不加）+ 是否用强效
 function WR_PaladinBlessing_UnitPick(unit, mode, classToken)
     local c = WR_PaladinBlessing_Cfg()
@@ -925,6 +962,14 @@ function WR_PaladinBlessing_Blocked()
     --   secret 值错误。secret 已被 WR_PalSafe_Call 收敛成 nil，nil == true 恒假，
     --   语义上 = 读不到就按「不阻止」处理（Blocked 只在脱战补祝福时被调用，
     --   读不到时放过比整段罢工更安全）。
+    -- ★★★ 2026-11-13：InCombatLockdown 是最可靠的战斗判定。UnitAffectingCombat
+    --   在战斗 secret 化时读回 nil → 旧逻辑会误判「不在战斗」→ 祝福模块继续跑，
+    --   CastDirect 因战斗锁返回 false → 回落焦点流程 → 防骑每 tick 设焦点 party2。
+    --   这里直接用 InCombatLockdown 兜底，战斗中一律不补祝福。
+    if WR_PalBless_Fn(InCombatLockdown) then
+        local okL, locked = WR_PalSafe_Call(2, InCombatLockdown)
+        if okL and locked == true then return true end
+    end
     if WR_PalBless_Fn(UnitAffectingCombat) then
         local ok, v = WR_PalSafe_Call(2, UnitAffectingCombat, "player")
         if ok and v == true then return true end
@@ -977,6 +1022,20 @@ function WR_PaladinBlessing_FocusSlot(unit)
     local j = tonumber(string.match(unit or "", "^raid(%d+)$"))
     if j and j >= 1 and j <= 25 then return 120 + j end      -- 121~145
     return nil
+end
+
+-- ★★★ 2026-11-13 修复（防骑被奶骑自动焦点牵连）：
+--   祝福的「焦点流程」本质只服务于神圣骑的 [@focus] 祝福宏。防护/惩戒没有
+--   [@focus] 祝福宏；一旦共享祝福模块在直施不可用（战斗锁定 / 回读失败）时
+--   回落到焦点流程，就会点亮 176-179 焦点色块 → AHK 按下 → 把队友设成焦点。
+--   非神圣专精直接禁止回落：宁可不补祝福，也绝不抢焦点。
+function WR_PaladinBlessing_FocusFlowAllowed()
+    local fn = WR_GetMyTalent
+    -- type(fn)=="userdata" 兼容离线夹具里的 Python 可调用对象（同 WR_PalBless_Fn 口径）
+    if type(fn) ~= "function" and type(fn) ~= "userdata" then return true end
+    local ok, spec = pcall(fn)
+    if not ok then return true end
+    return spec == "神圣"
 end
 
 -- ★★★ 2026-11-12 用户口径「队友不在附近时，队友的祝福会上到自己身上」：
@@ -1082,11 +1141,51 @@ end
 --     期会被静默丢弃，写不进去时宏还是上一次的旧目标（甚至初始自施文本）——
 --     这时点亮色块 = AHK 按下去把祝福打给了错误的人。宁可不补，也不能误施。
 function WR_PaladinBlessing_CastDirect(unit, spellName)
+    -- ★★★ 2026-11-13：战斗锁定硬闸。
+    --   槽 95 是 SecureActionButtonTemplate，战斗中 SetAttribute("macrotext")
+    --   会被**静默丢弃**（写不进去）；此时点亮 = AHK 按下去执行上一次的旧文本
+    --   —— 旧文本可能是 [@player,...] 自施文本，这就是「小队祝福上到自己、
+    --   顶掉个人祝福」的主通道。战斗锁定期一律拒绝直施（回落焦点流程：
+    --   焦点宏是注册期写好的静态文本，不依赖战斗中重写）。
+    if WR_PalBless_Fn(InCombatLockdown) then
+        local okL, locked = WR_PalSafe_Call(2, InCombatLockdown)
+        if okL and locked == true then return false end
+    end
     if not WR_PalBless_Fn(WR_CreateMacro) then return false end
     if type(unit) ~= "string" or unit == "" then return false end
     if type(spellName) ~= "string" or spellName == "" then return false end
     local text = WR_PaladinBlessing_DirectMacroText(unit, spellName)
     if not text then return false end
+
+    -- ★★★ 2026-11-13 用户口径「队友不在身边、小队祝福开着、选中敌方目标时祝福刷到自己身上，
+    --   把个人祝福顶掉」—— 点亮之前的**目标合法性硬闸**。
+    --   根因：直施是「盲点亮」。宏里的 /stopmacro [@partyN,nohelp] 只管客户端拿到手之后往哪泼，
+    --   管不了 AHK 这一次按键最终落到谁身上：
+    --     ① 玩家当前选中的是敌方目标 —— 给友方补祝福的语境根本不成立；
+    --     ② 宏文本回读失败（战斗锁定 / SetAttribute 被丢），槽 95 还是上一次的旧目标，
+    --        甚至初始那行「自施」文本 —— 点亮后按键直接落到玩家自己身上；
+    --   两种情况的共同结果都是「祝福打到自己」→ 与单人行 / 常驻那条互相顶掉 = 冲突。
+    --   处理：命中任一不合法条件就**不点亮**，队列推进到下一个单位。
+    --   读不到（secret → nil）一律放行：脱战可读，宁可放过也不要整队不补。
+    if type(unit) == "string" and unit ~= "player" then
+        if WR_PalBless_Fn(UnitIsDeadOrGhost) then
+            local okD, deadD = WR_PalSafe_Call(2, UnitIsDeadOrGhost, unit)
+            if okD and deadD == true then return false end
+        end
+        if WR_PalBless_Fn(UnitIsUnit) then
+            local okS, isSelfU = WR_PalSafe_Call(2, UnitIsUnit, unit, "player")
+            if okS and isSelfU == true then return false end      -- 单位 token 已被压成自己
+            local isPlr = nil
+            if WR_PalBless_Fn(UnitIsPlayer) then
+                local okQ, vQ = WR_PalSafe_Call(2, UnitIsPlayer, unit)
+                if okQ then isPlr = vQ end
+            end
+            if isPlr == false then
+                local okT, isTgt = WR_PalSafe_Call(2, UnitIsUnit, unit, "target")
+                if okT and isTgt == true then return false end   -- 当前目标就是它，且不是玩家 → 敌方
+            end
+        end
+    end
 
     local key = WR_PAL_BLESS_UNIT_KEY or "ALT-F5"
     WR_CreateMacro(key, text)
@@ -1097,7 +1196,10 @@ function WR_PaladinBlessing_CastDirect(unit, spellName)
         if btn and WR_PalBless_Fn(btn.GetAttribute) then
             local ok, cur = WR_PalSafe_Call(2, btn.GetAttribute, btn, "macrotext")
             cur = WR_PalBless_Plain(cur)
-            if ok and type(cur) == "string" and cur ~= "" and cur ~= text then
+            -- ★★★ 2026-11-13：回读校验改为**严格**——「读不到 / 空」同样视为写失败。
+            --   旧写法只在「读到了且不同」时拦截；回读本身被 secret 化 / 返回空时
+            --   会放行点亮 → 按键执行旧宏文本（可能是 [@player] 自施）→ 误施到自己。
+            if (not ok) or type(cur) ~= "string" or cur == "" or cur ~= text then
                 return false        -- 写不进去（战斗锁定 / 异常）→ 不点亮
             end
         end
@@ -1254,18 +1356,53 @@ end
 --   返回 true  = 本 tick 已点亮（调用方立刻 return true）
 --   返回 false = 这个单位此刻不能处理（冷却中 / 焦点未就绪 / 宏不可用且无焦点槽）
 --                → 调用方继续遍历下一个单位（修复二：跳过而不是结束整个 tick）
+-- ★★★ 2026-11-13 用户口径「选中敌方目标时小队祝福刷到自己身上、顶掉个人祝福」：
+--   玩家当前选中的目标是否**明确为敌对**（读得到才判；无目标 / 读不到 → false 放行）。
+--   敌对目标在身时，给队友补祝福的语境不成立：直施/焦点宏一旦条件回退，
+--   友善法术会退化成无目标施放 → 当前是敌对目标时按本服规则直接自施
+--   —— 这正是「小队祝福上到自己、顶掉个人祝福」的通道之一。
+function WR_PaladinBlessing_PlayerTargetHostile()
+    if not WR_PalBless_Fn(UnitExists) then return false end
+    local okE, e = WR_PalSafe_Call(2, UnitExists, "target")
+    if not (okE and e == true) then return false end      -- 无目标 / 读不到 → 不算敌方
+    if WR_PalBless_Fn(UnitIsFriend) then
+        local okF, f = WR_PalSafe_Call(2, UnitIsFriend, "player", "target")
+        if okF and f == false then return true end        -- 明确非友善 → 敌对
+    end
+    if WR_PalBless_Fn(UnitCanAttack) then
+        local okA, a = WR_PalSafe_Call(2, UnitCanAttack, "player", "target")
+        if okA and a == true then return true end         -- 明确可攻击 → 敌对
+    end
+    return false
+end
+
 local function WR_PaladinBlessing_TryUnit(unit, mode, kind, greater)
     local rec = WR_PAL_BLESS_KINDS[kind]
     if not rec then return false end
     local spellName = greater and rec.greater or rec.normal
     local slot = greater and rec.greaterSlot or rec.normalSlot
 
+    -- ★★★ 2026-11-13 用户口径「选中敌方目标时小队祝福刷到自己身上、顶掉个人祝福」：
+    --   给**队友**补祝福前先看玩家当前目标：明确敌对 → 本 tick 不点亮
+    --   （直施 / 焦点两条路都在这道闸后面，一并拦住）。
+    --   个人祝福（unit=player）不受影响，照常点亮 —— 两类祝福互不牵连。
+    --   读不到（secret → nil）放行，由 CastDirect 战斗锁/回读闸 + 射程确认闸兜底。
+    if unit ~= "player" and WR_PaladinBlessing_PlayerTargetHostile() then
+        return false
+    end
+
     -- ★★ 2026-11-12：单人自施分支（用户口径「单人可以不用设置焦点直接使用加祝福buff」）
     --   直接点亮 selfSlot（91~93，宏 /cast [target=player] 普通祝福），
     --   不切焦点、不走 [@focus]，也不受当前目标 / 已有焦点影响；
     --   自施宏本身就是普通祝福，与单人段「普通祝福」的语义一致。
     --   宏系统不可用（WR_CreateMacro 缺失，自施宏未注册）→ 落回焦点流程。
-    if mode == "solo" and rec.selfSlot and WR_PalBless_Fn(WR_CreateMacro) then
+    -- ★★★ 2026-11-13：小队/团队模式下「自己」的普通祝福也走自施宏（91~93）。
+    --   自施宏是注册期写好的静态 [target=player] 文本，战斗锁定下按键照常生效；
+    --   不再借用槽 95 动态宏 → 槽 95 从此只承载「队友」文本，
+    --   即使出现残留宏文本也**结构上不可能**落到玩家自己身上。
+    --   （团队段 unit=player 的强效祝福无自施宏，仍走槽 95 直施，但只在脱战可写时点亮。）
+    if (mode == "solo" or (unit == "player" and not greater))
+       and rec.selfSlot and WR_PalBless_Fn(WR_CreateMacro) then
         local key = "祝福:自施:" .. tostring(kind)
         if WR_PalBless_Fn(WR_PaladinForever_CanPrompt)
            and not WR_PaladinForever_CanPrompt(key, WR_PAL_BLESS_PROMPT_CD) then
@@ -1301,6 +1438,11 @@ local function WR_PaladinBlessing_TryUnit(unit, mode, kind, greater)
         end
         -- 直施不可用 → 落回焦点流程
     end
+
+    -- ★★★ 2026-11-13：非神圣专精禁止回落焦点流程。
+    --   防骑/惩戒的祝福只走直施（槽 91-93/95）；直施不可用就跳过该单位，
+    --   绝不点亮 176-179 焦点色块（防骑「自动设置焦点到 party2」的直接来源）。
+    if not WR_PaladinBlessing_FocusFlowAllowed() then return false end
 
     -- ① 焦点没切到该单位 → 先切焦点（含自己；直施不可用时才走到这里）
     if not WR_PaladinBlessing_FocusIs(unit) then
@@ -1407,6 +1549,14 @@ function WR_PaladinBlessing_Auto()
                 --   超程时顺手收口这个单位的残留状态，否则它上一次的 pending
                 --   会让它「看起来还在等」，并且色块可能还亮着被 AHK 连按。
                 local inRange = WR_PaladinBlessing_InCastRange(unit, spellName, greater)
+                -- ★★★ 2026-11-13 用户口径「小队祝福只作用于范围内的队友」：
+                --   InCastRange「读不到放行」的旧口径保留；这里对**队友**追加
+                --   「确认在射程内」硬闸——三层全读不到（战斗 secret）也按超程
+                --   处理，绝不点亮一个可能退化落到自己身上的祝福。
+                if inRange and unit ~= "player"
+                   and not WR_PaladinBlessing_RangeConfirmed(unit, spellName, greater) then
+                    inRange = false
+                end
                 if not inRange then
                     WR_PaladinBlessing_ClearPendingLit(unit, kind)
                     if WR_PalBless_Fn(WR_PaladinForever_HideNow) then
@@ -1442,6 +1592,22 @@ function WR_PaladinBlessing_Auto()
                         skipUnit = true      -- 已有祝福（含 999 哨兵）→ 不需要补
                         -- 读得到且确认不需要补 → 退避清零，回到正常节奏
                         WR_PaladinBlessing_BackoffClear(unit, kind)
+                    end
+
+                    -- ★★★ 2026-11-13 用户口径「选中敌方目标时祝福刷到自己身上，个人祝福被顶掉」
+                    --   最后一层：给队友补祝福的这一刻，如果玩家的当前目标是**另一个友方玩家**
+                    --   （战斗中常见：BOSS 加光环前先点队友读血 / 鼠标悬停目标切换），
+                    --   部分客户端会把带条件的 [@partyN] 施放落到当前友善目标上。
+                    --   这不是我们要的结果 —— 跳过这一 tick 等下一 tick，避免顶掉其他人身上的祝福。
+                    --   只拦「明确读到也是友方玩家且不是本单位」的情况；读不到一律放行。
+                    if not skipUnit and unit ~= "player" and WR_PalBless_Fn(UnitIsUnit) and WR_PalBless_Fn(UnitIsPlayer) then
+                        local okPt, isPlrT = WR_PalSafe_Call(2, UnitIsPlayer, "target")
+                        if okPt and isPlrT == true then
+                            local okTt, tgtIsUnit = WR_PalSafe_Call(2, UnitIsUnit, "target", unit)
+                            if okTt and tgtIsUnit == false then
+                                skipUnit = true      -- 目标是别的友方玩家 → 这一 tick 不动，免得祝福落到他身上
+                            end
+                        end
                     end
 
                     if not skipUnit then

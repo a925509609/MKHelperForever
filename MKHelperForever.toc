@@ -91,6 +91,7 @@ Core\Core_Functions.lua
 Core\SoD_Runes.lua
 Core\InterruptController.lua
 Core\BLACKLIST.lua
+Core\UI_Theme.lua
 Core\UI_Config.lua
 Core\UI_TalentFrame.lua
 Core\UI_ColorFrame.lua

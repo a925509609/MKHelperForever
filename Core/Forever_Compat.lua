@@ -1678,6 +1678,15 @@ do
     WR_Forever_SpellInvalidator:RegisterEvent("PLAYER_TALENT_UPDATE")
     WR_Forever_SpellInvalidator:RegisterEvent("PLAYER_REGEN_ENABLED")
     WR_Forever_SpellInvalidator:SetScript("OnEvent", function(self, event)
+        -- ★★★ 2026-11-13 用户口径「技能消耗变化……时及时刷新所有技能色块」：
+        --   技能消耗正缓存（WR_Forever_PowerCostCache）此前永不过期 —— 升级
+        --   （新客户端同一 spellID 的消耗按等级缩放）、换天赋/雕文修正都会改消耗，
+        --   旧消耗留着会出现「蓝不够还亮（旧消耗低）」或「够蓝却不亮（旧消耗高）」。
+        --   清空零成本：下一次点亮时按需逐技能重探（每技能一次 pcall），战斗中
+        --   也不掉帧；PLAYER_REGEN_ENABLED 只是重建索引，消耗缓存已在变更事件清过。
+        if event ~= "PLAYER_REGEN_ENABLED" then
+            WR_Forever_PowerCostCache = {}
+        end
         if event == "PLAYER_REGEN_ENABLED" then
             if WR_Forever_SpellIndexDirty then WR_Forever_ResetSpellIndex() end
             return

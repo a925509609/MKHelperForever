@@ -38,6 +38,17 @@
 --   本服战斗中读不到客户端 CD，因此以「UNIT_SPELLCAST_SUCCEEDED 的成功施放
 --   时刻」为唯一起点，按技能名 + 全部 rank spellID 双通道记账；提示前先过
 --   本地 CD 判定，再叠加「提示防抖」与「色块保持」两道闸，避免 AHK 同色连按。
+--
+-- ★★★ 2026-11-13 二次核对（NGA 攻略《[无限服] AFK回归，浅析无限服法师
+--   天赋与升级天赋分享》，7 页纯图片版，逐页渲染后逐条人工核对）：
+--   权威数据仍以 mage.json 为准，攻略只作交叉验证，二者没有冲突：
+--     · 冰枪术「对冻结目标伤害提高 300%」+「新增 8sCD」→ 与 CD 表一致 ✓
+--     · 寒冰指（等级 2/2，下 2 次法术视为冻结，15 秒）→ 触发判定见下 ✓
+--     · 寒冰护体列入核心天赋改动、要求「注意冰盾的保持」→ 补 buff 链 ✓
+--     · 强化冰锥术 +35% / 深冬之寒让冰锥术再 +20% → 冰锥术应进单体循环 ✓
+--     · 冰霜新星用来「提供冰冻效果增加清怪效率」→ 开碎裂窗口 ✓
+--     · 「三系输出循环都有一定复杂度，不存在一个技能搓到底」→ 多分支链 ✓
+--   据此落地两处修正：① Fingers of Frost 名称兼容；② 冰锥术单体收尾。
 -- ============================================================
 
 -- ============================================================
@@ -122,10 +133,20 @@ WR_MageFrost_FROZEN_DEBUFFS = {
     "冻结", "冰冻", "冰霜新星", "霜寒刺骨", "Frostbite", "Frozen",
 }
 
--- ★ 「冰霜之指」= Fingers of Frost（r5c3，被动天赋）。
---   效果：你的 Chill 效果有 15% 概率使下一次施法被当作目标已 Frozen。
---   有它的时候冰枪术按冻结处理。
-WR_MageFrost_FOF_BUFF = "冰霜之指"
+-- ★ Fingers of Frost（r5c3，被动天赋）触发判定。
+--   效果：Chill 效果有 15% 概率获得「寒冰指」，使下 2 次法术把目标视为已
+--   Frozen，持续 15 秒（NGA 攻略 P2 天赋截图：等级 2/2）。有它时冰枪术按冻结处理。
+-- ★★ 2026-11-13 名称兼容（攻略核对修正①）：
+--   同一条天赋/光环在不同数据源里中文名不一致：
+--     · NGA 攻略截图、游戏内 tooltip →「寒冰指」
+--     · Data/Forever_Abilities.lua 的 zh、Core/SoD_Runes.lua →「冰霜之指」
+--     · 英文客户端 → "Fingers of Frost"
+--   只查单一名字时，若客户端实际用另一个名字，FoF 触发永远读不到 →
+--   冰枪术碎裂窗口全部丢失（不掉血、不报错，最难查的一类静默 bug）。
+--   故改为候选名列表，任一命中即视为触发；仓库既有名字放第一，原行为零回归。
+WR_MageFrost_FOF_BUFFS = { "冰霜之指", "寒冰指", "Fingers of Frost" }
+-- 兼容别名：保留旧全局名，避免其它模块按旧名引用时拿到 nil。
+WR_MageFrost_FOF_BUFF = WR_MageFrost_FOF_BUFFS[1]
 
 -- ★ 需要「已学会」才能提示的技能。
 --   Forever 冰霜天赋树里的 4 条主动技能都是【天赋】而非天生技能：
@@ -282,8 +303,12 @@ function WR_MageFrost_Ready(spell)
 end
 
 -- ============================================================
--- 四、点亮色块（提示防抖 + 保持 + 保持到期自动熄灭）
+-- 四、点亮色块（提示防抖 + 保持标记）
 -- ------------------------------------------------------------
+-- ★ 2026-11-13 OA 审查更正：HoldUntil 目前只在 Show 里写、HideNow 里清，
+--   全文没有按「到期」读取并自动熄灭的逻辑。真正的熄灭靠
+--   WR_ColorFrame_ShowSkill 的「隐藏全部 → 显示一个」以及 ClearPrompts()。
+--   故标题不再宣称「保持到期自动熄灭」，避免误导后续维护者（11-12 遗留）。
 -- 带 CD 的技能：本地 CD 未就绪 / 防抖窗口内 → 不点亮。
 -- 无 CD 的填充技能（寒冰箭）：不做 CD 判定，但同样过防抖，
 --   保证「同一 tick 内不会重复点亮同一技能」。
@@ -414,7 +439,8 @@ function WR_MageForeverFrost()
     UnitCount10 = WR_GetRangeHarmUnitCount(10)
 
     -- ===== 2. 冻结判定（Forever 冰枪术碎裂窗口）=====
-    -- 目标身上有冻结类 debuff，或自己身上有「冰霜之指」→ 视为 Frozen
+    -- 目标身上有冻结类 debuff，或自己身上有 Fingers of Frost 类 buff
+    -- （多别名兼容，见 WR_MageFrost_FOF_BUFFS）→ 视为 Frozen
     -- ★ 统一用 pcall 而非 type() 守卫（见 WR_MageFrost_Show 里的说明）
     local targetFrozen = false
     for i = 1, #WR_MageFrost_FROZEN_DEBUFFS do
@@ -425,9 +451,12 @@ function WR_MageForeverFrost()
         end
     end
     local fofProc = false
-    do
-        local ok, t = pcall(WR_GetUnitBuffTime, "player", WR_MageFrost_FOF_BUFF)
-        if ok and type(t) == "number" and t > 0 then fofProc = true end
+    for i = 1, #WR_MageFrost_FOF_BUFFS do
+        local ok, t = pcall(WR_GetUnitBuffTime, "player", WR_MageFrost_FOF_BUFFS[i])
+        if ok and type(t) == "number" and t > 0 then
+            fofProc = true
+            break
+        end
     end
     local frozen = targetFrozen or fofProc
 
@@ -468,7 +497,7 @@ function WR_MageForeverFrost()
     -- ===== 6. ★ 冰枪术 · 碎裂窗口（最高输出优先级）=====
     -- Forever 天赋描述：「Deals 28 to 32 Frost damage... Deals 300% increased
     -- damage to Frozen targets.」—— 对冻结目标 4 倍伤害，且只有 8 秒 CD。
-    -- 所以：只有「目标 Frozen（含冰霜之指）」时才打；非冻结时绝不为了
+    -- 所以：只有「目标 Frozen（含 FoF 触发）」时才打；非冻结时绝不为了
     -- 「CD 好了」而浪费这一发（这是原实现最大的 bug）。
     if frozen and inRange30 then
         if WR_MageFrost_Show("冰枪术", 44) then return true end
@@ -494,8 +523,18 @@ function WR_MageForeverFrost()
         if WR_MageFrost_Show("暴风雪", 26) then return true end
     end
 
-    -- 9.2 冰锥术（10 秒 CD，瞬发锥形，减速 40%）—— 2+ 目标且贴身
-    if inMelee10 and UnitCount8 >= 2 then
+    -- 9.2 冰锥术（10 秒 CD，瞬发锥形，减速 40%）—— 贴身即用（含单体收尾）
+    -- ★★ 2026-11-13 按 NGA 攻略核对修正②：
+    --   旧条件 `inMelee10 and UnitCount8 >= 2` 把冰锥术锁死在多目标，单体
+    --   永远轮不到。但攻略 P3 明确「现在冰锥术可以作为收尾技能加入冰法的
+    --   循环中并能提供非常不错的伤害」、P4「灵活使用冰锥术收尾」，且天赋
+    --   强化冰锥术 +35%、深冬之寒让冰锥术再 +20%，单体打它同样是净收益。
+    --   本服冰锥术 10 秒 CD / 瞬发 / 246 蓝（Data/Forever_MageSpells.lua:63），
+    --   单体贴身时排在寒冰箭填充之前，作为瞬发补充伤害 + 40% 减速。
+    --   仍保留 inMelee10 射程门（锥形近身技能，30 码外打不到）；
+    --   蓝量下限 0.15、10 秒本地 CD 记账、提示防抖都在 Show 里照常生效，
+    --   挡住时继续往下走寒冰护体 / 急速冷却 / 寒冰箭，不会卡住整条链。
+    if inMelee10 then
         if WR_MageFrost_Show("冰锥术", 27) then return true end
     end
 

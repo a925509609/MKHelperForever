@@ -342,6 +342,12 @@ WR_PaladinForever_SpellRankIDs = {
     ["正义之怒"] = { 25780 },
     -- ★ 2026-11-08：截图实测 神圣之盾 Rank1 = 20925（CD 10 秒）
     ["神圣之盾"] = { 20925 },
+    -- ★★ 2026-11-13：截图实测 愤怒之锤 Rank1 = 24275（斩杀 <20%，本地 6 秒 CD）。
+    --   战斗中 UNIT_SPELLCAST_SUCCEEDED 的 spellName 可能是 secret，按 ID 记账
+    --   才能保证愤怒之锤的本地 6 秒 CD 正常推进（与神圣之盾同一处理）。
+    -- ★★★ 2026-11-14：补全 Rank2/3（24274/24239，Forever DB 实测：44/52/60 级）。
+    --   当前 rank 换级后施放事件上报的是新 rank ID；只登记 Rank1 会让 6 秒本地 CD 断档（色块反复亮）。
+    ["愤怒之锤"] = { 24275, 24274, 24239 },
 }
 -- 技能名 → 下一次自然冷却结束时间（Ready-first 的排序依据）
 WR_PaladinForever_FreeAt = WR_PaladinForever_FreeAt or {}
@@ -1842,6 +1848,45 @@ WR_PaladinForever_SPELL_RANGE = {
     ["奉献"]     = 5,   -- 以自身为中心
 }
 
+-- ============================================================
+-- ★★★ 2026-11-13：目标「确认死亡 / 尸体」统一判定（审判 buff 尸体空放修复）
+-- ------------------------------------------------------------
+--   用户口径：「勾选后，当目标已死亡且显示为尸体时，仍会切换所选圣印并尝试释放审判」。
+--   根因：TargetCastable / CanApplySeal / 状态机 phase4 全部只做裸 `if UnitIsDead(...) then`
+--     真值判断——① 12.0 战斗中单位状态型接口可能返回 secret boolean（哑值），
+--     裸真值拿不到「确认的 true」时，尸体被当成活体放行；② 整条链从未查
+--     UnitIsGhost（本服尸体目标可能挂在 ghost 态上，UnitIsDead 读不到 true）。
+--   口径（与射程 999/secret 放行一致）：只有【确认死亡】才拦——
+--     UnitIsDead / UnitIsDeadOrGhost / UnitIsGhost 任一明确回答 true → 死亡；
+--     另加「血量读得到且 ≤0」兜底；读不到（secret / API 缺失 / 抛错）一律放行。
+-- ============================================================
+function WR_PaladinForever_UnitIsDeadOrGhost(unit)
+    if type(unit) ~= "string" or unit == "" then return false end
+    -- ① 单位状态三接口：任何一个明确回答 true → 死亡。
+    --   ★ secret 比较会抛错：比较本身也要包 pcall（与 WR_PalBless_Plain 兜底探针同思路）；
+    --   ★ 兼容层下这些 API 可能是 userdata，只做 ~= nil 判存在（同 InSpellRange 的 WR_UnitRange 口径）。
+    local fns = {}
+    if UnitIsDead ~= nil then fns[#fns + 1] = UnitIsDead end
+    if UnitIsDeadOrGhost ~= nil then fns[#fns + 1] = UnitIsDeadOrGhost end
+    if UnitIsGhost ~= nil then fns[#fns + 1] = UnitIsGhost end
+    for i = 1, #fns do
+        local ok, v = pcall(fns[i], unit)
+        if ok then
+            local okC, eq = pcall(function() return v == true end)
+            if okC and eq == true then return true end
+        end
+    end
+    -- ② 血量兜底：读得到且确认为 0 → 死亡；读不到 / secret → 放行（见上方口径）。
+    if UnitHealth ~= nil then
+        local okH, hp = pcall(UnitHealth, unit)
+        if okH then
+            local okN, isZero = pcall(function() return type(hp) == "number" and hp <= 0 end)
+            if okN and isZero == true then return true end
+        end
+    end
+    return false
+end
+
 -- 目标是否「存在 + 可攻击 + 活着」（射程之外的另一半门）
 --   ★ 与 CanApplySeal 一致：UnitExists / UnitCanAttack / UnitIsDead 都是客户端标准 API，
 --     主循环本来就裸调用，这里不做 type() 防御（否则 mock/兼容层下会被误判成不可用）。
@@ -1849,7 +1894,11 @@ function WR_PaladinForever_TargetCastable(unit)
     unit = unit or "target"
     if not UnitExists(unit) then return false end
     if not UnitCanAttack("player", unit) then return false end
-    if UnitIsDead(unit) then return false end
+    -- ★★★ 2026-11-13：死亡/尸体判定改走统一门 WR_PaladinForever_UnitIsDeadOrGhost——
+    --   裸 UnitIsDead 真值判断拿不到 secret 的「确认 true」，且从未查 UnitIsGhost，
+    --   尸体（含 ghost 态）目标被当成活体放行 → 审判 buff 状态机对着尸体切圣印/亮审判。
+    --   读不到一律放行，口径与射程 999/secret 一致；活体目标行为不变。
+    if WR_PaladinForever_UnitIsDeadOrGhost(unit) then return false end
     return true
 end
 
@@ -1965,7 +2014,16 @@ do
                                "公正圣印", "光明圣印", "智慧圣印", "殉难圣印",
                                "腐蚀圣印", "复仇圣印", "审判", "神圣打击",
                                "奉献", "驱邪术", "愤怒之锤", "制裁之锤",
-                               "圣疗术", "圣佑术" }
+                               "圣疗术", "圣佑术",
+                               -- ★★ 2026-11-13（奶骑）：治疗技能也必须能在
+                               --   战斗中按 spellID 反查出名字，否则：
+                               --   ① ShowSkillCD 的「施放记录通道」拿不到起点 →
+                               --      圣光术/闪现每次施放后还会按 1.5 秒窗口重亮
+                               --      → AHK 同色连按 → 反复读条、蓝量雪崩；
+                               --   ② 施放成功就收不掉色块，读条期间又亮新色块
+                               --      → 打断自己的治疗读条（白烧蓝、治疗量 0）。
+                               "圣光术", "圣光闪现", "神圣震击", "神恩术",
+                               "清洁术", "圣盾术", "光之守夜", "真理之声" }
             for i = 1, #dynNames do
                 local nm = dynNames[i]
                 local ok, id = pcall(WR_ResolveSpellID, nm)
@@ -2069,6 +2127,18 @@ do
             WR_PaladinForever_HideNow(name)
             local cd = WR_PaladinForever_SkillCD and WR_PaladinForever_SkillCD[name]
             if name == "审判" then
+                -- ★★★ 2026-11-13（v2）：按施放瞬间身上的圣印记「单审判槽位」本地账，
+                --   战斗中目标 debuff 不可读时供 JudgementAllowed 兜底（光明/智慧互斥）。
+                if type(WR_PaladinForever_NoteSingleSlotJudgement) == "function" then
+                    local judgeSeal = WR_PaladinForever_LastSealAppliedName
+                    if judgeSeal == "光明圣印" then
+                        WR_PaladinForever_NoteSingleSlotJudgement("light",
+                            now + (WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS or 40))
+                    elseif judgeSeal == "智慧圣印" then
+                        WR_PaladinForever_NoteSingleSlotJudgement("wisdom",
+                            now + (WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS or 40))
+                    end
+                end
                 -- 审判 CD 随「强化审判」天赋变化，用实际施放间隔自动校准
                 WR_PaladinForever_ProbeJudgeCooldown(now)
                 cd = WR_PaladinForever_GetJudgeCooldown()
@@ -2358,11 +2428,99 @@ function WR_PaladinForever_InCombatGate(allowAddFlag)
     return false
 end
 
-function WR_PaladinForever_HasDispel()
-    return (WR_GetUnitDebuffTime("player", "中毒") > 0)
-        or (WR_GetUnitDebuffTime("player", "疾病") > 0)
-        or (WR_GetUnitDebuffTime("player", "魔法") > 0)
-        or (WR_GetUnitDebuffTime("player", "诅咒") > 0)
+-- ★★★ 2026-11-14 用户口径：「骑士清洁术功能匹配一下，目前插件面板中的清洁术无法使用」
+--   面板已有 5 模式下拉（FH_QJS / CJ_QJS）和防护「自己 / 目标」复选框，
+--   但 Forever 循环没有读取这些变量 → 面板选项完全不生效。
+--   另外公共 HasDispel 把「诅咒」也算进来，而本服 清洁术(4987) 只能驱散
+--   中毒 / 疾病 / 魔法（截图实测）—— 点诅咒会白按一次。
+--   这里统一：只认三种可驱散类型；模式 1/2/3/4/5 与防护独立复选框全部接入，
+--   施放走 43 自己 / 44 目标 / 59 指向（不设焦点）。
+WR_PaladinForever_DISPEL_KINDS = { "中毒", "疾病", "魔法" }
+
+function WR_PaladinForever_UnitIsFriendly(unit)
+    if type(unit) ~= "string" or unit == "" then return false end
+    if unit == "player" then return true end
+    -- ★ 直接 pcall：本仓库离线夹具里 UnitIsFriend/UnitIsPlayer 是 userdata 函数，
+    --   type(...) == "function" 会误判为不存在（客户端里两者都存在，行为一致）。
+    local ok, v = pcall(UnitIsFriend, "player", unit)
+    if ok and v == true then return true end
+    if ok and v == false then return false end
+    local okP, vP = pcall(UnitIsPlayer, unit)
+    if okP and vP == true then return true end
+    return false
+end
+
+function WR_PaladinForever_UnitHasDispel(unit)
+    if type(unit) ~= "string" or unit == "" then return false end
+    local okE, exists = pcall(UnitExists, unit)
+    if not okE or exists ~= true then return false end
+    local okD, dead = pcall(UnitIsDeadOrGhost, unit)
+    if okD and dead == true then return false end
+    if not WR_PaladinForever_UnitIsFriendly(unit) then return false end
+    local kinds = WR_PaladinForever_DISPEL_KINDS
+    for i = 1, #kinds do
+        local ok, remain = pcall(WR_GetUnitDebuffTime, unit, kinds[i])
+        if ok and type(remain) == "number" and remain > 0 then return true end
+    end
+    return false
+end
+
+function WR_PaladinForever_HasDispel(unit)
+    return WR_PaladinForever_UnitHasDispel(unit or "player")
+end
+
+-- 本地 8 秒清洁术冷却（战斗中客户端冷却不可读，用施放成功事件记账兜底）
+function WR_PaladinForever_OnCooldown(realName, cd)
+    if type(realName) ~= "string" or type(cd) ~= "number" or cd <= 0 then return false end
+    if type(WR_PaladinForever_GetLastCastAt) ~= "function" then return false end
+    local at = WR_PaladinForever_GetLastCastAt(realName)
+    if type(at) ~= "number" then return false end
+    return (GetTime() - at) < cd
+end
+
+-- 清洁术统一步骤（面板 5 模式 + 防护独立自己/目标复选框）
+--   phase = "priority"：只跑「优先」模式 + 防护独立复选框
+--   phase = "normal"  ：只跑「常规 / 目标 / 指向」模式
+--   phase = nil       ：所有模式（预留单入口专精）
+function WR_PaladinForever_CleanseStep(modeVar, phase, selfVar, targetVar)
+    local mode = tonumber(PigSet and PigSet[modeVar]) or 5
+    if mode < 1 or mode > 5 then mode = 5 end
+
+    local function canCast()
+        return WR_SpellUsable("清洁术", true) and not WR_PaladinForever_OnCooldown("清洁术", 8)
+    end
+    local function tryUnit(unit, alias, slot)
+        if not WR_PaladinForever_UnitHasDispel(unit) then return false end
+        return WR_PaladinForever_ShowSkillCD(alias, slot, 8) == true
+    end
+
+    if phase == "priority" then
+        if selfVar and PigSet and PigSet[selfVar] ~= false and canCast() then
+            if tryUnit("player", "清洁术(自己)", 43) then return true end
+        end
+        if targetVar and PigSet and PigSet[targetVar] ~= false and canCast() then
+            if tryUnit("target", "清洁术(目标)", 44) then return true end
+        end
+    end
+
+    local runDropdown
+    if phase == "priority" then
+        runDropdown = (mode == 2)
+    elseif phase == "normal" then
+        runDropdown = (mode == 1 or mode == 3 or mode == 4)
+    else
+        runDropdown = (mode >= 1 and mode <= 4)
+    end
+    if not runDropdown or not canCast() then return false end
+
+    if mode == 3 then
+        return tryUnit("target", "清洁术(目标)", 44)
+    elseif mode == 4 then
+        return tryUnit("mouseover", "清洁术(指向)", 59)
+    end
+    if tryUnit("target", "清洁术(目标)", 44) then return true end
+    if tryUnit("mouseover", "清洁术(指向)", 59) then return true end
+    return tryUnit("player", "清洁术(自己)", 43)
 end
 
 -- ★ 共享：圣印保持（无限：无符文限制，按单体/多目标选印）

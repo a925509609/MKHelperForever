@@ -90,21 +90,21 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-SHIFT-F7", "/cast [target=targettarget] 误导") -- 87
   WR_CreateMacro("ALT-CTRL-SHIFT-F8", "/cast 冰冻之箭") -- 88 目标冰冻之箭
   WR_CreateMacro("ALT-CTRL-SHIFT-F12", "/petstay") -- 89  宝宝待命(不控制模式原地)
-  WR_CreateMacro("ALT-CTRL-SHIFT-F10", "") -- 90
+  WR_CreateMacro("ALT-CTRL-SHIFT-F10", "/cast 胁迫") -- 90 BM天赋：宠物眩晕+暴击
   WR_CreateMacro("ALT-F1", "/cast [@cursor] 冰冻之箭") -- 91 指向冰冻之箭(备用)
-  WR_CreateMacro("ALT-F2", "") -- 92
-  WR_CreateMacro("ALT-F3", "") -- 93
-  WR_CreateMacro("ALT-F11", "") -- 94
-  WR_CreateMacro("ALT-F5", "") -- 95
-  WR_CreateMacro("ALT-F6", "") -- 96
+  WR_CreateMacro("ALT-F2", "/cast 召唤猎鹰") -- 92 BM天赋：主动伤害技能
+  WR_CreateMacro("ALT-F3", "/cast 狙击") -- 93 MM天赋：远程增伤
+  WR_CreateMacro("ALT-F11", "/cast 散射射击") -- 94 MM天赋：短程AoE
+  WR_CreateMacro("ALT-F5", "/cast 威慑") -- 95 SV天赋：自保
+  WR_CreateMacro("ALT-F6", "/cast 长足踢击") -- 96 SV天赋：近战踢击
   WR_CreateMacro("ALT-F7", "/focus party1target") -- 97
   WR_CreateMacro("ALT-F8", "/focus party2target") -- 98
   WR_CreateMacro("ALT-F12", "/focus party3target") -- 99
   WR_CreateMacro("ALT-F10", "/focus party4target") -- 100
-  WR_CreateMacro("ALT-SHIFT-F1", "") -- 101
-  WR_CreateMacro("ALT-SHIFT-F2", "") -- 102
-  WR_CreateMacro("ALT-SHIFT-F3", "") -- 103
-  WR_CreateMacro("ALT-SHIFT-F11", "") -- 104
+  WR_CreateMacro("ALT-SHIFT-F1", "/cast 反击") -- 101 SV天赋：反击（需格挡触发，可用性由客户端判定）
+  WR_CreateMacro("ALT-SHIFT-F2", "/cast 强击光环") -- 102 MM天赋：团队增益（常驻30分钟，仅补映射）
+  WR_CreateMacro("ALT-SHIFT-F3", "/cast 狂野怒火") -- 103 BM爆发备用（映射表登记为24，24已有ALT-NUMPAD4爆发宏，此宏仅备用）
+  WR_CreateMacro("ALT-SHIFT-F11", "/cast 急速射击") -- 104 MM爆发备用（映射表登记为22，22已有ALT-NUMPAD2爆发宏，此宏仅备用）
   WR_CreateMacro("ALT-SHIFT-F5", "") -- 105
   WR_CreateMacro("ALT-SHIFT-F6", "") -- 106
   WR_CreateMacro("ALT-SHIFT-F7", "") -- 107
@@ -218,20 +218,33 @@ end)
 --   旋转统一用 WR_ColorFrame_ShowSkill(技能名) 取槽位，优先此处，缺失回退原数值。
 --   所有槽位强制落在 1-199（职业专用）；200-240 为 Core/Global_Macros.lua 全局保留，严禁占用。
 --   未在此表的符文新技能已自动分配到空闲职业槽；如需 AHK 按键请在各 WR_CreateMacro 补绑定。
+--   [2026-11-13] 按无限服(Forever)实际技能集调整：新增 9 个新天赋主动技能映射
+--     (胁迫/召唤猎鹰/狙击/散射射击/威慑/长足踢击/反击/强击光环 + 爆发双登记 狂野怒火=24、急速射击=22，
+--     并补 黑箭=8)；删除无限不存在技能的死映射(杀戮射击/杀戮命令/眼镜蛇射击/奇美拉射击/稳固射击/雄狮守护/削砍)。
+--     对应旧 NUMPAD 宏行保留不删（经典服 SoD 路径仍可能使用），仅颜色映射表为 Forever 生效面。
+--   [2026-11-13 QA] 修正 3 条存量错位映射：雄鹰守护=76→1、蝰蛇守护=78→34、自动射击=85→40，
+--     分别对齐宏行 NUMPAD1 !雄鹰守护 / ALT-CTRL-NUMPAD4 !蝰蛇守护 / ALT-CTRL-NUMPAD0 !自动射击；宏行未动。
 -- ============================================================
 WR_SkillColor["HUNTER"] = {
+    -- 仍有效的经典技能
     ["毒蛇钉刺"] = 6,
-    ["杀戮射击"] = 5,
-    ["杀戮命令"] = 15,
-    ["多重射击"] = 20,
-    ["眼镜蛇射击"] = 11,
-    ["奇美拉射击"] = 14,
-    ["瞄准射击"] = 13,
-    ["稳固射击"] = 12,
+    ["黑箭"] = 8,
     ["爆炸射击"] = 7,
-    ["自动射击"] = 85,
-    ["雄狮守护"] = 19,
-    ["蝰蛇守护"] = 78,
-    ["雄鹰守护"] = 76,
-    ["削砍"] = 81,
+    ["多重射击"] = 20,
+    ["瞄准射击"] = 13,
+    ["自动射击"] = 40,
+    ["雄鹰守护"] = 1,
+    ["蝰蛇守护"] = 34,
+    -- 无限新天赋主动技能（本次新增，槽位与旋转层共享契约，勿改）
+    ["胁迫"] = 90,
+    ["召唤猎鹰"] = 92,
+    ["狙击"] = 93,
+    ["散射射击"] = 94,
+    ["威慑"] = 95,
+    ["长足踢击"] = 96,
+    ["反击"] = 101,
+    ["强击光环"] = 102,
+    -- 爆发技能：映射取既有爆发宏槽位(24/22)，备用宏 103/104 不进映射表
+    ["狂野怒火"] = 24,
+    ["急速射击"] = 22,
 }

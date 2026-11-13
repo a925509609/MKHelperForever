@@ -19,9 +19,10 @@ function WR_PaladinForeverRet()
     if PlayerHP < 25 and WR_SpellUsable("圣盾术", true) then
         if WR_ColorFrame_ShowSkill("圣盾术", 18) then return true end
     end
-    if PigSet.CJ_QJ ~= 0 and WR_SpellUsable("清洁术", true) and WR_PaladinForever_HasDispel() then
-        if WR_ColorFrame_ShowSkill("清洁术", 27) then return true end
-    end
+    -- ★★ 2026-11-14：清洁术按面板 CJ_QJS 五模式（原代码读的是已废弃的 CJ_QJ，
+    --   且固定点 27=targettarget 宏，导致面板选项完全无效）
+    if WR_PaladinForever_CleanseStep("CJ_QJS", "priority") then return true end
+    if WR_PaladinForever_CleanseStep("CJ_QJS", "normal") then return true end
 
     -- 2. ★ 2026-11-10 用户要求：删除「开启输出光环」文字提示，不再提醒。
 
@@ -89,8 +90,17 @@ function WR_PaladinForeverRet()
         if WR_PaladinForever_ShowSkillCD("制裁之锤", 22, 60) then return true end
     end
 
-    -- 12. 愤怒之锤（斩杀 <20%；本地 6 秒 CD）
-    if WR_SafeHPPct("target") < 0.20 and WR_SpellUsable("愤怒之锤", true) then
+    -- 12. 愤怒之锤（斩杀；本地 6 秒 CD）
+    --   ★★★ 2026-11-14：与防护共用 WR_PaladinForever_HammerExecuteReady——
+    --   Forever 的 UnitHealth 恒为 secret，旧的 WR_SafeHPPct <0.20 门永远不成立。
+    local hammerReady = false
+    if WR_PaladinForever_HammerExecuteReady ~= nil then
+        local okH, hv = pcall(WR_PaladinForever_HammerExecuteReady)
+        hammerReady = okH and hv == true
+    else
+        hammerReady = WR_SafeHPPct("target") < 0.20 and WR_SpellUsable("愤怒之锤", true)
+    end
+    if hammerReady and WR_SpellUsable("愤怒之锤", true) then
         if WR_PaladinForever_ShowSkillCD("愤怒之锤", 1, 6) then return true end
     end
 

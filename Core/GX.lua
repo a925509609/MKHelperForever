@@ -16,6 +16,257 @@ local FontSize = 16
 -- ==========================================
 local UpdateContent = [[
 
+【防骑】2026-11-14（修复愤怒之锤从未点亮：Forever 隐藏目标血量导致判定恒为满血）
+- 用户口径：「防骑愤怒之锤没有打出来过」。
+- 根因：无限/WoW Forever 的 UnitHealth / UnitHealthMax 对插件恒为 secret 值，WR_SafeHPPct 按安全层口径降级为 1（=满血）；旧门 `WR_SafeHPPct("target") < 0.20` 永远不成立 → hammerEligible 恒 false，主链与兜底都不会点亮愤怒之锤。
+- 修复（Paladin/Paladin_Forever_Prot.lua）：新增 WR_PaladinForever_HammerExecuteReady / WR_PaladinForever_TargetHealthPctSafe；血量可读时按 <20%，血量不可读（Forever 常态）时改用 C_Spell.IsSpellUsable（本服 IsUsableSpell 已映射到该 API；愤怒之锤仅斩杀期可施放，可用性即执行期信号且非 secret），并用 C_SpellActivationOverlay.IsSpellOverlayed（原生技能发光）兜底；主链与兜底统一走新判定。
+- 冷却记账：WR_PaladinForever_SpellRankIDs 补全愤怒之锤 Rank1/2/3 = 24275/24274/24239（Forever DB 实测：44/52/60 级），换 rank 不再漏记 6 秒本地 CD。
+- 同步：Paladin/Paladin_Forever_Ret.lua 的惩戒愤怒之锤复用同一判定（同一根因，避免换专精后再次出现）。
+- 验证：新增 .workbuddy/test_paladin_hammer_wrath_secret.py（隐藏血量 + 执行期/非执行期/冷却中/原生发光兜底）；test_paladin_hammer_wrath.py 等全部圣骑夹具与全量 Lua 语法通过。
+
+【圣骑士】2026-11-14（修复清洁术面板功能：防护/惩戒 Forever 循环未读取面板设置）
+- 用户口径：「骑士清洁术功能匹配一下，目前插件面板中的清洁术无法使用」；截图：清洁术 4987，驱散 1 个中毒/1 个疾病/1 个魔法。
+- 根因：面板已有 FH_QJS / CJ_QJS 五模式下拉与 FH_QJS_Player / FH_QJS_Target 复选框，但 Paladin_Forever_Prot.lua 完全没有清洁术逻辑；Paladin_Forever_Ret.lua 读的是已废弃变量 CJ_QJ，且固定点 27=targettarget 宏；公共 HasDispel 还把不能解的「诅咒」算进来。
+- 修复：新增共享 WR_PaladinForever_CleanseStep / WR_PaladinForever_UnitHasDispel / WR_PaladinForever_OnCooldown；防护接入 FH_QJS 的「优先/常规/目标/指向/禁用」与独立「自己/目标」复选框，惩戒接入 CJ_QJS；施放槽 43 自己 / 44 目标 / 59 指向，不设焦点；只认中毒/疾病/魔法。
+- 验证：新增 .workbuddy/test_paladin_cleanse.py；全部圣骑夹具与 194 文件语法检查通过。
+
+【圣骑士】2026-11-13（修复防骑「常驻光明圣印 + 智慧审判」：主循环误打光明审判顶掉智慧审判）
+- 用户口径：「角色使用光明圣印，审判选择智慧审判；当智慧审判命中目标并给目标加上智慧审判buff后，
+  再切回光明圣印进行攻击时，系统仍会释放光明审判，导致目标身上的智慧审判buff被顶掉消失」。
+- 根因：无限 12.x 战斗中 target 光环是 secret，WR_GetUnitDebuffTime 读不到目标身上的
+  光明/智慧审判 debuff。旧的 WR_PaladinForever_JudgementAllowed 只靠光环判断 →
+  战斗中恒判「没有审判」，主调度按当前圣印打出一发（常驻光明 → 光明审判），
+  把智慧审判顶掉；且智慧审判状态机 phase3 切回光明圣印后到 phase4 之间主调度也会抢打。
+- 修复（Paladin/Paladin_Forever_Prot.lua）：
+  ① 新增 40 秒「单审判槽位」本地记账（kind=light/wisdom）：审判施放成功 / 状态机确认时记录，
+     光环不可读时由 WR_PaladinForever_SingleSlotJudgementInfo 兜底；换目标自动失效。
+  ② WR_PaladinForever_JudgementAllowed 改为类型感知：光明审判永远不许覆盖智慧审判；
+     智慧审判可以把光明审判顶掉（用户要的就是智慧）。
+  ③ 主调度 judgeEligible：FH_CRGMSY / FH_ZHSP 开启时审判由对应状态机独占，
+     主循环任何时刻不再自己打审判，杜绝 phase3/4 切回常驻圣印时抢打光明审判。
+- 验证：新增 .workbuddy/test_paladin_light_wisdom_conflict_repro.py（A-G 全绿：
+  智慧审判挂上后、目标 debuff 不可读时主循环不再点亮审判）；全部圣骑士夹具与
+  全量 Lua 语法 194/194 通过。
+
+【全局】2026-11-13（修复主面板插件图标被「全局」区背景遮挡成黑块）
+- 用户口径：「面板中这里面板UI挡住了图标要移动一下」（截图：全局标题条左侧图标整块发黑）。
+- 根因：插件图标 MKHelperForeverIcon 挂在 configFrame 上（绘制层级低于子框架
+  WR_GlobalRegion 的 region 底色 0.90 alpha），整块图标被左区背景压暗；且 22px 图标
+  与 22px 标题条等高，底边被标题条底部 1px 分隔线切过。
+- 修复（Core/UI_Config.lua）：图标改挂 globalHeader 的 OVERLAY 层（高于左区底色），
+  尺寸 22→18、垂直居中（LEFT, 4, 0），完整落在标题条内，不再被背景/分隔线遮挡。
+- 验证：新增 .workbuddy/test_ui_icon_visibility.py（A-C 全绿）；UI 折叠/菜单夹具与
+  全量 Lua 语法全绿。
+
+【圣骑士】2026-11-13（修复防骑自动把小队第 2 名设为焦点：奶骑自动焦点宏隔离）
+- 用户口径：「防骑配置每次都会自动把焦点设置在小队第二个队友身上，之前不会」。
+- 根因：奶骑自动焦点（2026-11-13）把共享 Paladin_Macros.lua 的 31 条设焦点宏
+  去掉了 nocombat，并把 [@partyN]/[@raidN] 改成 [target=partyN]/[target=raidN]
+  以绕开 WR_ShouldGateFocusMacro。防骑/惩戒与神圣骑共用同一套宏；防骑的共享祝福
+  模块（Paladin_Blessing.lua）在战斗锁定/直施回读失败时回落焦点流程，点亮 176-179，
+  AHK 按 ALT-SHIFT-PAGEUP（177=party2）就真的执行 /focus party2。
+- 修复：Paladin_Macros.lua 按专精注册焦点宏——只有神圣骑使用活跃版；防护/惩戒恢复
+  [@partyN]/[@raidN,...,nocombat] 安全版（跟随关闭时会被门控为空宏）。
+  Paladin_Blessing.lua 增加 WR_PaladinBlessing_FocusFlowAllowed：非神圣专精禁止
+  回落焦点流程；WR_PaladinBlessing_Blocked 增加 InCombatLockdown 硬闸。
+- 验证：新增 .workbuddy/test_paladin_focus_spec_guard.py（A-F 全绿）；
+  test_focus_gate.py、test_paladin_blessing_misfire.py、test_paladin_blessing.py 全绿；
+  全量 Lua 语法 194/194。
+
+【全局】2026-11-13（修复「设置」折叠后右区菜单整片空白 / 天赋面板菜单被连带隐藏）
+- 用户口径：「点了折叠后出现了异常bug」；截图表现为右区「设置」标题下方整块菜单区空白，
+  下拉/滑块/按钮全不见，只剩下方职业分区。
+- 根因：下拉菜单/滑块/按钮等「设置」控件原先直接挂在各专精天赋 Frame 上，
+  天赋 Frame 的 Show/Hide、高度收缩或「设置」折叠逐控件 Hide 的残留状态，
+  会把整块菜单连带隐藏；同时 MAX_FRAME_HEIGHT 压缩分支在设置折叠时还会把
+  menuRegionH 重新抬回正数，留下大块空白。
+- 修复（Core/UI_Config.lua）：每个天赋面板新增独立 MenuBox（挂 WR_ClassMenuRegion，
+  不随天赋 Frame 显隐），全部 DM 控件改挂 MenuBox；WR_ApplySettingsCollapse 统一显隐
+  MenuBox 并兼容旧面板重建 menuWidgets；WR_LayoutConfigFrame 压缩分支在设置折叠时
+  强制 menuRegionH=0。
+- 修复（Core/UI_TalentFrame.lua）：切换专精时同步 MenuBox 显隐，避免旧专精菜单残留。
+- 验证：新增 .workbuddy/test_ui_menu_visibility.py；test_config_section_collapse.py、
+  test_ui_top_section_collapse.py、_syntax_all.py 全绿。
+
+【全局】2026-11-13（主面板「全局」「设置」标题条支持折叠）
+- 用户口径：「插件UI面板中，目前全局，设置无法折叠，全局折叠向右」。
+- 改动：Core/UI_Config.lua 的 SECTION_COLLAPSE_KEYS 登记「全局」= UI_GLOBAL_SECTION_COLLAPSED、
+  「设置」= UI_SETTINGS_SECTION_COLLAPSED；两个标题条改为可点击折叠（右侧显示 +/−）。
+- 全局：折叠时隐藏左区全部控件（标题条保留），左区高度收缩到标题条；展开恢复。
+  「全局」标题文字右对齐并预留折叠符宽度（折叠符固定在标题条右侧）。
+- 设置：折叠时隐藏右区下拉/滑块/按钮与天赋标题，菜单区高度归零，图标网格紧贴
+  「设置」标题条下方；展开恢复。
+- 验证：新增 .workbuddy/test_ui_top_section_collapse.py；_syntax_all.py 193 文件 FAIL=0。
+
+【全局】2026-11-13（技能色块「按技能逐个判蓝」补全：消耗缓存随法术书失效 + 蓝量变化事件立即刷新）
+- 用户口径：「为每个技能单独判断角色当前蓝量是否足够支付该技能的消耗；蓝量不足时
+  对应色块不亮并熄灭；蓝量足够时亮起；蓝量变化、技能消耗变化或相关状态更新时及时
+  刷新所有技能色块；蓝量恰好等于消耗时视为可释放并亮起；各技能色块判断相互独立，
+  避免仅根据全局状态统一控制」。
+- 现状核对：按技能判定的三级闸（WR_ColorFrame_ShowSkill 总闸 → WR_SoD_NotEnoughPower
+  按技能名查客户端回执黑名单 + 消耗算术 → WR_Forever_NotEnoughPower 的 cur<cost 判死 /
+  == 放行）2026-11-12 已落地；冰法/圣印/祝福/ShowSkillCD 四条旋转路径全部经由该判定，
+  无绕过点（冰法 MageFrost_Show 最终走 ShowSkill；直接点 WR_ColorFrame_Show 的均为
+  饰品/药水/跟随/焦点/首领预警等非技能提示，不在技能色块范围）。
+- 改动①（Core/Forever_Compat.lua）：技能消耗正缓存此前**永不过期**——升级（新客户端
+  同一 spellID 消耗按等级缩放）、换天赋/雕文修正都会改消耗，旧消耗留着会出现「蓝不够
+  还亮（旧低）/够蓝却不亮（旧高）」。现随法术书/天赋事件（SPELLS_CHANGED /
+  PLAYER_ENTERING_WORLD / PLAYER_TALENT_UPDATE）立即清空 WR_Forever_PowerCostCache，
+  下一次点亮按需逐技能重探；清空零成本，战斗中也不掉帧。
+- 改动②（Core/SoD_Runes.lua）：
+  · WR_SoD_SweepPowerBlocked 拆出 WR_SoD_RefreshPowerBlocks(force)：force=true 跳过
+    「本轮已亮过」短路——蓝量在点亮之后又被其它动作吃掉时，本 tick 刚亮的色块同样
+    立即熄灭；force=false 保持每 tick 收尾清扫语义（MainLoop 调用点不变）。
+  · 新增资源变化事件帧：UNIT_POWER_UPDATE / UNIT_POWER / UNIT_MANA / UNIT_RAGE /
+    UNIT_ENERGY 按客户端代际并集注册（逐个 pcall，新客户端注册未知事件会抛错）；
+    触发时先清 0.05 秒资源帧缓存再强制复查当前亮着的技能色块——蓝降立即熄灭、
+    蓝升由下一 tick 循环照常重点亮（事件层只做「熄灭」方向，不越权点亮）。
+    事件带 unitToken 时只认玩家自己；战斗中资源读不到（secret）自动放行不误灭。
+- 验证：新增 .workbuddy/test_power_refresh.py 共 27 项全过（消耗缓存随法术书/天赋事件
+  失效并按新消耗判 / 事件 force 路径立即熄灭 / 事件帧自清资源缓存 / 蓝回升不越权点亮 /
+  == 边界在 ShowSkill 层 / 贵技能拦下不牵连便宜技能与回执黑名单独立性 / 只认 player /
+  注册并集 / 老 tick 清扫语义回归）；test_power_gate.py 30 项回归通过；_syntax_all.py
+  193 文件 FAIL=0；全量 39 个夹具 39/39 全绿。
+
+【全局】2026-11-13（删除全局面板「爆发总闸」开关）
+- 用户口径：「删除插件中全局下的爆发总闸」。
+- 改动：Core/UI_Config.lua 左侧「全局」面板删除「爆发总闸」复选框（WR_GlobalBurstCheckbox）
+  及其文字标签、点击/提示脚本；GLOBAL_BURST 存档键不再初始化与读写。
+- 布局：原锚在爆发总闸下方的「启用怪物屏蔽」改为锚定「偷药时间」滑块，其后的
+  职业屏蔽 / 屏幕文字提示 / 图标缩放 / 窗口透明度 / 自动跟随整条链保持不变。
+- 说明：该开关原为纯 UI 总闸，各职业自己的爆发开关与判定逻辑均不受影响。
+- 验证：_syntax_all.py 全量语法通过；test_config_prepull_removed.py 与新增
+  test_config_global_burst_removed.py 全过。
+
+【防骑】2026-11-13（目标已死亡/尸体 → 不切「审判buff」圣印、不空放审判）
+- 用户口径：「勾选后，当目标已死亡且显示为尸体时，仍会切换所选圣印并尝试释放审判」。
+- 根因：死亡/尸体判定全部是裸真值调用——TargetCastable（CanHitTarget 的底座）只有
+  `if UnitIsDead(unit) then return false end` 一道闸：① 12.0 战斗中单位状态型接口
+  可能返回 secret boolean（哑值），裸真值拿不到「确认的 true」；② 整条链从未查
+  UnitIsGhost（本服尸体目标可能挂在 ghost 态上，UnitIsDead 读不到 true）。
+  于是目标变尸体后：光明/十字军/智慧三状态机 phase0 照常点火切 buff 圣印，
+  phase1 照常点亮审判——全部空放，白顶常驻圣印 + 白烧切印的蓝。
+- 修复：
+  ① Paladin_Forever.lua 新增 WR_PaladinForever_UnitIsDeadOrGhost(unit) 统一判定：
+    UnitIsDead / UnitIsDeadOrGhost / UnitIsGhost 任一明确回答 true 即死亡，
+    另加「血量读得到且 ≤0」兜底；secret 比较全部包 pcall，API 缺失/读不到一律放行
+    （口径与射程 999/secret 放行一致，活体目标行为不变）；
+  ② TargetCastable 的裸 UnitIsDead 改走统一门 → CanHitTarget 全链对尸体统一拦截：
+    主循环审判 / 多目标链 / 三状态机 phase0 切印门与 phase1 审判门 / 插入一次性 /
+    愤怒之锤 / 驱邪术 / 奉献 / 攻击，惩戒与神圣同样受益；
+  ③ 三状态机入口各加【尸体不切印】总门：确认目标死亡 → 重置阶段并 return false，
+    不点火切印、不提示审判，也不会卡在 phase1~4 对着尸体空等超时；
+    常驻圣印由主循环圣印维持逻辑（CanApplySeal）自行恢复；目标复活后流程从头重开。
+- 验证：新增 .workbuddy/test_paladin_dead_target.py 18 项全过（死亡 / ghost 态 /
+  血量兜底 / API 缺失放行 / phase1 中途变尸体立即放弃 / 复活后直接补审判）；
+  _syntax_all.py 193 文件 FAIL=0；range_gate / light / crusader / wisdom /
+  light_mode / seal_switch_timing / justice_seal_loop / seal_early_loss / hammer /
+  blessing_misfire 10 个旧夹具回归全绿。
+
+【防骑】2026-11-13（愤怒之锤接入主循环优先级 + 面板开关）
+- 用户口径：「请在提供的防骑主循环逻辑中新增愤怒之锤的使用分支，明确其触发条件、
+  冷却与资源限制，并与现有技能优先级正确衔接」。
+- 触发条件：面板「愤怒之锤」开关 FH_FNZC（防护区第 7 行第 2 列，默认勾选）+ 目标生命
+  少于 20%（WR_SafeHPPct，读不到视为满血不触发）+ 目标可攻击且存活 + 30 码射程
+  （WR_PaladinForever_SPELL_RANGE）+ 本地 6 秒 CD + 蓝量 ≥20%（WR_PaladinForever_PROT_HOW_MANA_MIN）。
+- 优先级衔接：多目标链 审判 之后、神圣打击 之前；单体链 Ready-first 之后、驱邪术 之前；
+  原第 11 档兜底保留并同样受开关控制。
+- 读条保护：0.87 秒读条 + PROMPT_HOLD 1.5 秒窗口内整条调度让路（窗口内即使目标回血
+  也让路，保护可能仍在飞行的读条），窗口走完或施放成功后自动恢复常规调度。
+- 冷却记账：WR_PaladinForever_SpellRankIDs 登记 愤怒之锤 = 24275（截图实测），
+  施放成功事件按 ID 记账，战斗中事件名 secret 时本地 6 秒 CD 照常推进。
+- 离线夹具 .workbuddy/test_paladin_hammer_wrath.py 17 项全过；_syntax_all.py 193 文件 FAIL=0。
+【防骑】2026-11-13（小队祝福误施到自己 / 顶掉个人祝福——五道硬闸补全）
+- 用户口径：「当队伍中仅剩我和另一名队友时，我选中一个敌对目标，插件会错误地将
+  预先设置的小队祝福buff施放到我自己身上，此时该队友并不在我身边；同时这个错误
+  施放的小队祝福会顶替我已选择的个人祝福buff」。
+- 根因（三条通道，均在 Paladin_Blessing.lua）：
+  ① 槽 95 是共享动态宏：战斗锁定下 SetAttribute 被静默丢弃，而旧回读校验只在
+    「读到了且不同」时拦截，「读不到 / 空」会放行 → AHK 按键执行上一次的旧宏文本
+    （可能是 [@player] 自施文本）→ 祝福上到自己，顶掉个人祝福；
+  ② 小队模式下「自己」的祝福也走槽 95 直施 → 槽 95 里合法存在 [@player,help]
+    自施文本，任何一次重写失败留下的残留都会自施；
+  ③ 射程三层全读不到（战斗 secret）时 InCastRange 按「读不到放行」点亮，配合本服
+    宏条件回退（超程 / 条件失败 → 退化施放 → 当前是敌对目标时友善法术自施）
+    ——「队友不在身边 + 选中敌对目标 = 小队祝福上自己」。
+- 修复：
+  ① TryUnit 入口新增 WR_PaladinBlessing_PlayerTargetHostile 总闸：当前目标明确
+    敌对 → 队友祝福本 tick 一律不点亮（读不到放行；个人祝福不受影响）；
+  ② 小队/团队模式下「自己」的普通祝福改走自施宏 91~93（注册期静态文本，战斗中
+    按键照常生效）→ 槽 95 从此只承载队友文本，结构上不可能再落到玩家身上；
+  ③ CastDirect 新增 InCombatLockdown 硬闸（战斗锁定期拒绝直施、回落焦点流程），
+    回读校验改严格：读不到 / 空 = 写失败，一律不点亮；
+  ④ Auto 新增 WR_PaladinBlessing_RangeConfirmed 射程确认闸：三层必须有一层明确
+    回答「在射程内」才点亮，全读不到按超程跳过（宁可不补，也不能误施）；
+  ⑤ 超程 / 射程读不到时顺手 HideNow 收口残留色块，AHK 不会连按空键。
+- 语义：小队祝福只作用于确认在射程内的队友；选中敌对目标时不给队友点亮；
+  个人祝福（91~93 自施）独立生效，与小队祝福互不顶替。
+- 验证：.workbuddy/test_paladin_blessing_misfire.py 28 项全过（敌对目标闸 / 超程 /
+  射程读不到 / 战斗锁 / 回读严格 / 自施改道 / 正常直施 / 单元口径）；
+  _syntax_all.py 193 文件 FAIL=0。
+
+
+【防骑】2026-11-13（战斗中目标不在审判射程 → 不切「审判buff」对应圣印）
+- 用户口径：「战斗中怪没有在近战位置，打不到也会切审判buff对应的圣印，
+  导致和选择的圣印互顶，浪费了蓝」。
+- 根因：光明圣印 / 十字军审判 / 智慧审判 三个常驻状态机点火只看审判 CD 窗口
+  （JudgementSwitchDue），没有判目标射程——目标在审判 10 码外时照样切 buff 圣印，
+  这发审判根本打不出去，白顶掉面板所选常驻圣印 + 白烧一次切印的蓝。
+- 修复：三状态机入口各加「打得到才切印」总门：phase 0（新点火）且
+  WR_PaladinForever_CanHitTarget("审判","target") 为假 → 本 tick 直接不切印，
+  维持面板所选常驻圣印；已进入 phase 1~4 的流程照常收尾；距离读不到
+  （999 / secret）放行，与主调度 judgeEligible 的射程口径一致。
+- 校验：_syntax_all.py 193 文件 FAIL=0；light/crusader/wisdom toggle 与
+  seal_switch_timing 夹具全通过；新增 .workbuddy/test_paladin_range_gate.py
+  覆盖三状态机「射程外不切印 / 射程内正常切 / 中途脱离不卡死 / 999 放行」。
+
+【术士】2026-11-13（无限服输出循环按参考图语义重写，面板零改动、仅术士作用域）
+- 根因：旧 Forever 三系循环为 SoD 机械转译，读不存在的 FANG_ADD_WL 键、
+  依赖无限已移除的符文/技能（鬼影缠身门、混乱箭等），且无 DOT 预判/护甲/
+  召唤/拉条阈值/插入/切目标语义，与参考图功能面板脱节。
+- 改动（仅 Warlock/ + 本日志块）：
+  · Warlock_Forever.lua 重写为公共件：停手门/插入段(一次性自关+无脑火雨)/
+    自保(红药30%+吸生命)/护甲(邪甲→恶魔皮肤回退/魔甲)/召唤(脱战静止)/
+    宠物攻击/切目标(1秒防抖)/防ADD战斗门(按专精读 FANG_ADD_TKS/EMS/HMS)/
+    拉条(分流30%·高血80%·魔杖50%，参考图默认值)/DOT(只补自己的·灾祸二选一)/
+    读条引导(吸灵魂斩杀>灵魂之火>烧尽>灼热之痛>折磨>暗影箭，引导不打断)。
+  · 三专精文件重写为薄壳传参；旧循环逻辑删除（非 Forever 仍回退旧 SoD 函数）。
+  · Warlock_OOC_Summon_BExt.lua 追加 移动/吃喝/恶魔牺牲 三门。
+  · Warlock_Macros.lua 新增槽 91折磨/92灼热之痛/93恶魔皮肤（键位空闲核对）+
+    WR_SkillColor 登记复用槽 1/9/25/35/40/76/77/86/190/30/56。
+- 兼容：血蓝 WR_GetUnitHP/MP、光环 WR_GetUnit*Time(ByMe)、可用性 WR_SpellUsable、
+  色块 WR_ColorFrame_ShowSkill/WR_HideSkillColorSlot；不注册 CLEU、不裸算 secret；
+  缺失技能（厄运诅咒等）经 WR_Forever_SkillAbsent 闸门自然跳过。
+- 校验：lua_check.js 全量 FAIL=0；行尾保持（公共件/宏 LF，三薄壳 CRLF）；
+  隔离基线 .workbuddy/warlock_scope_baseline_20261113.txt 核对仅允许清单变更；
+  备份 *.bak-20261113wl。留痕 .workbuddy/memory/2026-11-13.md。
+
+【法师·冰霜】2026-11-13（NGA 攻略二次核对：FoF 名称兼容 + 冰锥术单体收尾）
+- 依据：NGA《[无限服] AFK回归，浅析无限服法师天赋与升级天赋分享》7 页纯图片版
+  （123.pdf，逐页渲染成整页图后人工核对）；权威数据仍以
+  https://talentsforever.com/export/mage.json 为准，攻略只作交叉验证。
+- 核对结论（二者无冲突）：冰枪术 8 秒 CD / 对冻结目标 +300% 伤害；寒冰指
+  等级 2/2（冰冷效果 15% 概率，下 2 次法术视为目标已冻结，持续 15 秒）；
+  寒冰护体属核心天赋且要「注意冰盾的保持」；强化冰锥术 +35%、深冬之寒让
+  冰锥术再 +20% → 冰锥术应进单体循环；冰霜新星用来提供冰冻效果；作者明确
+  「三系输出循环都有一定复杂度，不存在一个技能搓到底」。
+- 修正①（静默丢输出）Mage/Mage_Forever_Frost.lua：Fingers of Frost 的中文名在
+  不同数据源不一致（攻略 / 游戏内 tooltip「寒冰指」 vs Data/Forever_Abilities.lua
+  的 zh 与 Core/SoD_Runes.lua「冰霜之指」）。原代码只查「冰霜之指」单一名字，
+  客户端若用另一个名字则 FoF 永远读不到 → 冰枪术碎裂窗口全部丢失，且不掉血、
+  不报错。改为 WR_MageFrost_FOF_BUFFS 候选名列表（含英文 "Fingers of Frost"），
+  任一命中即视为触发；保留 WR_MageFrost_FOF_BUFF 旧全局名作兼容别名。
+- 修正②（输出链缺口）同文件 9.2 段：冰锥术原条件 `inMelee10 and UnitCount8 >= 2`
+  把它锁死在多目标，单体永远轮不到。按攻略「可以作为收尾技能加入循环」「灵活
+  使用冰锥术收尾」放宽为 `inMelee10`（贴身即用，含单体）。仍保留 10 码射程门、
+  蓝量下限 0.15、10 秒本地 CD 记账与提示防抖；被挡住时继续走寒冰护体 /
+  急速冷却 / 寒冰箭，不卡链。
+- 文案同步：Mage/Mage_Menu.lua 的「智能AOE模式」tooltip 明确「本开关只门控暴风雪」，
+  冰锥术贴身收尾不受该开关控制，避免文案暗示了代码里并不存在的门控关系。
+- 校验：全量 Lua 语法双跑（lupa 193 文件 / luaparse Lua 5.1 772 文件，均 0 失败）；
+  29 个既有夹具 + 新增 .workbuddy/test_mage_frost_nga.py（23 条断言）共 30 个
+  全部 exit=0；TOC 引用完整性 184/184。独立审查记录见 .workbuddy/oa_final_report.md。
+
 【全局】2026-11-12（修复「技能不够蓝释放时色块仍然亮，导致一直按空键」）
 - 用户口径原话：「技能不够蓝释放时，应当不亮色块，导致一直按按键」。
 - 现象链（色块模型）：法力不够 → 色块照样亮 → AHK 读色按键 → 客户端以
