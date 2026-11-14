@@ -16,6 +16,52 @@ local FontSize = 16
 -- ==========================================
 local UpdateContent = [[
 
+【防骑】2026-11-14（新增「愤怒之锤·精英」开关：只对精英怪 / BOSS 斩杀）
+- 用户口径：「防骑再新增一个愤怒之锤的按钮，控制愤怒之锤目标为精英怪，boss的时候才用」。
+- 实现（Paladin/Paladin_Forever_Prot.lua）：新增 WR_PaladinForever_HammerTargetIsEliteOrBoss / WR_PaladinForever_HammerTargetAllowed；hammerEligible 追加目标类型门——勾选「精英」后，仅当目标分类为 elite / rareelite / worldboss / boss、boss1~5 单位帧、骷髅级（等级 -1）或 UnitIsBoss 时才提示愤怒之锤；普通小怪即使进入斩杀期也不点亮（省 0.87 秒读条 + 295 蓝）。主链与第 11 档兜底共用 hammerEligible，行为一致。
+- 面板（Paladin/Paladin_Menu.lua）：「愤怒之锤」右侧新增「精英」复选框 FH_FNZC_JY（默认关闭 = 保持原行为，全目标可用）；原「愤怒之锤」tooltip 同步说明。
+- 验证：新增 .workbuddy/test_paladin_hammer_wrath_elite.py 20 项全过（开关关闭原行为 / elite·rareelite·worldboss·boss / 骷髅级 / boss1~5 / 普通怪拦截 / 与总开关·斩杀期·蓝量·射程叠加 / 主链与兜底 / 菜单存在性）；全部 27 个圣骑士夹具全绿；全量 195 个 Lua 文件语法 0 失败。
+
+【圣骑士】2026-11-14（清洁术真正可用：按 dispelType 识别中毒/疾病/魔法，不再按光环名空匹配）
+- 用户口径：「骑士这个版本清洁术用不了」（截图：清洁术 4987，驱散 1 个中毒 / 1 个疾病 / 1 个魔法）。
+- 根因：WR_PaladinForever_UnitHasDispel / WR_PaladinForeverHoly_HasDispel 旧实现把「中毒 / 疾病 / 魔法」当成 debuff 名称传给 WR_GetUnitDebuffTime；该函数按【光环名精确匹配】，而真机 debuff 名是技能名（毒液箭 / 撕裂 / 腐蚀…），永远匹配不到 → 可驱散判定恒 false → 清洁术所有模式都不亮。
+- 修复（Paladin/Paladin_Forever.lua）：新增 WR_PaladinForever_NormalizeDispelType / IsCleansableDispelType / CacheHasDispel；UnitHasDispel 改为先扫 HARMFUL 光环缓存的 dispelType（Poison / Disease / Magic，兼容客户端本地化的「中毒 / 疾病 / 魔法」），再走公共 WR_UnitDebuffType、C_UnitAuras 直读和旧名字兜底；继续排除「诅咒」。新增 WR_PaladinForever_CanCleanseCast：IsUsableSpell 对需要友方目标的技能在敌方/无目标时可能返回 false，此时只要已学会且不在本地 CD 就允许点亮（蓝量仍由色块总闸拦截）。
+- 修复（Paladin/Paladin_Forever_Holy.lua）：WR_PaladinForeverHoly_HasDispel 统一委托公共判定，奶骑同步修复；清洁术可用性走同一 CanCleanseCast。
+- 修复（Core/Core_Functions.lua）：光环缓存 dispelType 兼容 data.dispelName / data.dispelType 两种字段名。
+- 验证：新增 .workbuddy/test_paladin_cleanse_dispeltype.py 18 项全过（真实技能名 + dispelType、中文类型、Curse 排除、缓存缺失直读 C_UnitAuras、CleanseStep 接线）；test_paladin_cleanse.py 旧夹具同步更新后全过；全部 26 个圣骑士夹具全绿；全量 195 个 Lua 文件语法 0 失败。
+
+【防骑】2026-11-14（目标已有圣光审判时切回所选常驻圣印：修复光明圣印残留不切愤怒）
+- 用户口径：「防骑存在异常，当目标有圣光审判时，身上有圣光圣印，选择圣印是愤怒圣印，这时候没有切对应圣印」。
+- 根因：① WR_PaladinForever_SealNeedsRefresh 的「任意圣印在身一律不补」会挡住「从光明圣印切回面板所选常驻圣印」，只要身上能读到任意圣印就永远不亮愤怒圣印；② 光明/十字军/智慧三个 buff 维持状态机 phase4 旧条件要求 LightSealOnPlayer() 为真，战斗中光环 name 是 secret / 施放事件丢失时会误判「不在光明」，于是不提示切回；③ SealBuffState 在光环 name 为 secret 时只返回 "up", nil，无法知道身上是哪条圣印。
+- 修复（Paladin/Paladin_Forever.lua）：新增 WR_PaladinForever_SealNameBySpellID，SealBuffState 缓存分支与直扫分支在光环 name 不可读时按 spellId 反查具体圣印名。
+- 修复（Paladin/Paladin_Forever_Prot.lua；Paladin/Paladin_Menu.lua 同步光明圣印 tooltip）：新增 WR_PaladinForever_MainSealOnPlayer / WR_PaladinForever_SealShouldSwitchToMain；当光环明确是另一条「审判 buff 维持类」圣印（光明/十字军/智慧）且目标已有对应审判 debuff（含圣光审判/光明审判与本地单槽位记账兜底）时，允许切回面板所选常驻圣印并本 tick 直接点亮；光明/十字军/智慧三个状态机 phase4 改为反向确认「常驻圣印是否已在身上」（not MainSealOnPlayer），不再依赖能否读到光明/十字军/智慧光环。
+- 验证：新增 .workbuddy/test_paladin_seal_switch_back.py 8 项全过（未勾选维持 / 勾选维持 / 光环不可读 / 常驻=光明 / 正义不误切 / 光明审判旧名 / spellID 反查）；全部 25 个圣骑士夹具全绿；全量 195 个 Lua 文件语法 0 失败。
+
+【防骑】2026-11-14（愤怒/正义圣印正常打审判，不被光明/智慧审判buff开关误伤）
+- 用户口径：「愤怒和正义不会顶审判buff，要正常打审判」。
+- 根因：WR_PaladinForever_JudgementUsesSingleSlot 把 FH_CRGMSY / FH_ZHSP 两个审判buff维持开关直接判成「单审判槽位」；即使常驻圣印是正义/愤怒，主调度 judgeEligible 也会被整段跳过——这两条圣印的审判根本不产生审判 debuff，却被当成光明/智慧审判一样限制。
+- 修复（Paladin/Paladin_Forever_Prot.lua；Paladin/Paladin_Menu.lua 同步正义/愤怒 tooltip）：单槽位判定只看「本次实际消耗的圣印」——只有光明圣印/智慧圣印算单槽位；正义/愤怒等审判不产生审判 debuff，不受 buff 维持开关影响。主调度 judgeEligible 仅在「常驻圣印本身是光明/智慧且对应维持开关开着」时让位；phase4 维持期恢复普通审判。光明/智慧状态机改为按自己实际切过去的圣印判定，避免拿常驻圣印误判。
+- 验证：新增 .workbuddy/test_paladin_judgement_nonconflict_seals.py，E1-E6 / F1-F4 / G1-G5 共 15 项全过；全部 24 个圣骑士夹具全绿（含光明/智慧/十字军三个 buff 维持状态机与光明/智慧互斥夹具）；同步修正 4 个旧夹具的 phase4 判定时间适配 1.0 秒圣印提示保护窗口；全量 195 个 Lua 文件语法 0 失败。
+
+【防骑】2026-11-14（圣印提示优先级提高：上圣印不再被其它技能色块顶掉）
+- 用户口径：「防骑目前上圣印经常被顶，导致无法使用出圣印，将圣印优先级调高」。
+- 根因：圣印色块保持/保护窗口只有 0.3 秒（约 3 个主循环 tick）。WR_ColorFrame_Show 每次
+  点亮任意技能都会先隐藏全部色块，0.3 秒窗口一旦被下一 tick 的审判/神圣打击/攻击等色块
+  覆盖，AHK 就读不到圣印键 → 不补印；补印重试又要等 CanPrompt 的 3 秒闩锁，表现就是
+  「上圣印经常被顶、圣印出不来」。
+- 修复（Paladin/Paladin_Forever.lua）：
+  ① WR_PaladinForever_SEAL_PROMPT_HOLD：0.3 → 1.0 秒（约 10 个主循环 tick），
+     整个窗口内 WR_PaladinForever_RefreshSealPrompt 每 tick 重亮同一圣印并让循环直接
+     return true，任何其它技能提示都顶不掉圣印色块；
+  ② WR_PaladinForever_ShowSealBlock 点亮成功即写入 ActiveSealPromptUntil（不再依赖
+     调用方一定紧接着调 HideSkillLater），保护窗口不会漏开；
+  ③ 1.0 秒严格小于圣骑士 1.5 秒 GCD，一个窗口最多成功施放一次圣印；施放成功事件
+     仍立即 HideNow，不会回到「同色常亮连按 50 次」的反复上印老问题。
+- 验证：新增 .workbuddy/test_paladin_seal_priority.py 12 项全过（常量 / 点亮即开窗 /
+  0.4s 与 0.95s 持续保护 / 1.0s 到期 / 圣印保持上限 / 普通技能保持不变 /
+  Prot 顶部优先级分支命中并重亮圣印）；Paladin_Forever.lua 与
+  Paladin_Forever_Prot.lua 语法编译通过，全量 195 个 Lua 文件语法 0 失败。
+
 【防骑】2026-11-14（修复愤怒之锤从未点亮：Forever 隐藏目标血量导致判定恒为满血）
 - 用户口径：「防骑愤怒之锤没有打出来过」。
 - 根因：无限/WoW Forever 的 UnitHealth / UnitHealthMax 对插件恒为 secret 值，WR_SafeHPPct 按安全层口径降级为 1（=满血）；旧门 `WR_SafeHPPct("target") < 0.20` 永远不成立 → hammerEligible 恒 false，主链与兜底都不会点亮愤怒之锤。

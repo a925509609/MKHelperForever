@@ -342,7 +342,7 @@ local function WR_ScanAurasForUnit(unit)
                     name = name, count = count or 1,
                     expirationTime = expirationTime or 999,
                     source = source, spellId = spellId,
-                    dispelType = data.dispelName
+                    dispelType = data.dispelName or data.dispelType
                 }
             else
                 -- ★ 无限适配：C_UnitAuras 取完后不再回退旧 API；若旧 API 已被
@@ -375,7 +375,7 @@ local function WR_ScanAurasForUnit(unit)
                     name = name, count = count or 1,
                     expirationTime = expirationTime or 999,
                     source = source, spellId = spellId,
-                    dispelType = data.dispelName
+                    dispelType = data.dispelName or data.dispelType
                 }
             else
                 -- ★ 无限适配：同上，旧 API 被移除时直接 break，不做无效回退

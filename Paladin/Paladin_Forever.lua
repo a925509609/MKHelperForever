@@ -197,16 +197,20 @@ end
 --   · 普通循环技能 1.5 秒：覆盖 AHK 读屏 + 按键；打出后由施放成功事件立即清除。
 --   · 长 Buff 类（圣印/正义之怒/祝福）沿用各自传入的较长时长。
 WR_PaladinForever_PROMPT_HOLD = 1.5
--- ★★ 圣印色块专用保持上限（秒）。AHK 是「同色常亮就一直按」：扫描 30ms +
+-- ★★ 圣印色块专用保持/保护上限（秒）。AHK 是「同色常亮就一直按」：扫描 30ms +
 --   随机冷却 33~44ms ⇒ 约 60ms 一次。保持太久会被连按放大成反复施放；
 --   保持太短（<0.1s）则 AHK 可能一次都没读到 → 漏按 → 表现为「战斗中又没挂圣印」。
 --   ★ 2026-11-09 第十一次修正：0.2 秒名义保持其实只够 1 个游戏帧——主循环下一 tick
 --     的「神圣打击」等提示会调用 WR_ColorFrame_Show，而它会先隐藏所有色块，把刚亮
---     的圣印顶掉；AHK 直接漏按。现在改为 0.3 秒，并且在这 0.3 秒内由
---     WR_PaladinForever_RefreshSealPrompt 每 tick 重亮圣印色块、阻止其他提示覆盖；
---     一旦收到圣印施放成功事件立即 HideNow 提前结束窗口。实际可见 3 个 tick 左右，
---     足够 AHK 扫到 1~2 次；成功即灭，不会回到 3 秒连按 50 次的老问题。
-WR_PaladinForever_SEAL_PROMPT_HOLD = 0.3
+--     的圣印顶掉；AHK 直接漏按。改为 0.3 秒，并由 WR_PaladinForever_RefreshSealPrompt
+--     在窗口内每 tick 重亮圣印色块、阻止其他提示覆盖。
+--   ★★ 2026-11-14 用户口径「防骑目前上圣印经常被顶，导致无法使用出圣印，将圣印优先级调高」：
+--     0.3 → 1.0 秒。0.3 秒在真机上只够 3 个主循环 tick（100ms/tick），AHK 扫屏或
+--     按键稍有抖动就会被下一 tick 的审判/神圣打击色块覆盖 → 圣印一直补不上。
+--     1.0 秒覆盖约 10 个 tick，远大于 AHK 一次扫屏+按键周期；且严格小于圣骑士
+--     1.5 秒 GCD，一个提示窗口内最多只会成功施放一次圣印，不会回到「同色常亮连按
+--     50 次」的老问题。成功施放事件到达后 HideNow 仍会立即熄灭，不额外占 GCD。
+WR_PaladinForever_SEAL_PROMPT_HOLD = 1.0
 
 -- 带本地冷却的技能提示（三层判定 + 两段式重试）：
 --   ① 有成功施放记录 → 按「施放时刻 + CD」判定（最准）；
@@ -707,7 +711,7 @@ function WR_PaladinForever_HideSkillLater(spell, slot, delay)
     -- ★★ 2026-11-09：所有圣印色块（常驻/单体/光明插入/共享）统一短保持。
     --   长保持 + AHK 同色连按 = 反复施放同一圣印（截图「Buff 还剩25秒」）。
     if type(spell) == "string" and string.find(spell, "圣印", 1, true) then
-        local cap = WR_PaladinForever_SEAL_PROMPT_HOLD or 0.3
+        local cap = WR_PaladinForever_SEAL_PROMPT_HOLD or 1.0
         if holdFor > cap then holdFor = cap end
         -- ★ 记录「刚刚点亮过圣印色块」的时刻：战斗中施放成功事件里 spellName/spellId
         --   都是 secret 认不出时，用它兜底判断「这次事件就是按了圣印」→ 记 30 秒窗口，
@@ -786,10 +790,16 @@ function WR_PaladinForever_ShowSealBlock(skillName, slot)
         -- ★★ 2026-11-09 第十一次修正：记录当前「圣印提示保护窗口」。
         --   HideSkillLater 会紧接着补上 Until；窗口内 RefreshSealPrompt 持续重亮，
         --   避免被下一 tick 的其他技能提示瞬间覆盖（AHK 漏按的根因）。
+        -- ★★ 2026-11-14：点亮即写入保护截止时间（不再依赖调用方一定调 HideSkillLater）。
+        --   保护窗口 = WR_PaladinForever_SEAL_PROMPT_HOLD（现 1.0 秒），期间
+        --   RefreshSealPrompt 每 tick 重亮圣印并让循环直接 return true，
+        --   任何其它技能提示都顶不掉这块圣印色块。
         WR_PaladinForever_ActiveSealPromptName = skillName
         WR_PaladinForever_ActiveSealPromptSlot = slot
         WR_PaladinForever_ActiveSealPromptBypass =
             (type(bypassUntil) == "number" and GetTime() <= bypassUntil) and true or false
+        WR_PaladinForever_ActiveSealPromptUntil =
+            GetTime() + (WR_PaladinForever_SEAL_PROMPT_HOLD or 1.0)
         WR_PaladinForever_SealPromptShownCount = (WR_PaladinForever_SealPromptShownCount or 0) + 1
         WR_PaladinForever_SealPromptShownAt = GetTime()
     end
@@ -800,7 +810,8 @@ end
 --   背景：WR_ColorFrame_Show 每次会先隐藏【所有】色块；主循环下一 tick 只要
 --   点亮「神圣打击」等任意提示，就会把刚亮起的圣印色块顶掉。0.2 秒的保持在此
 --   情况下实际只剩 1 个游戏帧，AHK 扫描不到 → 玩家看到「战斗中又没挂圣印」。
---   现在：圣印色块亮起后的 0.3 秒内，Prot/共享循环每 tick 先调用本函数重亮
+--   现在：圣印色块亮起后的保护窗口内（WR_PaladinForever_SEAL_PROMPT_HOLD，
+--   2026-11-14 起为 1.0 秒），Prot/共享循环每 tick 先调用本函数重亮
 --   同一圣印并直接 return true，确保窗口内只有圣印色块、AHK 必能读到；
 --   一旦施放成功事件到达，HideNow 会立即清掉保护窗口，不会连按 50 次。
 function WR_PaladinForever_RefreshSealPrompt()
@@ -1214,7 +1225,8 @@ WR_PaladinForever_SEAL_BUFF_SECONDS = 30
 -- ★★ 2026-11-09 第八次修正（用户最终口径，逐字确认）：
 --   「圣印存在30秒，只需要上一次即可，圣印的技能是没有cd的可以一直释放」。
 --   —— 本服圣印是 30 秒短 Buff、技能本身没有冷却；AHK 是「同色常亮就一直按」
---      （每 ~60ms 重按一次，色块亮 0.3 秒 = 约 5 次 /cast）。因此只要插件多点亮
+--      （每 ~60ms 重按一次，色块亮 1.0 秒 = 约 16 次 /cast；施放成功事件会立即熄块，
+--      但仍不应靠多点色块来补印）。因此只要插件多点亮
 --      一次圣印色块，就会被 AHK 放大成「反复上圣印」。
 --   之前的 2 秒「提前补」正是罪魁：每次 Buff 还没到期就先点亮色块做预防性刷新 →
 --   AHK 一顿连按 → 表现为「用了圣印后还会反复上」。
@@ -1311,6 +1323,23 @@ function WR_PaladinForever_IsSealSpellID(sid)
     return hit
 end
 
+-- ★★★ 2026-11-14：由 spellID 反查具体圣印名。
+--   战斗中光环 name 可能是 secret，但 spellId 仍是数字：SealBuffState 过去只能
+--   返回 "up", nil，导致 LightSealOnPlayer() / 常驻圣印判定不知道身上是哪条
+--   （典型：目标已有圣光审判、身上是光明圣印、面板选愤怒 —— 永远不切回愤怒）。
+--   这里按 WR_PaladinForever_SealNames 动态解析当前 rank，与 IsSealSpellID 同一数据源。
+function WR_PaladinForever_SealNameBySpellID(sid)
+    if type(sid) ~= "number" then return nil end
+    -- 不写 type(...)=="function"：离线夹具里 WR_ResolveSpellID 可能是可调用 userdata
+    if WR_ResolveSpellID == nil then return nil end
+    for i = 1, #WR_PaladinForever_SealNames do
+        local nm = WR_PaladinForever_SealNames[i]
+        local ok, id = pcall(WR_ResolveSpellID, nm)
+        if ok and type(id) == "number" and id == sid then return nm end
+    end
+    return nil
+end
+
 -- 直接扫玩家 HELPFUL 光环，三态返回："up" / "missing" / "unknown"
 --   up      = 找到任意圣印光环（名字含「圣印」或 spellId 命中已知圣印）
 --   missing = 光环全部可读、确实没有圣印
@@ -1352,7 +1381,10 @@ function WR_PaladinForever_ScanSealAura()
         if type(sid) == "number"
            and not (type(WR_IsSecretValue) == "function" and WR_IsSecretValue(sid))
            and WR_PaladinForever_IsSealSpellID(sid) then
-            if not Expired(data) then return "up", nil, RemainOf(data) end
+            if not Expired(data) then
+                -- ★★★ 2026-11-14：返回由 spellID 反查的圣印名（name 可能 secret）
+                return "up", WR_PaladinForever_SealNameBySpellID(sid), RemainOf(data)
+            end
         end
         local nm = data.name
         if type(WR_IsSecretValue) == "function" and WR_IsSecretValue(nm) then
@@ -1496,14 +1528,20 @@ function WR_PaladinForever_SealBuffState()
                     and exp ~= 0 and exp ~= 999   -- 0/999 = 无到期时间哨兵
                 local left = expOK and (exp - now) or nil
                 if left and left > 0 and left < 900 then
-                    c.state, c.name = "up", nm
+                    -- ★★★ 2026-11-14：名字是 secret 时按 spellId 反查具体圣印名，
+                    --   否则 state=up/name=nil 会让「身上是光明圣印」永远判不出来。
+                    local displayName = nm
+                    if type(displayName) ~= "string" then
+                        displayName = WR_PaladinForever_SealNameBySpellID(aura and aura.spellId)
+                    end
+                    c.state, c.name = "up", displayName
                     WR_PaladinForever_NoteSealBuffRemain(left)
-                    WR_PaladinForever_NoteSealAuraReadUp(nm)
-                    if type(nm) == "string" then
-                        WR_PaladinForever_SealAuraSeenUp[nm] = true
+                    WR_PaladinForever_NoteSealAuraReadUp(displayName)
+                    if type(displayName) == "string" then
+                        WR_PaladinForever_SealAuraSeenUp[displayName] = true
                         -- 兼容「正义圣印（等级 2）」：同时按去后缀基名记一次
-                        local base = WR_PaladinForever_StripRankSuffix(nm)
-                        if base ~= nm then
+                        local base = WR_PaladinForever_StripRankSuffix(displayName)
+                        if base ~= displayName then
                             WR_PaladinForever_SealAuraSeenUp[base] = true
                         end
                     end
@@ -2435,7 +2473,50 @@ end
 --   中毒 / 疾病 / 魔法（截图实测）—— 点诅咒会白按一次。
 --   这里统一：只认三种可驱散类型；模式 1/2/3/4/5 与防护独立复选框全部接入，
 --   施放走 43 自己 / 44 目标 / 59 指向（不设焦点）。
-WR_PaladinForever_DISPEL_KINDS = { "中毒", "疾病", "魔法" }
+--
+-- ★★★ 2026-11-14 用户口径：「骑士这个版本清洁术用不了」：
+--   真机 debuff 名称是技能名（毒液箭 / 撕裂 / 腐蚀…），不是「中毒 / 疾病 / 魔法」。
+--   旧实现用 WR_GetUnitDebuffTime(unit, "中毒") —— 它按【光环名精确匹配】，
+--   永远匹配不到真实 debuff → UnitHasDispel 恒 false → 清洁术永远不亮。
+--   现改为读取 HARMFUL 光环的 dispelType（Poison / Disease / Magic，
+--   同时兼容本地化「中毒 / 疾病 / 魔法」）；诅咒（Curse）依旧排除。
+WR_PaladinForever_DISPEL_KINDS = { "Poison", "Disease", "Magic" }
+WR_PaladinForever_DISPEL_LEGACY_NAMES = { "中毒", "疾病", "魔法" }
+
+-- dispelType 归一化：英文枚举名与中文显示名都接受；其它（含 Curse）返回 nil
+function WR_PaladinForever_NormalizeDispelType(v)
+    if type(v) ~= "string" or v == "" then return nil end
+    if WR_IsSecretValue ~= nil then
+        local okS, sec = pcall(WR_IsSecretValue, v)
+        if okS and sec == true then return nil end
+    end
+    local okL, s = pcall(string.lower, v)
+    if not okL or type(s) ~= "string" then return nil end
+    if s == "poison" or s == "中毒" then return "poison" end
+    if s == "disease" or s == "疾病" then return "disease" end
+    if s == "magic" or s == "魔法" then return "magic" end
+    if s == "curse" or s == "诅咒" then return "curse" end
+    return nil
+end
+
+function WR_PaladinForever_IsCleansableDispelType(v)
+    local k = WR_PaladinForever_NormalizeDispelType(v)
+    return k == "poison" or k == "disease" or k == "magic"
+end
+
+-- 扫描某单位的 HARMFUL 光环缓存，命中任何清洁术可驱散类型即返回 true
+local function WR_PaladinForever_CacheHasDispel(unit)
+    local cache = type(WR_AuraCache) == "table" and WR_AuraCache[unit] or nil
+    local auras = cache and cache.HARMFUL or nil
+    if type(auras) ~= "table" then return false end
+    for i = 1, #auras do
+        local aura = auras[i]
+        if type(aura) == "table" and WR_PaladinForever_IsCleansableDispelType(aura.dispelType) then
+            return true
+        end
+    end
+    return false
+end
 
 function WR_PaladinForever_UnitIsFriendly(unit)
     if type(unit) ~= "string" or unit == "" then return false end
@@ -2443,23 +2524,53 @@ function WR_PaladinForever_UnitIsFriendly(unit)
     -- ★ 直接 pcall：本仓库离线夹具里 UnitIsFriend/UnitIsPlayer 是 userdata 函数，
     --   type(...) == "function" 会误判为不存在（客户端里两者都存在，行为一致）。
     local ok, v = pcall(UnitIsFriend, "player", unit)
-    if ok and v == true then return true end
+    if ok and v then return true end
     if ok and v == false then return false end
     local okP, vP = pcall(UnitIsPlayer, unit)
-    if okP and vP == true then return true end
+    if okP and vP then return true end
     return false
 end
 
 function WR_PaladinForever_UnitHasDispel(unit)
     if type(unit) ~= "string" or unit == "" then return false end
     local okE, exists = pcall(UnitExists, unit)
-    if not okE or exists ~= true then return false end
+    if not okE or not exists then return false end
     local okD, dead = pcall(UnitIsDeadOrGhost, unit)
-    if okD and dead == true then return false end
+    if okD and dead then return false end
     if not WR_PaladinForever_UnitIsFriendly(unit) then return false end
-    local kinds = WR_PaladinForever_DISPEL_KINDS
-    for i = 1, #kinds do
-        local ok, remain = pcall(WR_GetUnitDebuffTime, unit, kinds[i])
+    if WR_UpdateFrameState ~= nil then pcall(WR_UpdateFrameState) end
+
+    -- ① 主通道：刷新并读取 HARMFUL 光环缓存的 dispelType
+    if WR_EnsureAuraCached ~= nil then
+        pcall(WR_EnsureAuraCached, unit)
+    elseif WR_ForceRefreshAuraCache ~= nil then
+        pcall(WR_ForceRefreshAuraCache, unit)
+    end
+    if WR_PaladinForever_CacheHasDispel(unit) then return true end
+
+    -- ② 公共类型查询（内部同样读缓存 dispelType；DISPEL_KINDS 不含诅咒）
+    if WR_UnitDebuffType ~= nil then
+        local kinds = WR_PaladinForever_DISPEL_KINDS
+        for i = 1, #kinds do
+            local ok, hit = pcall(WR_UnitDebuffType, unit, kinds[i])
+            if ok and hit == true then return true end
+        end
+    end
+
+    -- ③ 兜底：缓存缺失（核心层未加载 / 首次扫描失败）时直读 C_UnitAuras
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        for i = 1, 40 do
+            local ok, data = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL")
+            if not ok or not data then break end
+            local dt = data.dispelName or data.dispelType
+            if WR_PaladinForever_IsCleansableDispelType(dt) then return true end
+        end
+    end
+
+    -- ④ 旧名字兜底：个别自定义 debuff 就叫「中毒」
+    local legacy = WR_PaladinForever_DISPEL_LEGACY_NAMES
+    for i = 1, #legacy do
+        local ok, remain = pcall(WR_GetUnitDebuffTime, unit, legacy[i])
         if ok and type(remain) == "number" and remain > 0 then return true end
     end
     return false
@@ -2478,6 +2589,27 @@ function WR_PaladinForever_OnCooldown(realName, cd)
     return (GetTime() - at) < cd
 end
 
+-- 清洁术可用性（兼容「需要友方目标」的客户端：IsUsableSpell 在敌方/无目标时
+-- 可能返回 false，但技能本身已学会且不在本地冷却 —— 仍允许点亮，蓝量交给色块总闸）。
+function WR_PaladinForever_CanCleanseCast()
+    if WR_SpellUsable("清洁术", true) then return true end
+    -- 蓝量不足时不放行（资源可读时）；资源不可读交给色块总闸与客户端回执兜底
+    if WR_Forever_NotEnoughPower ~= nil then
+        local okN, low = pcall(WR_Forever_NotEnoughPower, "清洁术")
+        if okN and low == true then return false end
+    end
+    local id = 4987
+    if WR_ResolveSpellID ~= nil then
+        local okR, v = pcall(WR_ResolveSpellID, "清洁术")
+        if okR and type(v) == "number" and v > 0 then id = v end
+    end
+    if IsPlayerSpell ~= nil then
+        local okP, known = pcall(IsPlayerSpell, id)
+        if okP and known == true then return true end
+    end
+    return false
+end
+
 -- 清洁术统一步骤（面板 5 模式 + 防护独立自己/目标复选框）
 --   phase = "priority"：只跑「优先」模式 + 防护独立复选框
 --   phase = "normal"  ：只跑「常规 / 目标 / 指向」模式
@@ -2487,7 +2619,7 @@ function WR_PaladinForever_CleanseStep(modeVar, phase, selfVar, targetVar)
     if mode < 1 or mode > 5 then mode = 5 end
 
     local function canCast()
-        return WR_SpellUsable("清洁术", true) and not WR_PaladinForever_OnCooldown("清洁术", 8)
+        return WR_PaladinForever_CanCleanseCast() and not WR_PaladinForever_OnCooldown("清洁术", 8)
     end
     local function tryUnit(unit, alias, slot)
         if not WR_PaladinForever_UnitHasDispel(unit) then return false end

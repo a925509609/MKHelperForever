@@ -117,10 +117,29 @@ end
 -- ============================================================
 function WR_PaladinForeverHoly_HasDispel(unit)
     if type(unit) ~= "string" or not UnitExists(unit) then return false end
-    local kinds = { "中毒", "疾病", "魔法" }
-    for i = 1, #kinds do
-        local v = WR_GetUnitDebuffTime(unit, kinds[i])
-        if type(v) == "number" and v > 0 then return true end
+    -- ★★★ 2026-11-14：统一走公共判定（按 HARMFUL 光环的 dispelType 识别
+    --   Poison / Disease / Magic）。旧实现按「中毒/疾病/魔法」光环名精确匹配，
+    --   真机 debuff 名是技能名（毒液箭/撕裂/腐蚀…）→ 永远匹配不到 → 不驱散。
+    if WR_PaladinForever_UnitHasDispel ~= nil then
+        local ok, hit = pcall(WR_PaladinForever_UnitHasDispel, unit)
+        if ok and hit == true then return true end
+        if ok and hit == false then return false end
+    end
+    -- 兜底：公共件缺失时按 HARMFUL 缓存的 dispelType 自行判断
+    local cache = type(WR_AuraCache) == "table" and WR_AuraCache[unit] or nil
+    local auras = cache and cache.HARMFUL or nil
+    if type(auras) == "table" then
+        for i = 1, #auras do
+            local aura = auras[i]
+            local dt = type(aura) == "table" and aura.dispelType or nil
+            if type(dt) == "string" then
+                local s = string.lower(dt)
+                if s == "poison" or s == "disease" or s == "magic"
+                    or dt == "中毒" or dt == "疾病" or dt == "魔法" then
+                    return true
+                end
+            end
+        end
     end
     return false
 end
@@ -499,8 +518,14 @@ function WR_PaladinForeverHoly()
     --   施放顺序：自己 → 焦点 → 指向（模式 4 才查指向）
     --   三种用途用三个槽位：43 自施 / 63 焦点 / 59 指向，互不串台。
     local dispelOff = (PigSet and PigSet.SS_QJS_AUTO == true) or (qjsMode == 5)
+    local cleanseReady
+    if WR_PaladinForever_CanCleanseCast ~= nil then
+        cleanseReady = WR_PaladinForever_CanCleanseCast()
+    else
+        cleanseReady = WR_SpellUsable("清洁术", true)
+    end
     if not dispelOff
-       and WR_SpellUsable("清洁术", true)
+       and cleanseReady
        and not WR_PaladinForeverHoly_OnCooldown("清洁术", 8) then
         if WR_PaladinForeverHoly_HasDispel("player")
            and WR_PaladinForever_ShowSkillCD("清洁术(自己)", 43, 8) then
