@@ -78,10 +78,10 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-SHIFT-F5", "/cast 混沌流星") -- 75
   WR_CreateMacro("CTRL-SHIFT-F6", "/cast [@cursor] 火焰之雨") -- 76
   WR_CreateMacro("CTRL-SHIFT-F7", "/cast 地狱烈焰") -- 77
-  WR_CreateMacro("CTRL-SHIFT-F8", "/cast 暗影烈焰") -- 78
+  WR_CreateMacro("CTRL-SHIFT-F8", "/cast 浩劫诅咒") -- 78: 毁灭插入-浩劫诅咒（原暗影烈焰，80级移除）
   WR_CreateMacro("CTRL-SHIFT-F12", "/cast 制造法术石") -- 79
   WR_CreateMacro("CTRL-SHIFT-F10", "/use 完美法术石 \n/use 16\n/click StaticPopup1Button1") -- 80
-  WR_CreateMacro("ALT-CTRL-SHIFT-F1", "") -- 81
+  WR_CreateMacro("ALT-CTRL-SHIFT-F1", "/cast 生命虹吸") -- 81  -- [恶魔术] DOT 生命虹吸（痛苦天赋）
   WR_CreateMacro("ALT-CTRL-SHIFT-F2", "/cast [target=focus] 暗影箭(等级 1)") -- 82
   WR_CreateMacro("ALT-CTRL-SHIFT-F3", "") -- 83
   WR_CreateMacro("ALT-CTRL-SHIFT-F11", "/targetexact 安塔尔·缮炉者\n/targetexact 严肃的凯普斯\n/cast 恐惧") -- 84: TOC-恐惧牧师
@@ -94,22 +94,22 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-F1", "") -- 91
   WR_CreateMacro("ALT-F2", "") -- 92
   WR_CreateMacro("ALT-F3", "") -- 93
-  WR_CreateMacro("ALT-F11", "") -- 94
-  WR_CreateMacro("ALT-F5", "") -- 95
-  WR_CreateMacro("ALT-F6", "") -- 96
+  WR_CreateMacro("ALT-F11", "/cast 元素诅咒") -- 94  -- [恶魔术] 诅咒系
+  WR_CreateMacro("ALT-F5", "/cast 虚弱诅咒") -- 95  -- [恶魔术] 诅咒系
+  WR_CreateMacro("ALT-F6", "/cast 鲁莽诅咒") -- 96  -- [恶魔术] 诅咒系
   WR_CreateMacro("ALT-F7", "/focus party1target") -- 97
   WR_CreateMacro("ALT-F8", "/focus party2target") -- 98
   WR_CreateMacro("ALT-F12", "/focus party3target") -- 99
   WR_CreateMacro("ALT-F10", "/focus party4target") -- 100
-  WR_CreateMacro("ALT-SHIFT-F1", "") -- 101
-  WR_CreateMacro("ALT-SHIFT-F2", "") -- 102
-  WR_CreateMacro("ALT-SHIFT-F3", "") -- 103
-  WR_CreateMacro("ALT-SHIFT-F11", "") -- 104
-  WR_CreateMacro("ALT-SHIFT-F5", "") -- 105
-  WR_CreateMacro("ALT-SHIFT-F6", "") -- 106
-  WR_CreateMacro("ALT-SHIFT-F7", "") -- 107
-  WR_CreateMacro("ALT-SHIFT-F8", "") -- 108
-  WR_CreateMacro("ALT-SHIFT-F12", "") -- 109
+  WR_CreateMacro("ALT-SHIFT-F1", "/cast 语言诅咒") -- 101  -- [恶魔术] 诅咒系
+  WR_CreateMacro("ALT-SHIFT-F2", "/cast 死亡缠绕") -- 102  -- [恶魔术] 插入
+  WR_CreateMacro("ALT-SHIFT-F3", "/cast 恐惧术") -- 103  -- [恶魔术] 插入
+  WR_CreateMacro("ALT-SHIFT-F11", "/cast 恐惧嚎叫") -- 104  -- [恶魔术] 插入
+  WR_CreateMacro("ALT-SHIFT-F5", "/cast 生命通道") -- 105  -- [恶魔术] 插入
+  WR_CreateMacro("ALT-SHIFT-F6", "/use 治疗药水") -- 106  -- [恶魔术] 自保
+  WR_CreateMacro("ALT-SHIFT-F7", "/cast 痛苦灾祸") -- 107  -- [恶魔术] 灾祸2选1
+  WR_CreateMacro("ALT-SHIFT-F8", "/cast 末日灾祸") -- 108  -- [恶魔术] 灾祸2选1
+  WR_CreateMacro("ALT-SHIFT-F12", "/cast 疲劳诅咒") -- 109  -- [恶魔术] 诅咒系（痛苦天赋）
   WR_CreateMacro("ALT-SHIFT-F10", "/targetexact 玛兹迪娜\n/targetexact 伊锐丝·影踪\n/targetexact 鲁姬卡\n/targetexact 阿莱希娅·月行者") -- 110: TOC-选盗贼猎人
   WR_CreateMacro("ALT-CTRL-SHIFT--", "") -- 111
   WR_CreateMacro("CTRL-SHIFT--", "/cast [@focus] 法术偷取") -- 112
@@ -228,7 +228,6 @@ WR_SkillColor["WARLOCK"] = {
     ["鬼影缠身"] = 5,
     ["吸取灵魂"] = 11,
     ["痛苦无常"] = 2,
-    ["腐蚀术"] = 14,
     ["痛苦诅咒"] = 3,
     ["暗影箭"] = 6,
     ["生命分流"] = 10,
@@ -238,16 +237,26 @@ WR_SkillColor["WARLOCK"] = {
     ["烧尽"] = 39,
     ["厄运诅咒"] = 24,
     ["燃烧"] = 42,
+    ["暗影灼烧"] = 54,
     ["混乱箭"] = 98,
-    ["强化诅咒"] = 301,
-    ["疲劳诅咒"] = 302,
-    ["生命虹吸"] = 303,
-    ["吸取希望"] = 304,
-    ["恶魔牺牲"] = 305,
-    ["恶魔支配"] = 306,
-    ["灵魂链接"] = 307,
-    ["暗影灼烧"] = 308,
-    ["浩劫诅咒"] = 309,
+    -- ★ 2026-11-15 恶魔术收尾：301-309 越界登记（违反 1-199 职业槽规则）改绑合法空槽；
+    --   本服不存在的技能（强化诅咒/吸取希望/恶魔支配/灵魂链接）移除登记，
+    --   ResolveSlot 未命中时走「不点亮+告警」路径，避免点亮无效槽位。
+    ["疲劳诅咒"] = 109,
+    ["生命虹吸"] = 81,
+    ["痛苦灾祸"] = 107,
+    ["末日灾祸"] = 108,
+    ["元素诅咒"] = 94,
+    ["虚弱诅咒"] = 95,
+    ["鲁莽诅咒"] = 96,
+    ["语言诅咒"] = 101,
+    ["死亡缠绕"] = 102,
+    ["恐惧术"] = 103,
+    ["恐惧嚎叫"] = 104,
+    ["生命通道"] = 105,
+    ["治疗药水"] = 106,
+    ["种族爆发"] = 8,
+    ["腐蚀术"] = 41,   -- 槽14=CTRL-NUMPAD4 [target=focus] 焦点宏；对当前目标补 DOT 必须用 41 本体宏
     -- ★ 2026-11-13 新循环登记（槽位与上方宏一一对应；1/9/25/35/40/76/77/86/190 复用现有宏）
     ["折磨"] = 91,
     ["灼热之痛"] = 92,
@@ -258,6 +267,7 @@ WR_SkillColor["WARLOCK"] = {
     ["火焰之雨"] = 76,
     ["地狱烈焰"] = 77,
     ["地狱火"] = 25,
+    ["浩劫诅咒"] = 78,
     ["灵魂碎裂"] = 40,
     ["魔杖射击"] = 190,
     ["邪能治疗石"] = 35,

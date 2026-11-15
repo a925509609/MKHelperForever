@@ -302,20 +302,88 @@ local function WR_PaladinForever_StripSealRankSuffix(nm)
     return s
 end
 
+-- ★★★ 2026-11-15：按「目标」分别记录自己打出的审判 debuff 到期时刻。
+--   背景：战斗中目标光环是 secret，WR_GetUnitDebuffTime 对新目标可能读不到；
+--   旧的单条本地账只记录「最后一次审判的目标」，A→B→A 切回 A 时旧账还停在 B，
+--   状态机误判 A 没有智慧审判 → 再次切智慧圣印重打（用户实测截图：A 身上明明
+--   还有 39 秒「智慧审判」）。现在按 targetKey 分目标记账，换目标后仍能兜底。
+WR_PaladinForever_JudgementMemory = WR_PaladinForever_JudgementMemory or {}
+
+function WR_PaladinForever_PruneJudgementMemory(now)
+    local mem = WR_PaladinForever_JudgementMemory
+    if type(mem) ~= "table" then
+        WR_PaladinForever_JudgementMemory = {}
+        return
+    end
+    now = tonumber(now) or GetTime()
+    local kinds = { "light", "wisdom", "crusader" }
+    for key, rec in pairs(mem) do
+        if type(rec) ~= "table" then
+            mem[key] = nil
+        else
+            local any = false
+            for i = 1, #kinds do
+                local kind = kinds[i]
+                local untilAt = tonumber(rec[kind])
+                if type(untilAt) == "number" and untilAt > now then
+                    rec[kind] = untilAt
+                    any = true
+                else
+                    rec[kind] = nil
+                end
+            end
+            if not any then mem[key] = nil end
+        end
+    end
+end
+
+-- 当前目标身上的本地审判记忆剩余秒数（只认自己实际打出过的审判）
+function WR_PaladinForever_LocalJudgementRemain(kind)
+    if type(kind) ~= "string" then return 0 end
+    local key = WR_PaladinForever_JudgementSealTargetKey()
+    if key == nil then return 0 end
+    local mem = WR_PaladinForever_JudgementMemory
+    local rec = type(mem) == "table" and mem[key] or nil
+    if type(rec) ~= "table" then return 0 end
+    local untilAt = tonumber(rec[kind])
+    if type(untilAt) ~= "number" then return 0 end
+    local remain = untilAt - GetTime()
+    if remain <= 0 then
+        rec[kind] = nil
+        return 0
+    end
+    return remain
+end
+
 -- 目标身上某个「审判」debuff 的剩余时间（通用）：
 --   0 = 没读到 / 没有；>0 = 剩余秒数；999 = 有但到期时间不可读
 --   names 为候选名称数组，兼容不同客户端/旧版本的翻译差异。
-function WR_PaladinForever_JudgementSealDebuffRemain(names)
-    if type(WR_GetUnitDebuffTime) ~= "function" then return 0 end
+--   kind（可选）：light / wisdom / crusader —— 光环读不到时按该目标本地账兜底。
+function WR_PaladinForever_JudgementSealDebuffRemain(names, kind)
+    if type(WR_GetUnitDebuffTime) ~= "function" then
+        if kind ~= nil then
+            local localRemain = WR_PaladinForever_LocalJudgementRemain(kind)
+            if type(localRemain) == "number" and localRemain > 0 then
+                return math.min(localRemain, 999), "local"
+            end
+        end
+        return 0, "aura"
+    end
     local best = 0
     for i = 1, #names do
         local ok, t = pcall(WR_GetUnitDebuffTime, "target", names[i])
         if ok and type(t) == "number" and t > 0 then
-            if t >= 900 then return 999 end
+            if t >= 900 then return 999, "aura" end
             if t > best then best = t end
         end
     end
-    return best
+    if best <= 0 and kind ~= nil then
+        local localRemain = WR_PaladinForever_LocalJudgementRemain(kind)
+        if type(localRemain) == "number" and localRemain > 0 then
+            return math.min(localRemain, 999), "local"
+        end
+    end
+    return best, "aura"
 end
 
 -- 目标身上「光明审判」debuff 剩余时间：
@@ -324,19 +392,19 @@ end
 --     「圣光审判」，旧版本还曾用「光明圣印」当目标 debuff 名；三个名字都查，
 --     避免因为名称不一致导致「明明已经挂了审判，却一直不切回常驻圣印」。
 function WR_PaladinForever_LightSealDebuffRemain()
-    return WR_PaladinForever_JudgementSealDebuffRemain({ "光明审判", "圣光审判", "光明圣印" })
+    return WR_PaladinForever_JudgementSealDebuffRemain({ "光明审判", "圣光审判", "光明圣印" }, "light")
 end
 
 -- 目标身上「十字军审判」debuff 剩余时间：
 --   本服名称「十字军审判」；「十字军圣印」作为旧名/异常翻译兜底。
 function WR_PaladinForever_CrusaderSealDebuffRemain()
-    return WR_PaladinForever_JudgementSealDebuffRemain({ "十字军审判", "十字军圣印" })
+    return WR_PaladinForever_JudgementSealDebuffRemain({ "十字军审判", "十字军圣印" }, "crusader")
 end
 
 -- 目标身上「智慧审判」debuff 剩余时间：
 --   本服名称「智慧审判」；「智慧圣印」作为旧名/异常翻译兜底。
 function WR_PaladinForever_WisdomSealDebuffRemain()
-    return WR_PaladinForever_JudgementSealDebuffRemain({ "智慧审判", "智慧圣印" })
+    return WR_PaladinForever_JudgementSealDebuffRemain({ "智慧审判", "智慧圣印" }, "wisdom")
 end
 
 -- ★ 2026-11-13：以下三个门控函数必须定义在
@@ -364,15 +432,39 @@ end
 --   光明/智慧审判 debuff → 旧门控恒判「没有审判」，主调度照常打审判。
 --   常驻光明圣印时这一发就是光明审判，会把刚挂上的智慧审判顶掉（用户实测冲突）。
 --   修法：审判成功时按「施放瞬间身上的圣印」记一条 40 秒本地账（kind = light/wisdom），
---   光环可读时以光环为准；不可读时用本地账兜底。换目标自动失效。
+--   光环可读时以光环为准；不可读时用本地账兜底。
+-- ★★★ 2026-11-15：本地账改为「按目标 key 分开记」（见文件上方 JudgementMemory），
+--   不再因为换目标就把别的目标的账覆盖；单条旧字段保留给无法读到 targetKey 的场景。
 WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS = 40
 
 function WR_PaladinForever_NoteSingleSlotJudgement(kind, untilAt)
-    if kind ~= "light" and kind ~= "wisdom" then return end
+    if kind ~= "light" and kind ~= "wisdom" and kind ~= "crusader" then return end
     local t = tonumber(untilAt) or (GetTime() + WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS)
-    WR_PaladinForever_SingleSlotJudgementUntil = t
-    WR_PaladinForever_SingleSlotJudgementKind = kind
-    WR_PaladinForever_SingleSlotJudgementTarget = WR_PaladinForever_JudgementSealTargetKey()
+    if kind == "light" or kind == "wisdom" then
+        WR_PaladinForever_SingleSlotJudgementUntil = t
+        WR_PaladinForever_SingleSlotJudgementKind = kind
+        WR_PaladinForever_SingleSlotJudgementTarget = WR_PaladinForever_JudgementSealTargetKey()
+    end
+    local key = WR_PaladinForever_JudgementSealTargetKey()
+    if key == nil then return end
+    local mem = WR_PaladinForever_JudgementMemory
+    if type(mem) ~= "table" then
+        mem = {}
+        WR_PaladinForever_JudgementMemory = mem
+    end
+    local rec = mem[key]
+    if type(rec) ~= "table" then
+        rec = {}
+        mem[key] = rec
+    end
+    -- 光明 / 智慧审判同属一个「审判」槽位：打上其中一条时另一条已被顶掉。
+    if kind == "light" then
+        rec.wisdom = nil
+    elseif kind == "wisdom" then
+        rec.light = nil
+    end
+    rec[kind] = t
+    WR_PaladinForever_PruneJudgementMemory(GetTime())
 end
 
 function WR_PaladinForever_ClearSingleSlotJudgement()
@@ -383,13 +475,23 @@ end
 
 -- 返回：kind（"light"/"wisdom"/nil）、剩余秒数、来源（"aura"/"local"/nil）
 function WR_PaladinForever_SingleSlotJudgementInfo()
-    local lightRemain = WR_PaladinForever_LightSealDebuffRemain()
+    local lightRemain, lightSource = WR_PaladinForever_LightSealDebuffRemain()
     if type(lightRemain) == "number" and lightRemain > 0 then
-        return "light", lightRemain, "aura"
+        return "light", lightRemain, lightSource or "aura"
     end
-    local wisdomRemain = WR_PaladinForever_WisdomSealDebuffRemain()
+    local wisdomRemain, wisdomSource = WR_PaladinForever_WisdomSealDebuffRemain()
     if type(wisdomRemain) == "number" and wisdomRemain > 0 then
-        return "wisdom", wisdomRemain, "aura"
+        return "wisdom", wisdomRemain, wisdomSource or "aura"
+    end
+    -- ★★★ 2026-11-15：目标光环读不到（战斗中 secret / 刚换目标缓存未刷新）时，
+    --   按「当前目标 key」取本地账；这样 A→B→A 切回 A 仍知道 A 身上的智慧审判还没到期。
+    local localLight = WR_PaladinForever_LocalJudgementRemain("light")
+    if type(localLight) == "number" and localLight > 0 then
+        return "light", localLight, "local"
+    end
+    local localWisdom = WR_PaladinForever_LocalJudgementRemain("wisdom")
+    if type(localWisdom) == "number" and localWisdom > 0 then
+        return "wisdom", localWisdom, "local"
     end
     local untilAt = WR_PaladinForever_SingleSlotJudgementUntil
     if type(untilAt) == "number" and GetTime() < untilAt then
@@ -527,7 +629,23 @@ function WR_PaladinForever_WisdomSealOnPlayer()
 end
 
 -- 目标标识：用于「换目标后重新挂审判 debuff」。GUID 读不到时退化为名字。
-function WR_PaladinForever_JudgementSealTargetKey()
+-- ★★★ 2026-11-15（实战第二版）：目标 key 的「时序性 secret」盲区。
+--   实战复现（用户实测「夹具全绿但游戏里依旧重复切智慧圣印」）：
+--   审判施放事件回报的那一刻（事件回调里记账），战斗中 UnitGUID/UnitName
+--   恰好处于 secret 状态 → key=nil → NoteSingleSlotJudgement 直接 return，
+--   A 的按目标账【根本没记上】；之后切回 A 时 GUID 恢复可读 → mem[keyA]
+--   查不到 + 旧单条账又被目标检查判无效（stored=B, current=A）→ 误判
+--   「A 没有智慧审判」→ 再次切智慧圣印重打。
+--   修法（三件套，全部不依赖事件时刻的 GUID 可读性）：
+--   ① PLAYER_TARGET_CHANGED 递增 TargetEpoch（事件必触发，是换目标的权威信号）；
+--   ② 每个 epoch 内第一次读到 key（GUID 或名字）就锁定快照，整个 epoch 复用
+--      同一把钥匙（防 GUID/名字来源中途漂移导致账键对不上）；
+--   ③ 直接读取读不到时回退快照（epoch 必须一致）。审判前一瞬主循环 tick
+--      已锁定的快照，让事件回调记账也能落到正确目标头上。
+WR_PaladinForever_TargetEpoch = WR_PaladinForever_TargetEpoch or 0
+WR_PaladinForever_TargetKeySnapshot = WR_PaladinForever_TargetKeySnapshot or nil
+
+local function WR_PaladinForever_RawTargetKey()
     local key
     if type(WR_SafeUnitGUID) == "function" then
         key = WR_SafeUnitGUID("target")
@@ -550,6 +668,37 @@ function WR_PaladinForever_JudgementSealTargetKey()
         end
     end
     return key
+end
+
+-- PLAYER_TARGET_CHANGED 回调：epoch+1 并尽力重建快照。
+-- 由 Paladin_Forever.lua 的事件帧调用；离线夹具可直接手动调用模拟换目标。
+function WR_PaladinForever_NoteTargetChanged()
+    WR_PaladinForever_TargetEpoch = (WR_PaladinForever_TargetEpoch or 0) + 1
+    WR_PaladinForever_TargetKeySnapshot = nil
+    local key = WR_PaladinForever_RawTargetKey()
+    if type(key) == "string" and key ~= "" then
+        WR_PaladinForever_TargetKeySnapshot = { key = key, epoch = WR_PaladinForever_TargetEpoch }
+    end
+end
+
+function WR_PaladinForever_JudgementSealTargetKey()
+    local epoch = WR_PaladinForever_TargetEpoch or 0
+    local snap = WR_PaladinForever_TargetKeySnapshot
+    -- ★ 2026-11-15：先读实时值。实时值可读时永远以它为准——即使换目标事件
+    --   漏发 / 夹具直接改 GUID，也不会被上一目标的快照锁死；快照只用于
+    --   「事件时刻 GUID/Name 全 secret」时兜底。
+    local key = WR_PaladinForever_RawTargetKey()
+    if key ~= nil and key ~= "" then
+        if type(snap) ~= "table" or snap.epoch ~= epoch or snap.key ~= key then
+            WR_PaladinForever_TargetKeySnapshot = { key = key, epoch = epoch }
+        end
+        return key
+    end
+    if type(snap) == "table" and snap.epoch == epoch and type(snap.key) == "string"
+        and snap.key ~= "" then
+        return snap.key
+    end
+    return nil
 end
 
 -- 兼容旧名：光明圣印状态机沿用
@@ -591,6 +740,7 @@ function WR_PaladinForever_ResetWisdomJudgementState()
     WR_PaladinForever_WisdomJudgementDeadline = nil
     WR_PaladinForever_WisdomJudgementDebuffUntil = nil
     WR_PaladinForever_WisdomJudgementTarget = nil
+    WR_PaladinForever_WisdomJudgementTargetEpoch = nil
     WR_PaladinForever_WisdomJudgementMaintainPromptAt = nil
 end
 
@@ -852,7 +1002,8 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             return false
         end
         local switchAt = WR_PaladinForever_LightSealSwitchAt or 0
-        -- ★ 切回常驻圣印是自身 Buff，不要求目标在近战范围（目标跑远也要换回仇恨圣印）
+        -- ★ 2026-11-14 用户口径：能平砍的时候才挂自身圣印（切回也是挂印），
+        --   不能平砍就不切，避免目标跑远 / 死亡时空放圣印；能平砍后下一 tick 会自动切回。
         if (now - switchAt) >= 2.0 then
             -- 显式切回常驻圣印（面板「圣印」专区所选）
             WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
@@ -1076,6 +1227,7 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             end
             WR_PaladinForever_CrusaderSealDebuffUntil = untilAt
             WR_PaladinForever_CrusaderSealTarget = WR_PaladinForever_JudgementSealTargetKey()
+            WR_PaladinForever_NoteSingleSlotJudgement("crusader", untilAt)
             if mainSeal == WR_PaladinForever_CRUSADER_SEAL_NAME then
                 -- 常驻就是十字军圣印：无需切回，直接进入维持期
                 WR_PaladinForever_CrusaderSealPhase = 4
@@ -1129,7 +1281,8 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             return false
         end
         local switchAt = WR_PaladinForever_CrusaderSealSwitchAt or 0
-        -- ★ 切回常驻圣印是自身 Buff，不要求目标在近战范围（目标跑远也要换回仇恨圣印）
+        -- ★ 2026-11-14 用户口径：能平砍的时候才挂自身圣印（切回也是挂印），
+        --   不能平砍就不切，避免目标跑远 / 死亡时空放圣印；能平砍后下一 tick 会自动切回。
         if (now - switchAt) >= 2.0 then
             -- 显式切回常驻圣印（面板「圣印」专区所选）
             WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
@@ -1267,6 +1420,7 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
                 + ((remain >= 900) and WR_PaladinForever_WISDOM_JUDGEMENT_SECONDS
                    or math.min(remain + 0.5, WR_PaladinForever_WISDOM_JUDGEMENT_SECONDS + 1))
             WR_PaladinForever_WisdomJudgementTarget = WR_PaladinForever_JudgementSealTargetKey()
+            WR_PaladinForever_WisdomJudgementTargetEpoch = WR_PaladinForever_TargetEpoch or 0
             phase = 4
         end
     end
@@ -1359,6 +1513,7 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             end
             WR_PaladinForever_WisdomJudgementDebuffUntil = untilAt
             WR_PaladinForever_WisdomJudgementTarget = WR_PaladinForever_JudgementSealTargetKey()
+            WR_PaladinForever_WisdomJudgementTargetEpoch = WR_PaladinForever_TargetEpoch or 0
             WR_PaladinForever_NoteSingleSlotJudgement("wisdom", untilAt)
             if mainSeal == WR_PaladinForever_WISDOM_SEAL_NAME then
                 -- 常驻就是智慧圣印：无需切回，直接进入维持期
@@ -1413,7 +1568,8 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             return false
         end
         local switchAt = WR_PaladinForever_WisdomJudgementSwitchAt or 0
-        -- ★ 切回常驻圣印是自身 Buff，不要求目标在近战范围（目标跑远也要换回仇恨圣印）
+        -- ★ 2026-11-14 用户口径：能平砍的时候才挂自身圣印（切回也是挂印），
+        --   不能平砍就不切，避免目标跑远 / 死亡时空放圣印；能平砍后下一 tick 会自动切回。
         if (now - switchAt) >= 2.0 then
             -- 显式切回常驻圣印（面板「圣印」专区所选）
             WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
@@ -1433,7 +1589,12 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
         end
         local targetKey = WR_PaladinForever_JudgementSealTargetKey()
         local storedKey = WR_PaladinForever_WisdomJudgementTarget
-        if storedKey and targetKey and storedKey ~= targetKey then
+        local storedEpoch = WR_PaladinForever_WisdomJudgementTargetEpoch
+        -- ★ 2026-11-15（第二版）：epoch 兜底——两边 key 都读不到（全程 secret）时，
+        --   PLAYER_TARGET_CHANGED 的 epoch 仍能检测到换目标，避免把 B 的维持期
+        --   错套在切回来的 A 头上（DebuffUntil 是 B 的时间）。
+        if (storedKey and targetKey and storedKey ~= targetKey)
+            or (type(storedEpoch) == "number" and storedEpoch ~= (WR_PaladinForever_TargetEpoch or 0)) then
             -- 换目标：重新给新目标挂智慧审判
             WR_PaladinForever_ResetWisdomJudgementState()
             return false
@@ -1497,6 +1658,8 @@ function WR_PaladinForeverProt()
     local sealState = WR_PaladinForever_ProtSealState()
 
     -- ★★ 2026-11-09 用户口径：补印只在「战斗中 + 近战可攻击」时进行。
+    -- ★★★ 2026-11-14 用户口径：改为「能平砍的时候才挂自身圣印」（CanApplySeal → CanMeleeSwing），
+    --   目标是敌对活体且在平砍射程内才允许点亮圣印色块，否则一律空放。
     --   ★ 进战强制补印：只要无法确认「身上真有可读圣印光环」(BaseSealUp)，进战且
     --     近战能打到目标时补一次。旧逻辑只认 sealState == "missing"，而战斗中光环是
     --     secret、ProtSealState 会靠「30 分钟本地施放记录」把已消失的圣印判成
@@ -1807,7 +1970,7 @@ function WR_PaladinForeverProt()
     --         唯一防连按的闸，收到 0.3 秒会立刻回到「反复上印」的老 bug。
     --     · HideSkillLater 对圣印统一 1.0 秒（WR_PaladinForever_SEAL_PROMPT_HOLD）
     --       + 成功施放事件立即 HideNow；1.0 秒 < 1.5 秒 GCD，不会连按出第二发。
-    --   「何时能亮」仍由 CanApplySeal（战斗中 + 近战可攻击）决定，脱战绝不点亮。
+    --   「何时能亮」仍由 CanApplySeal（战斗中 + 能平砍）决定，脱战绝不点亮。
     -- ============================================================
     -- ★★ 2026-11-11：状态机可能在本 tick 已推进阶段（例如刚从「需要光明」切到
     --   「目标已有 debuff」），补印目标要按最新阶段重新取一次。

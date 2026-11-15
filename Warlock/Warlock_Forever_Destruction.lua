@@ -1,27 +1,20 @@
 -- ============================================================
--- Warlock Forever · Destruction 专精薄壳
--- 2026-11-13 重写：旧机械转译循环删除；逻辑全部在公共件
--- Warlock_Forever.lua 的共享段，本文件只传专精差异参数。
--- ★ 本文件不得在 WR_WarlockForever_Run 之前读 TargetDeathTime 等全局：
---   那些值由公共件 Base() 每 tick 采集，提前读会拿到上一 tick 脏值。
---   「自动 BOSS 厄运诅咒」已移入公共件 DOT 段（bossDoom 参数驱动）。
+-- Warlock Forever · Destruction 专精薄壳（60级 / 无限服）
+-- ------------------------------------------------------------
+-- 2026-11-15 重做：按「猪猪-无限服 · 毁灭页」截图，逻辑全部在
+-- Warlock_Destruction_Features.lua（WD 功能层），本文件只做派发。
+-- ★ 本文件不得在采集全局之前读 PlayerHP/TargetDeathTime 等：
+--   那些值由 WD.Base() 每 tick 采集，提前读会拿到上一 tick 脏值。
+-- ★ 共享件 Warlock_Forever.lua 零改动：痛苦/恶魔学识不受影响。
+-- ★ 旧 80 级循环参数（dotList/curse/drainSoul/soulFire/incinerate/
+--   searingPain/bossDoom 等）已废弃：本层改走 WD 功能层。
 -- ============================================================
 
 if WR_PlayerClass ~= "WARLOCK" then return end
 
 function WR_WarlockForeverDestruction()
-    return WR_WarlockForever_Run("毁灭", {
-        dotList = {
-            { name = "腐蚀术", slot = 14, ttd = 6 },
-            { name = "献祭",   slot = 36, ttd = 8 },
-        },
-        curse = nil,          -- 毁灭诅咒只走 SS_HM_EYZZ / 插入键
-        drainSoul = false,
-        soulFire = true,
-        incinerate = true,    -- 需目标有献祭（公共件内判）
-        searingPain = true,   -- 灼热之痛移动填充
-        torment = false,
-        metaMorph = false,
-        bossDoom = true,      -- 自动 BOSS 厄运诅咒（SS_HM_EYZZ）
-    })
+    if WR_WarlockDest and WR_WarlockDest.Run then
+        return WR_WarlockDest.Run()
+    end
+    return false
 end

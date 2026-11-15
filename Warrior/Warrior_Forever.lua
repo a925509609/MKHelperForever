@@ -102,10 +102,10 @@ function WR_WarriorArms_MP()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("贯刺打击") and WR_SpellUsable("贯刺打击", true) then
-        if WR_ColorFrame_ShowSkill("贯刺打击", 301) then return true end
+        if WR_ColorFrame_ShowSkill("贯刺打击", 64) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("横扫攻击") and WR_SpellUsable("横扫攻击", true) then
-        if WR_ColorFrame_ShowSkill("横扫攻击", 302) then return true end
+        if WR_ColorFrame_ShowSkill("横扫攻击", 42) then return true end
     end
     return false
 end
@@ -197,10 +197,10 @@ function WR_WarriorFury_MP()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("刺耳怒吼") and WR_SpellUsable("刺耳怒吼", true) then
-        if WR_ColorFrame_ShowSkill("刺耳怒吼", 303) then return true end
+        if WR_ColorFrame_ShowSkill("刺耳怒吼", 53) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("死亡之愿") and WR_SpellUsable("死亡之愿", true) then
-        if WR_ColorFrame_ShowSkill("死亡之愿", 304) then return true end
+        if WR_ColorFrame_ShowSkill("死亡之愿", 60) then return true end
     end
     return false
 end

@@ -82,6 +82,7 @@ Data\Forever_SkillRegistry.lua
 Data\Forever_MageSpells.lua
 Core\Forever_Compat.lua
 Core\Forever_SecretGuard.lua
+Core\Forever_CombatHealth.lua
 
 # ============================================================
 # 2. 核心
@@ -138,8 +139,10 @@ Paladin\Paladin_Holy_ShieldFreedom.lua
 Paladin\Paladin_Protection.lua
 Paladin\Paladin_Retribution.lua
 Paladin\Paladin_Forever.lua
+Paladin\Paladin_Retribution_Features.lua
 Paladin\Paladin_Forever_Ret.lua
 Paladin\Paladin_Forever_Prot.lua
+Paladin\Paladin_Holy_Features.lua
 Paladin\Paladin_Forever_Holy.lua
 Paladin\Paladin_Retribution_Check.lua
 
@@ -176,8 +179,11 @@ Warrior\Warrior_Arms.lua
 Warrior\Warrior_Fury.lua
 Warrior\Warrior_Protection.lua
 Warrior\Warrior_Forever.lua
+Warrior\Warrior_Arms_Features.lua
 Warrior\Warrior_Forever_Arms.lua
+Warrior\Warrior_Fury_Features.lua
 Warrior\Warrior_Forever_Fury.lua
+Warrior\Warrior_Protection_Features.lua
 Warrior\Warrior_Forever_Protection.lua
 
 Priest\Priest_Menu.lua
@@ -231,6 +237,9 @@ Warlock\Warlock_Destruction.lua
 Warlock\Warlock_OOC_Summon_BExt.lua
 Warlock\Warlock_Corruption_Refresh.lua
 Warlock\Warlock_Forever.lua
+Warlock\Warlock_Demonology_Features.lua
+Warlock\Warlock_Affliction_Features.lua
+Warlock\Warlock_Destruction_Features.lua
 Warlock\Warlock_Forever_Affliction.lua
 Warlock\Warlock_Forever_Demonology.lua
 Warlock\Warlock_Forever_Destruction.lua

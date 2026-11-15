@@ -20,127 +20,53 @@ end
 
 Paladin_Menu = {
     -- ==========================================================
-    -- 1. 惩戒专精 (Retribution)
+    -- 1. 惩戒专精 (Retribution) —— 2026-11-15 按「彼岸花-无限服 · 惩戒页」重做
     -- ==========================================================
     ["惩戒"] = {
-        -- ===== 下拉菜单（DM） =====
+        -- ===== 下拉菜单（DM）：选择 / 拉条 =====
         DM = {
-            -- 防ADD开关
+            -- 防ADD
             {
                 text = "|cffF58CBA防ADD|r",
                 menuItems = { { text = "|cffF58CBA是|r" }, { text = "|cffF58CBA否|r" } },
-                tooltipText = "是否开启防ADD,打开的情况下需要目标进入战斗才会攻击",
+                tooltipText = "是否开启防ADD：打开时，需要目标已进入战斗才会主动攻击。",
                 saveVariable = "FANG_ADD_CJQ",
                 defaultID = 1
             },
-            -- 寒霜刺骨
+            -- 拉条（截图口径：喝红药 90 / 圣疗术 69 / 奉献 4目标）
+            { text = "|cffF58CBA喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 90,
+              tooltipText = "自己血量低于设定值时自动喝治疗药水（0 = 不喝）。", saveVariable = "CJ_HXY" },
+            { text = "|cffF58CBA圣疗术|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 69,
+              tooltipText = "自己血量低于设定值时使用圣疗术自疗（0 = 不使用）。", saveVariable = "CJ_SLLS" },
+            { text = "|cffF58CBA奉献|r", isSlider = true, minValue = 0, maxValue = 10, valueStep = 1, defaultVal = 4,
+              tooltipText = "身边 8 码内敌人达到该数量时自动使用奉献（0 = 不使用）。", saveVariable = "CJ_FX_COUNT" },
+            -- 祝福设置按钮（三专精统一入口；功能区的「祝福」图标也能右键打开）
             {
-                text = "|cffF58CBA寒霜刺骨|r",
-                menuItems = {
-                    { text = "|cffF58CBA5|r" }, { text = "|cffF58CBA6|r" }, { text = "|cffF58CBA7|r" },
-                    { text = "|cffF58CBA8|r" }, { text = "|cffF58CBA9|r" }, { text = "|cffF58CBA10|r" },
-                    { text = "|cffF58CBA禁用|r" }
-                },
-                tooltipText = "|cff00adf0寒霜刺骨|r层数大于等于设定值，自动停手(|cff00adf0冰龙|r技能)\n",
-                saveVariable = "CJ_HSCG",
-                section = "自动",
-                defaultID = 1
-            },
-            -- 制裁之锤（瓦格里）——已隐藏：本服不再使用该细分功能
-            --[[
-            {
-                text = "|cffF58CBA制裁之锤|r",
-                menuItems = { { text = "|cffF58CBA1|r" }, { text = "|cffF58CBA2|r" }, { text = "|cffF58CBA3|r" }, { text = "|cffF58CBA禁用|r" } },
-                tooltipText = "使用|cff00adf0制裁之锤|r击晕选中编号的|cff00adf0瓦格里暗影戒卫|r(|cff00adf0巫妖王|r技能)\n",
-                saveVariable = "CJ_ZCZC",
-                section = "自动",
-                defaultID = 1
-            },
-            ]]
-            -- 圣光闪现阈值
-            {
-                text = "|cffF58CBA圣光闪现|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 0,
-                tooltipText = "选择|cff00adf0圣光闪现|r的阈值\n",
-                saveVariable = "CJ_SGSX"
-            },
-            -- ★ 2026-11-11：祝福下拉框已删除，改为「祝福设置」按钮，
-            --   点击打开独立列表（Paladin_Blessing.lua）。见 DM 列表末尾。
-            -- 清洁术模式
-            {
-                text = "|cffF58CBA清洁术|r",
-                menuItems = {
-                    { text = "|cffF58CBA常规|r" },
-                    { text = "|cffF58CBA优先|r" },
-                    { text = "|cffF58CBA目标|r" },
-                    { text = "|cffF58CBA指向|r" },
-                    { text = "|cffF58CBA禁用|r" },
-                },
-                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r\n|cffff5040（清洁术只能驱散中毒/疾病/魔法，不能解诅咒）|r",
-                saveVariable = "CJ_QJS",
-                defaultID = 5
-            },
-            -- ★ 2026-11-11：祝福下拉框 → 「祝福设置」按钮（打开独立列表）
-            {
-                -- 用户口径「祝福设置保留，祝福两个字剔除」：按钮保名「祝福设置」，左侧标签不再写「祝福」
                 text = "",
                 isButton = true,
                 buttonText = "祝福设置",
                 onClick = "WR_OpenPaladinBlessing",
-                tooltipText = "打开|cff00adf0祝福设置列表|r：单人 / 小队 / 团队分别配置力量·智慧·王者祝福，脱战自动补祝福。\n（原「祝福」下拉框已删除）",
+                tooltipText = "打开|cff00adf0祝福设置列表|r：单人 / 小队 / 团队分别配置力量·智慧·王者祝福，脱战自动补祝福。",
             },
         },
         -- ===== 复选框（CB） =====
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 135953, text = "|cffF58CBA全局|r", tooltipText = "使用|cff00adf0清洁术|r，驱散|cff00adf0灵魂尖啸|r和|cff00adf0熔化冲压|r\n", saveVariable = "CJ_QJS_QJ", defaultState = true },
-            { row = 1, column = 2, IconID = 135968, text = "|cffF58CBA红玉|r", tooltipText = "使用|cff00adf0自由之手|r，驱散|cff00adf0红玉减速|r\n", saveVariable = "CJ_ZYZS", defaultState = true },
-            { row = 1, column = 3, IconID = 135964, text = "|cffF58CBA血沸|r", tooltipText = "自动给沸腾之血目标保护\n", saveVariable = "CJ_BH", defaultState = true },
-            { row = 1, column = 4, IconID = 132326, text = "|cffF58CBA全局|r", tooltipText = "全局队友目标自动判断愤怒之锤.注意朝向\n", saveVariable = "CJ_FNZC_QJ", defaultState = true },
-            -- ★ 第1行第5列：偷药开关
-            { row = 1, column = 5, IconID = 236871, text = "|cffF58CBA偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "CJ_TOUYAO", section = "爆发", defaultState = false },
+            -- ===== 功能 =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Warrior_Innerrage", text = "|cffF58CBA圣印|r", tooltipText = "圣印总开关：管理常驻圣印 / 解封之怒舞 / 审判维持。\n右键打开额外条件。\n宏：/PALADIN_RET_SEAL 切换", saveVariable = "CJ_SY_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_PaladinRetUI and WR_PaladinRetUI.ShowOptions then WR_PaladinRetUI.ShowOptions("CJ_SY") end end },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Holy_GreaterBlessingofKings", text = "|cffF58CBA祝福|r", tooltipText = "脱战自动补祝福。\n右键打开祝福设置列表（单人 / 小队 / 团队）。\n宏：/PALADIN_RET_BLESS 切换", saveVariable = "CJ_BLESS_ON", section = "功能", defaultState = true,
+              onRightClick = function() if type(WR_OpenPaladinBlessing) == "function" then WR_OpenPaladinBlessing() end end },
+            { row = 1, column = 3, IconID = 132293, text = "|cffF58CBA切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标。", saveVariable = "CJ_TAB", section = "功能", defaultState = true },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Spell_Holy_DispelMagic", text = "|cffF58CBA驱散|r", tooltipText = "自动使用清洁术驱散中毒 / 疾病 / 魔法（不能解诅咒）。\n右键选驱散模式（常规 / 优先 / 目标 / 指向）。", saveVariable = "CJ_QJS_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_PaladinRetUI and WR_PaladinRetUI.ShowOptions then WR_PaladinRetUI.ShowOptions("CJ_QJS") end end },
+            { row = 2, column = 1, IconID = "Interface\\Icons\\Ability_ThunderClap", text = "|cffF58CBA愤怒之锤|r", tooltipText = "目标进入斩杀期时自动使用愤怒之锤。", saveVariable = "CJ_FNZS", section = "功能", defaultState = true },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Spell_Holy_Excorcism_02", text = "|cffF58CBA驱邪术|r", tooltipText = "目标为亡灵/恶魔时自动使用驱邪术。", saveVariable = "CJ_QXS", section = "功能", defaultState = true },
 
-            -- 第2行
-            { row = 2, column = 1, IconID = 135875, text = "|cffF58CBA自动|r", tooltipText = "自动爆发使用|cff00adf0复仇之怒|r\n", saveVariable = "CJ_BF", section = "爆发", defaultState = true },
-            { row = 2, column = 2, IconID = 236871, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0速度药水|r\n", saveVariable = "CJ_SDYS", section = "爆发", defaultState = false },
-            { row = 2, column = 3, IconID = 133712, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0通用热力工程炸药|r或|cff00adf0萨隆邪铁炸弹|r\n", saveVariable = "CJ_ZD", defaultState = true },
-            { row = 2, column = 4, IconID = 136047, text = "|cffF58CBA锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n", saveVariable = "CJ_SUO", defaultState = true },
-
-            -- 第3行
-            { row = 3, column = 1, IconID = 135926, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0奉献|r\n", saveVariable = "CJ_FX", defaultState = true },
-            { row = 3, column = 2, IconID = 135902, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0神圣愤怒|r\n", saveVariable = "CJ_SSFN", defaultState = true },
-            { row = 3, column = 3, IconID = 135933, text = "|cffF58CBA自动|r", tooltipText = "自动|cff00adf0专注光掌|r\n", saveVariable = "CJ_ZD_ZZGH", defaultState = false },
-
-            -- 第4行
-            { row = 4, column = 1, IconID = 236262, text = "|cffF58CBA自动|r", tooltipText = "自动|cff00adf0祈求圣光|r\n,根据饰品触发时间自动开启", saveVariable = "CJ_ZD_QQSG", defaultState = true },
-            { row = 4, column = 2, IconID = 236262, text = "|cffF58CBA嗜血|r", tooltipText = "自动|cff00adf0祈求圣光|r\n,如果身上有嗜血英勇5层直接开掉", saveVariable = "CJ_ZD_QQSG_SX", defaultState = true },
-            -- ★ 第4行第3列：起手2加3祈求开关
-            { row = 4, column = 3, IconID = 236262, text = "|cffF58CBA2+3|r", tooltipText = "开启|cff00adf0起手2加3祈求|r模式\n起手阶段使用2层正义+3层虔诚的祈求圣光，优化起手爆发", saveVariable = "CJ_QQSG_QS", defaultState = false },
-            { row = 4, column = 4, IconID = 132387, text = "|cffF58CBA自动|r", tooltipText = "使用|cff00adf0雪球|r\n", saveVariable = "CJ_XQ", defaultState = true },
-            -- ★ 2026-08-21 ZZ移植：技能提示开关（祈求圣光/十字军/重担 大字提醒）
-            { row = 4, column = 5, IconID = 237500, text = "|cffF58CBA提示|r", tooltipText = "开启|cff00adf0技能提示|r\n祈求圣光即将可用时红色大字提醒「别动了」；十字军打击/圣光重担即将结束时提醒站定引导", saveVariable = "CJ_ZD_TIP", defaultState = true },
-
-            -- 第5行（插入类技能）
-            { row = 5, column = 1, IconID = 135902, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0神圣愤怒|r\n", saveVariable = "CJ_CRSSFN", section = "插入", defaultState = false },
-            { row = 5, column = 2, IconID = 135963, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0制裁之锤|r\n", saveVariable = "CJ_CRZCZC", section = "插入", defaultState = false },
-            { row = 5, column = 3, IconID = 253400, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0神圣牺牲|r\n", saveVariable = "CJ_CRSSXS", section = "插入", defaultState = false },
-            { row = 5, column = 4, IconID = 135896, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0圣盾术|r\n", saveVariable = "CJ_CRSDS", section = "插入", defaultState = false },
-            { row = 5, column = 5, IconID = 135966, text = "|cffF58CBA插入|r", tooltipText = "先开|cff00adf0圣盾术|r对你|cff00adf0目标的目标|r释放|cff00adf0牺牲|r\n", saveVariable = "CJ_CRWDXS", section = "插入", defaultState = false },
-
-            -- 第6行
-            { row = 6, column = 1, IconID = 135967, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0拯救之手|r\n", saveVariable = "CJ_CRZJZS", section = "插入", defaultState = false },
-            { row = 6, column = 2, IconID = 135968, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0自由之手|r\n", saveVariable = "CJ_CRZYZS", section = "插入", defaultState = false },
-            { row = 6, column = 3, IconID = 236262, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0祈求圣光|r\n", saveVariable = "CJ_CRQQSG", section = "插入", defaultState = false },
-            -- ★ 自动切目标开关
-            { row = 7, column = 1, IconID = 132293, text = "|cffF58CBA切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "CJ_TAB", defaultState = false },
-            -- ★ 衣服使用加力量开关
-            { row = 7, column = 2, IconID = 134326, text = "|cffF58CBA衣服|r", tooltipText = "使用|cff00adf0加力量胸甲|r（如王者壁垒等带\"使用:力量\"效果的胸甲）\n爆发期/目标将死/DBM倒数时提示按下胸甲\"使用\"按键（slot5）", saveVariable = "CJ_YF", section = "爆发", defaultState = false },
-            -- ★ 工程手套独立开关
-            { row = 7, column = 3, IconID = 132962, text = "|cffF58CBA手套|r", tooltipText = "自动使用|cff00adf0工程手套附魔|r（爆发窗口触发，独立于复仇之怒开关）", saveVariable = "CJ_GCST", section = "爆发", defaultState = true },
+            -- ===== 插入（一次性，放完自关） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Holy_SealOfMight", text = "|cffF58CBA制裁|r", tooltipText = "插入制裁之锤：目标正在读条时使用一次，放完自动关闭。", saveVariable = "CJ_CRZC", section = "插入", defaultState = false },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Holy_Restoration", text = "|cffF58CBA圣佑|r", tooltipText = "插入圣佑术：自己血量过低（30%）时使用一次，放完自动关闭。", saveVariable = "CJ_CRSYS", section = "插入", defaultState = false },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Holy_RighteousnessAura", text = "|cffF58CBA审判|r", tooltipText = "插入审判：身上有圣印时使用一次，放完自动关闭。", saveVariable = "CJ_CRSP", section = "插入", defaultState = false },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Spell_Holy_Innerfire", text = "|cffF58CBA奉献|r", tooltipText = "插入奉献：身边怪数达到「奉献」拉条时使用一次，放完自动关闭。", saveVariable = "CJ_CRFL", section = "插入", defaultState = false },
         },
     },
 
@@ -287,93 +213,24 @@ Paladin_Menu = {
     },
 
     -- ==========================================================
-    -- 3. 神圣专精 (Holy)
+    -- 3. 神圣专精 (Holy) —— 2026-11-15 按「彼岸花-无限服 · 奶骑页」重做
     -- ==========================================================
     ["神圣"] = {
-        -- ===== 下拉菜单（DM） =====
+        -- ===== 下拉菜单（DM）：选择 / 拉条 =====
         DM = {
-            -- ★ 2026-11-11：祝福下拉框已删除，改为「祝福设置」按钮，
-            --   点击打开独立列表（Paladin_Blessing.lua）。见 DM 列表末尾。
-            -- 清洁术模式
+            -- 防ADD
             {
-                text = "|cffF58CBA清洁术|r",
-                menuItems = {
-                    { text = "|cffF58CBA常规|r" },
-                    { text = "|cffF58CBA优先|r" },
-                    { text = "|cffF58CBA目标|r" },
-                    { text = "|cffF58CBA指向|r" },
-                    { text = "|cffF58CBA禁用|r" },
-                },
-                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r\n|cffff5040（清洁术只能驱散中毒/疾病/魔法，不能解诅咒）|r",
-                saveVariable = "SS_QJS",
-                defaultID = 2
-            },
-            -- 圣光道标
-            {
-                text = "|cffF58CBA圣光道标|r",
-                menuItems = {
-                    { text = "", }, { text = "", }, { text = "", }, { text = "", },
-                    { text = "|cffF58CBA自己|r", },
-                    { text = "|cffF58CBA刷新|r", },
-                    { text = "|cffF58CBA禁用|r" }
-                },
-                tooltipText = "选择圣光道标的|cff996b1f坦克|r。\n注：当队伍中有|cff996b1f坦克|r的时候，选项才会显示(|cff00ADF0请让团长设置职责|r)。\n注：当队伍|cff996b1f坦克|r变动，选项也会变动，请注意及时调整。\n|cffF58CBA自己：道标保持在自己身上。|r\n|cffadff2f刷新：自己手动上一次道标给他人，当道标时间即将结束，会自动刷新他身上的道标。|r",
-                saveVariable = "SS_SGDB",
+                text = "|cffF58CBA防ADD|r",
+                menuItems = { { text = "|cffF58CBA是|r" }, { text = "|cffF58CBA否|r" } },
+                tooltipText = "是否开启防ADD：打开时，需要目标已进入战斗才会主动攻击（愤怒之锤/驱邪术/审判等）。",
+                saveVariable = "FANG_ADD_SS",
                 defaultID = 1
-            },
-            -- 圣洁护盾
-            {
-                text = "|cffF58CBA圣洁护盾|r",
-                menuItems = {
-                    { text = "", }, { text = "", }, { text = "", }, { text = "", },
-                    { text = "|cffF58CBA自己|r", },
-                    { text = "|cffF58CBA刷新|r", },
-                    { text = "|cffF58CBA禁用|r" }
-                },
-                tooltipText = "选择圣洁护盾的|cff996b1f坦克|r。\n注：当队伍中有|cff996b1f坦克|r的时候，选项才会显示(|cff00ADF0请让团长设置职责|r)。\n注：当队伍|cff996b1f坦克|r变动，选项也会变动，请注意及时调整。\n|cffF58CBA自己：护盾保持在自己身上。|r\n|cffadff2f刷新：自己手动上一次护盾给他人，当护盾时间即将结束，会自动刷新他身上的护盾。|r",
-                saveVariable = "SS_SJHD",
-                defaultID = 1
-            },
-            -- 神圣震击模式
-            {
-                text = "|cffF58CBA神圣震击|r",
-                menuItems = {
-                    { text = "|cffF58CBA常规|r" },
-                    { text = "|cffF58CBA积极|r" },
-                    { text = "|cffF58CBA急救|r" },
-                    { text = "|cffF58CBA禁用|r" }
-                },
-                tooltipText = "|cff00ADF0常规：移动中或急救时使用。|r\n|cffffff00积极：更积极的使用。|r\n|cffadff2f急救：仅限急救低血量友方时使用。|r",
-                saveVariable = "SS_SSZJ",
-                defaultID = 1
-            },
-            -- 圣光术阈值
-            {
-                text = "|cffF58CBA圣光术|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 70,
-                tooltipText = "当友方单位血量低于设定值的时候，使用|cffffffb3圣光术|r。\n|cffff5040值为0：不使用|cffffffb3圣光术|r。|r",
-                saveVariable = "SS_SGS"
-            },
-            -- 圣光闪现阈值
-            {
-                text = "|cffF58CBA圣光闪现|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 90,
-                tooltipText = "当友方单位血量低于设定值的时候，使用|cffffffb3圣光闪现|r。\n|cffff5040值为0：不使用|cffffffb3圣光闪现|r。|r",
-                saveVariable = "SS_SGSX"
             },
             -- 治疗模式
             {
                 text = "|cffF58CBA治疗模式|r",
                 menuItems = {
-                    { text = "|cffF58CBA自动|r" },
+                    { text = "|cffF58CBA全团|r" },
                     { text = "|cffF58CBA目标|r" },
                     { text = "|cffF58CBA预读|r" },
                     { text = "|cffF58CBA泄蓝|r" },
@@ -389,130 +246,53 @@ Paladin_Menu = {
                     { text = "|cffF58CBA萨13|r" },
                     { text = "|cffF58CBA萨24|r" },
                 },
-                tooltipText = "|cff00adf0自动：自动治疗所有单位，切目标不影响治疗。|cffffffff(过量自动打断施法)|r\n|cffffd700目标：有目标时治疗目标，无目标则|cff00adf0治疗全团|r。|cffffffff(过量自动打断施法)|r\n|cffadff2f预读：有目标时治疗目标，无目标则|cff00adf0治疗全团|r。|r|cffffffff(过量自动打断施法)|r\n|cff6a5acd泄蓝：有目标时治疗目标，无目标则|cff00adf0治疗全团|r。|r|cffff5040(过量不会打断施法)|r\n|cff996b1f坦克：仅治疗坦克，需要团长设置\"坦克\"职责。|r|cffffffff(过量自动打断施法)|r\n|cff9C3590脆皮：仅治疗坦克，需要团长设置\"坦克\"职责。|r|cffffffff(过量自动打断施法)|r|cffff5040(切记不要把道标给坦克)|r\n|cfffdffb6队伍：仅治疗选择的队伍（仅团队中生效）。|cffffffff(过量自动打断施法)|r|r\n|cffC31778萨鲁法尔：当|cff00adf0阵亡勇士的印记|r出现，自动道标和治疗选中的编号，无印记则|cff00adf0治疗全团|r。|r",
+                tooltipText = "|cff00adf0全团：自动治疗所有单位，切目标不影响治疗。|r\n|cffffd700目标：有目标时治疗目标，无目标则治疗全团。|r\n|cffadff2f预读：有目标时治疗目标，无目标则治疗全团。|r\n|cff6a5acd泄蓝：有目标时治疗目标，无目标则治疗全团。|r\n|cff996b1f坦克：仅治疗坦克，需要团长设置\"坦克\"职责。|r\n|cff9C3590脆皮：仅治疗脆皮，需要团长设置\"坦克\"职责。|r\n|cfffdffb6队伍：仅治疗选择的队伍（仅团队中生效）。|r",
                 saveVariable = "SS_ZLMS",
                 defaultID = 1
             },
-            -- ★ 过量停条窗口（0.1~0.5秒，默认0.5秒）
+            -- 拉条
+            { text = "|cffF58CBA喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 90,
+              tooltipText = "自己血量低于设定值时自动喝治疗药水（0 = 不喝）。", saveVariable = "SS_HXY" },
+            { text = "|cffF58CBA圣疗术|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 69,
+              tooltipText = "目标/自己血量低于设定值时使用圣疗术（0 = 不使用）。", saveVariable = "SS_SLS" },
+            { text = "|cffF58CBA奉献|r", isSlider = true, minValue = 0, maxValue = 10, valueStep = 1, defaultVal = 4,
+              tooltipText = "身边 8 码内敌人达到该数量时自动使用奉献（0 = 不使用）。", saveVariable = "SS_FL_COUNT" },
+            { text = "|cffF58CBA圣光守望|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 52,
+              tooltipText = "目标血量低于设定值时施加圣光守望，为后续神圣震击的小队治疗做准备（0 = 不使用）。", saveVariable = "SS_SGWS" },
+            { text = "|cffF58CBA神圣震击|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 54,
+              tooltipText = "目标血量低于设定值时使用神圣震击（0 = 不使用）。", saveVariable = "SS_SSZJ" },
+            { text = "|cffF58CBA圣光术|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 60,
+              tooltipText = "目标血量低于设定值时使用圣光术（0 = 不使用）。", saveVariable = "SS_SGS" },
+            { text = "|cffF58CBA圣光闪现|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 85,
+              tooltipText = "目标血量低于设定值时使用圣光闪现（0 = 不使用）。", saveVariable = "SS_SGSX" },
+            -- ★ 2026-11-15：保留「祝福设置」按钮（三专精统一入口；功能区的「祝福」图标也能右键打开）
             {
-                text = "|cffF58CBA过量停条|r",
-                menuItems = {
-                    { text = "|cffF58CBA0.1秒|r" },
-                    { text = "|cffF58CBA0.2秒|r" },
-                    { text = "|cffF58CBA0.3秒|r" },
-                    { text = "|cffF58CBA0.4秒|r" },
-                    { text = "|cffF58CBA0.5秒|r" },
-                },
-                tooltipText = "设置过量停条的检查窗口。施法剩余时间≤此值时检查目标血量，满血则停止施法避免过量。\n|cffff5040需配合下方「过量停条」开关使用，开关默认关闭。|r",
-                saveVariable = "SS_GLTCCK",
-                defaultID = 5
-            },
-            -- 制裁之锤（瓦格里）——已隐藏：本服不再使用该细分功能
-            --[[
-            {
-                text = "|cffF58CBA制裁之锤|r",
-                menuItems = {
-                    { text = "|cffF58CBA自动|r" },
-                    { text = "|cffF58CBA瓦1|r" },
-                    { text = "|cffF58CBA瓦2|r" },
-                    { text = "|cffF58CBA瓦3|r" },
-                    { text = "|cffF58CBA禁用|r" },
-                },
-                tooltipText = "|cffffd700自动：自动使用|cff00adf0制裁之锤|r击晕危险的怪物。|r\n|cffadff2f瓦格里：使用|cff00adf0制裁之锤|r击晕选中序号的|cff00adf0瓦格里暗影戒卫者|r。(|cff00adf0巫妖王|r)|r",
-                saveVariable = "SS_ZCZC",
-                section = "自动",
-                defaultID = 1
-            },
-            ]]
-            -- 圣疗术目标选择
-            {
-                text = "|cffF58CBA圣疗术|r",
-                menuItems = {
-                    { text = "|cff996b1f坦克1 (30%)|r" }, 
-                    { text = "|cff996b1f坦克2 (30%)|r" }, 
-                    { text = "|cff996b1f坦克3 (30%)|r" }, 
-                    { text = "|cff996b1f坦克4 (30%)|r" },
-                    { text = "|cffF58CBA自己 (30%)|r", },
-                    { text = "|cffadff2f全团检测 (30%)|r", },
-                    { text = "|cffF58CBA禁用|r" }
-                },
-                tooltipText = "选择|cffF58CBA圣疗术|r的治疗目标和阈值。\n注：当队伍中有|cff996b1f坦克|r的时候，选项才会显示(|cff00ADF0请让团长设置职责|r)。\n注：当队伍|cff996b1f坦克|r变动，选项也会变动，请注意及时调整。\n|cff996b1f坦克1-4：治疗对应编号的坦克，默认30%阈值。|r\n|cffF58CBA自己：圣疗术用于自己，默认30%阈值。|r\n|cffadff2f全团检测：检查所有队员（包括坦克和队友），最低血量优先使用，默认30%阈值。|r\n|cffff5040值为0：不使用|cffF58CBA圣疗术|r。|r",
-                saveVariable = "SS_SLS_Target",
-                defaultID = 1
-            },
-            -- 圣疗术阈值
-            {
-                text = "|cffF58CBA圣疗术阈值|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 30,
-                tooltipText = "自定义各目标的圣疗术血量阈值。\n数值会根据当前选中的目标模式生效。|r\n|cffff5040值为0：不使用|cffF58CBA圣疗术|r。|r",
-                saveVariable = "SS_SLS"
-            },
-            -- 圣盾术阈值
-            {
-                text = "|cffF58CBA圣盾术|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 30,
-                tooltipText = "当自己血量低于设定值的时候，使用|cffffffb3圣盾术|r。\n|cffff5040值为0：不使用|cffffffb3圣盾术|r。|r",
-                saveVariable = "SS_SDS"
-            },
-            -- 牺牲之手阈值
-            {
-                text = "|cffF58CBA牺牲之手|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 30,
-                tooltipText = "当队友血量低于设定值的时候，使用|cffffffb3牺牲之手|r。\n|cffff5040值为0：不使用|cffffffb3牺牲之手|r。|r",
-                saveVariable = "SS_XSZS"
-            },
-            -- 保护之手阈值
-            {
-                text = "|cffF58CBA保护之手|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 30,
-                tooltipText = "当队友中了需要保护的减伤DEBUFF，或者血量低于设定值的时候，使用|cffffffb3保护之手|r。\n|cffff5040值为0：不使用|cffffffb3保护之手|r。|r",
-                saveVariable = "SS_BHZS"
-            },
-            -- ★ 2026-11-11：祝福下拉框 → 「祝福设置」按钮（打开独立列表）
-            {
-                -- 用户口径「祝福设置保留，祝福两个字剔除」：按钮保名「祝福设置」，左侧标签不再写「祝福」
                 text = "",
                 isButton = true,
                 buttonText = "祝福设置",
                 onClick = "WR_OpenPaladinBlessing",
-                tooltipText = "打开|cff00adf0祝福设置列表|r：单人 / 小队 / 团队分别配置力量·智慧·王者祝福，脱战自动补祝福。\n（原「祝福」下拉框已删除）",
+                tooltipText = "打开|cff00adf0祝福设置列表|r：单人 / 小队 / 团队分别配置力量·智慧·王者祝福，脱战自动补祝福。",
             },
         },
         -- ===== 复选框（CB） =====
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 135968, text = "|cffF58CBA自由|r", tooltipText = "队友被定身时，使用|cff00adf0自由之手|r。", saveVariable = "SS_ZYZS", defaultState = true },
-            { row = 1, column = 2, IconID = 135230, text = "|cffF58CBA治疗石|r", tooltipText = "血量过低使用|cff00adf0治疗石|r。", saveVariable = "SS_ZLS", defaultState = true },
-            { row = 1, column = 3, IconID = 135737, text = "|cffF58CBA狂咒|r", tooltipText = "中|cff00adf0狂咒|r后停手(|cff00adf0辛达苟萨|r)", saveVariable = "SS_KZ", defaultState = true },
-            -- ★ 第1行第4列：偷药开关
-            { row = 1, column = 4, IconID = 236871, text = "|cffF58CBA偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "SS_TOUYAO", section = "爆发", defaultState = false },
-            -- 第2行
-            { row = 2, column = 1, IconID = 136012, text = "|cffF58CBA爆发|r", tooltipText = "开启|cff00adf0爆发模式|r，使用|cff00adf0手套附魔|r、|cff00adf0速度药水|r、|cff00adf0饰品|r及|cff00adf0神启|r。\n含DBM倒数提前开功能", saveVariable = "SS_BF", section = "爆发", defaultState = false },
-            -- ★ 第2行第2列：过量停条开关（默认关闭）
-            { row = 2, column = 2, IconID = 135737, text = "|cffF58CBA过停|r", tooltipText = "开启后，施法结束前(按停条窗口设定)目标已满血时自动停止施法，避免过量治疗。\n|cffff5040首领机制(狂咒/血肉成灰等)与特殊治疗模式不受此开关影响，始终生效。|r", saveVariable = "SS_GLTC", defaultState = false },
-            -- ★ 第2行第3列：插入神圣牺牲
-            { row = 2, column = 3, IconID = 253400, text = "|cffF58CBA插入|r", tooltipText = "插入|cff00adf0神圣牺牲|r\n", saveVariable = "SS_CRSSXS", section = "插入", defaultState = false },
-            { row = 2, column = 4, IconID = 135953, text = "|cffF58CBA总闸|r", tooltipText = "勾选后，关闭神圣骑自动|cff00adf0清洁术|r（驱散），优先级高于下拉选项。", saveVariable = "SS_QJS_AUTO", defaultState = false },
-            -- 第3行：鼠标指向三手（奶骑主动给队友套保护/牺牲/拯救）
-            { row = 3, column = 1, IconID = 135964, text = "|cff00adf0指向保护|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0保护之手|r（颜色提示，按键 ALT-CTRL-F7）\n|cffaaffaa悬停满足条件时持续提示；成功施放后自动取消勾选（一次性）|r", saveVariable = "SS_ZZBH", section = "插入", defaultState = false },
-            { row = 3, column = 2, IconID = 135966, text = "|cff00adf0指向牺牲|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0牺牲之手|r（颜色提示，按键 CTRL-SHIFT-F7）\n|cffaaffaa悬停满足条件时持续提示；成功施放后自动取消勾选（一次性）|r", saveVariable = "SS_ZZXS", section = "插入", defaultState = false },
-            { row = 3, column = 3, IconID = 135967, text = "|cff00adf0指向拯救|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0拯救之手|r（颜色提示，按键 CTRL-F10）\n|cffaaffaa悬停满足条件时持续提示；成功施放后自动取消勾选（一次性）|r", saveVariable = "SS_ZZJZ", section = "插入", defaultState = false },
+            -- ===== 功能 =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Holy_SealOfWisdom", text = "|cffF58CBA圣印|r", tooltipText = "圣印总开关：管理常驻圣印与审判维持。\n右键打开额外条件。", saveVariable = "SS_SY_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_PaladinHolyUI and WR_PaladinHolyUI.ShowOptions then WR_PaladinHolyUI.ShowOptions("SS_SY") end end },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Holy_Greaterblessingoflight", text = "|cffF58CBA圣光誓约|r", tooltipText = "给指定队友保持圣光誓约，没 buff 或剩不到 15 秒时切焦点补。\n右键打开额外条件（给谁加）。", saveVariable = "SS_OATH_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_PaladinHolyUI and WR_PaladinHolyUI.ShowOptions then WR_PaladinHolyUI.ShowOptions("SS_OATH") end end },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Holy_GreaterBlessingofKings", text = "|cffF58CBA祝福|r", tooltipText = "脱战自动补祝福。\n右键打开祝福设置列表（单人 / 小队 / 团队）。", saveVariable = "SS_BLESS_ON", section = "功能", defaultState = true,
+              onRightClick = function() if type(WR_OpenPaladinBlessing) == "function" then WR_OpenPaladinBlessing() end end },
+            { row = 1, column = 4, IconID = 132293, text = "|cffF58CBA切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标。", saveVariable = "SS_TAB", section = "功能", defaultState = true },
+            { row = 2, column = 1, IconID = "Interface\\Icons\\Spell_Holy_DispelMagic", text = "|cffF58CBA驱散|r", tooltipText = "自动使用清洁术驱散中毒 / 疾病 / 魔法（不能解诅咒）。", saveVariable = "SS_QJS_ON", section = "功能", defaultState = true },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Ability_ThunderClap", text = "|cffF58CBA愤怒之锤|r", tooltipText = "目标进入斩杀期时自动使用愤怒之锤。", saveVariable = "SS_FNZS", section = "功能", defaultState = true },
+            { row = 2, column = 3, IconID = "Interface\\Icons\\Spell_Holy_Excorcism_02", text = "|cffF58CBA驱邪术|r", tooltipText = "目标为亡灵/恶魔时自动使用驱邪术。", saveVariable = "SS_QXS", section = "功能", defaultState = true },
+
+            -- ===== 插入（一次性，放完自关） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Holy_SealOfMight", text = "|cffF58CBA制裁|r", tooltipText = "插入制裁之锤：目标正在读条时使用一次，放完自动关闭。", saveVariable = "SS_CRZC", section = "插入", defaultState = false },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Holy_Restoration", text = "|cffF58CBA圣佑|r", tooltipText = "插入圣佑术：自己血量过低时使用一次，放完自动关闭。", saveVariable = "SS_CRSY", section = "插入", defaultState = false },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Holy_RighteousnessAura", text = "|cffF58CBA审判|r", tooltipText = "插入审判：身上有圣印时使用一次，放完自动关闭。", saveVariable = "SS_CRSP", section = "插入", defaultState = false },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Spell_Holy_InnerFire", text = "|cffF58CBA奉献|r", tooltipText = "插入奉献：身边敌人达到拉条数量时使用一次，放完自动关闭。", saveVariable = "SS_CRFL", section = "插入", defaultState = false },
         },
     },
 }

@@ -52,6 +52,16 @@ local UnitClassBase = UnitClassBase
 local GetTime = GetTime
 local math_ceil = math.ceil
 
+-- 战斗中 UnitHealthMax 可能为 secret；优先用战斗估算缓存的最大生命，
+-- 避免把 1 当分母导致 incoming / maxHp 放大数百倍、把候选人权重打成 0。
+local function HealWeightMaxHP(unit)
+    if type(WR_SafeUnitMaxHealth) == "function" then
+        local v = WR_SafeUnitMaxHealth(unit)
+        if type(v) == "number" and v > 0 then return v end
+    end
+    return WR_SafeNumber(UnitHealthMax(unit), 1)
+end
+
 local playerClass = nil
 local AnubSwarmHealMode = false
 
@@ -93,10 +103,23 @@ local function WR_GetUnitWeight(Unit, ID)
        not UnitIsCharmed(TempUnit) and not UnitCanAttack(TempUnit, "player") and
        WR_UnitRange(TempUnit) <= 40 then
 
-        local maxHp = WR_SafeNumber(UnitHealthMax(TempUnit), 1)
+        local maxHp = HealWeightMaxHP(TempUnit)
         if maxHp <= 0 then return end
 
-        local UnitHP = (WR_SafeNumber(UnitHealth(TempUnit), WR_SafeNumber(UnitHealthMax(TempUnit), 1)) + (WR_SafeNumber(UnitGetIncomingHeals(TempUnit), 0) or 0)) / maxHp
+        -- ★★ 2026-11-14：Forever 战斗中 UnitHealth 是 secret，优先走 WR_GetUnitHP
+        -- （其内部在 secret 时使用战斗血量估算），可读时仍是精确值。
+        local UnitHP
+        if type(WR_GetUnitHP) == "function" then
+            UnitHP = WR_GetUnitHP(TempUnit)
+        end
+        if type(UnitHP) ~= "number" then
+            UnitHP = (WR_SafeNumber(UnitHealth(TempUnit), maxHp) + (WR_SafeNumber(UnitGetIncomingHeals(TempUnit), 0) or 0)) / maxHp
+        else
+            local incoming = WR_SafeNumber(UnitGetIncomingHeals(TempUnit), 0) or 0
+            if maxHp > 1 then UnitHP = UnitHP + incoming / maxHp end
+        end
+        if UnitHP > 1 then UnitHP = 1 end
+        if UnitHP < 0 then UnitHP = 0 end
         local UnitWeight = UnitHP * 100
         if UnitWeight > 100 then UnitWeight = 100 end
         UnitWeight = 100 - UnitWeight
@@ -302,17 +325,29 @@ function WR_UpdateRosterState()
 
     if pMember.IsDead then
         pMember.HP = 0
-        pMember.MaxHP = WR_SafeNumber(UnitHealthMax("player"), 1)
+        pMember.MaxHP = HealWeightMaxHP("player")
         pMember.LostHP = pMember.MaxHP
     else
-        pMember.MaxHP = WR_SafeNumber(UnitHealthMax("player"), 1)
-        local hp = WR_SafeNumber(UnitHealth("player"), WR_SafeNumber(UnitHealthMax("player"), 1)) + (WR_SafeNumber(UnitGetIncomingHeals("player"), 0) or 0)
-        if pMember.MaxHP > 0 then
-            pMember.HP = hp / pMember.MaxHP
+        pMember.MaxHP = HealWeightMaxHP("player")
+        -- ★ 2026-11-14：secret 时用 WR_GetUnitHP 的战斗估算，避免整队当满血
+        local hpPct = nil
+        if type(WR_GetUnitHP) == "function" then hpPct = WR_GetUnitHP("player") end
+        if type(hpPct) == "number" then
+            local incoming = WR_SafeNumber(UnitGetIncomingHeals("player"), 0) or 0
+            pMember.HP = hpPct
+            if pMember.MaxHP > 1 then pMember.HP = pMember.HP + incoming / pMember.MaxHP end
+            if pMember.HP > 1 then pMember.HP = 1 end
+            if pMember.HP < 0 then pMember.HP = 0 end
+            pMember.LostHP = pMember.MaxHP * (1 - pMember.HP)
         else
-            pMember.HP = 0
+            local hp = WR_SafeNumber(UnitHealth("player"), WR_SafeNumber(UnitHealthMax("player"), 1)) + (WR_SafeNumber(UnitGetIncomingHeals("player"), 0) or 0)
+            if pMember.MaxHP > 0 then
+                pMember.HP = hp / pMember.MaxHP
+            else
+                pMember.HP = 0
+            end
+            pMember.LostHP = pMember.MaxHP - hp
         end
-        pMember.LostHP = pMember.MaxHP - hp
     end
 
     pMember.Range = 0
@@ -347,17 +382,29 @@ function WR_UpdateRosterState()
 
                 if member.IsDead then
                     member.HP = 0
-                    member.MaxHP = WR_SafeNumber(UnitHealthMax(unit), 1)
+                    member.MaxHP = HealWeightMaxHP(unit)
                     member.LostHP = member.MaxHP
                 else
-                    member.MaxHP = WR_SafeNumber(UnitHealthMax(unit), 1)
-                    local hp = WR_SafeNumber(UnitHealth(unit), WR_SafeNumber(UnitHealthMax(unit), 1)) + (WR_SafeNumber(UnitGetIncomingHeals(unit), 0) or 0)
-                    if member.MaxHP > 0 then
-                        member.HP = hp / member.MaxHP
+                    member.MaxHP = HealWeightMaxHP(unit)
+                    -- ★ 2026-11-14：secret 时用 WR_GetUnitHP 的战斗估算
+                    local hpPct = nil
+                    if type(WR_GetUnitHP) == "function" then hpPct = WR_GetUnitHP(unit) end
+                    if type(hpPct) == "number" then
+                        local incoming = WR_SafeNumber(UnitGetIncomingHeals(unit), 0) or 0
+                        member.HP = hpPct
+                        if member.MaxHP > 1 then member.HP = member.HP + incoming / member.MaxHP end
+                        if member.HP > 1 then member.HP = 1 end
+                        if member.HP < 0 then member.HP = 0 end
+                        member.LostHP = member.MaxHP * (1 - member.HP)
                     else
-                        member.HP = 0
+                        local hp = WR_SafeNumber(UnitHealth(unit), WR_SafeNumber(UnitHealthMax(unit), 1)) + (WR_SafeNumber(UnitGetIncomingHeals(unit), 0) or 0)
+                        if member.MaxHP > 0 then
+                            member.HP = hp / member.MaxHP
+                        else
+                            member.HP = 0
+                        end
+                        member.LostHP = member.MaxHP - hp
                     end
-                    member.LostHP = member.MaxHP - hp
                 end
 
                 member.Range = WR_UnitRange(unit)

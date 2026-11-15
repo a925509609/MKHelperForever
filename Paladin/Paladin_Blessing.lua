@@ -1475,7 +1475,12 @@ end
 --   时，队友甲永远轮不到（自己冷却到期又抢先占掉唯一的 tick 返回点）。
 --   现在改为「跳过」：冷却中的单位直接 continue，tick 继续推进到下一个单位。
 function WR_PaladinBlessing_Auto()
+    -- ★ 2026-11-15：奶骑面板「祝福」功能图标 = 自动祝福总开关（SS_BLESS_ON）
+    if PigSet and PigSet.SS_BLESS_ON == false then return false end
     local c = WR_PaladinBlessing_Cfg()
+    if PigSet and PigSet.SS_BLESS_ON == true and c.enable ~= true then
+        c.enable = true          -- 面板「祝福」勾着即视为总闸打开（新面板单一入口）
+    end
     if c.enable ~= true then return false end                 -- 总闸
 
     -- ① 先收口「已点亮待确认」的色块（buff 上身就立刻熄灭）

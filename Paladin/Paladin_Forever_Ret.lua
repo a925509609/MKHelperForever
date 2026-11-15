@@ -1,10 +1,22 @@
 -- ============================================================
--- Paladin Forever · Ret 专精循环
--- 共享 helper 见 Paladin_Forever.lua（公共件）
--- 由程序从原单文件物理拆分，逻辑未改动
+-- Paladin Forever · Ret 专精循环（60级 / 无限服）
+-- ------------------------------------------------------------
+-- 2026-11-15 按「彼岸花-无限服 · 惩戒页」重做：
+--   选择：防ADD（FANG_ADD_CJQ）
+--   拉条：喝红药 90 / 圣疗术 69 / 奉献 4目标
+--   功能：圣印（常驻 / 解封之怒舞 / 保持审判 / 卡CD审判）/ 祝福 /
+--         切换目标 / 驱散 / 愤怒之锤 / 驱邪术
+--   插入：制裁 / 圣佑 / 审判 / 奉献（一次性，放完自关）
+--   主循环：圣印层 → 神圣打击 → 审判兜底 → 驱邪术 → 愤怒之锤 → 奉献
+-- ★ 80 级技能（复仇之怒 / 祈求圣光 / 神圣牺牲 / 十字军打击 /
+--   神圣震击 / 神恩术 / 真理之声 / 光之守夜 / 圣殿壁垒）在无限服
+--   惩戒不存在或非惩戒天赋，本循环不再引用。
+-- 共享 helper 见 Paladin_Forever.lua（公共件），功能层见
+-- Paladin_Retribution_Features.lua（RT 命名空间）。
 -- ============================================================
 
 function WR_PaladinForeverRet()
+    local RT = WR_PaladinRetUI
     WR_PaladinForever_ClearStalePrompts(1.0)
     ShiFaSuDu = 0.3
     GCD = WR_GetGCD("审判")
@@ -15,115 +27,76 @@ function WR_PaladinForeverRet()
     TargetInCombat = WR_UnitInCombat("target")
     UnitCount8 = WR_GetRangeHarmUnitCount(8)
 
-    -- 1. 生存
-    if PlayerHP < 25 and WR_SpellUsable("圣盾术", true) then
-        if WR_ColorFrame_ShowSkill("圣盾术", 18) then return true end
+    -- 1. 祝福（脱战自动补；总开关在功能区「祝福」图标）
+    if RT.On("CJ_BLESS_ON", true) and type(WR_PaladinBlessing_Auto) == "function" and WR_PaladinBlessing_Auto() then return true end
+
+    -- 2. 圣疗术（自疗：血量低于拉条）
+    local sls = RT.Val("CJ_SLLS", 69)
+    local hpSafe = tonumber(PlayerHP) or 1
+    if sls > 0 and hpSafe < sls / 100 and RT.SpellKnown("圣疗术")
+       and WR_SpellUsable("圣疗术", true) then
+        if WR_PaladinForever_ShowSkillCD("圣疗术", 48, 1200) then return true end
     end
-    -- ★★ 2026-11-14：清洁术按面板 CJ_QJS 五模式（原代码读的是已废弃的 CJ_QJ，
-    --   且固定点 27=targettarget 宏，导致面板选项完全无效）
-    if WR_PaladinForever_CleanseStep("CJ_QJS", "priority") then return true end
-    if WR_PaladinForever_CleanseStep("CJ_QJS", "normal") then return true end
 
-    -- 2. ★ 2026-11-10 用户要求：删除「开启输出光环」文字提示，不再提醒。
+    -- 3. 喝红药
+    if RT.PotionStep() then return true end
 
-    -- 3. 祝福（2026-11-11：下拉框已删除，改走独立祝福设置列表 + 脱战自动补）
-    --   type 保护：离线夹具未加载 Paladin_Blessing.lua 时安全跳过，真实客户端该函数必存在
-    if type(WR_PaladinBlessing_Auto) == "function" and WR_PaladinBlessing_Auto() then return true end
+    -- 4. 插入（一次性：制裁 / 圣佑 / 审判 / 奉献）
+    if RT.InsertStep() then return true end
 
-    -- 4. 自动攻击（仅开怪前提示；战斗中视为已激活，不抢占技能）
+    -- 5. 驱散（清洁术：常规/优先/目标/指向，见右键或下拉）
+    if RT.On("CJ_QJS_ON", true) then
+        if WR_PaladinForever_CleanseStep("CJ_QJS", "priority") then return true end
+        if WR_PaladinForever_CleanseStep("CJ_QJS", "normal") then return true end
+    end
+
+    -- 6. 自动攻击（仅开怪前提示；战斗中视为已激活）
     if not PlayerMove and UnitCanAttack("player", "target") and not UnitIsDead("target")
        and not WR_PaladinForever_AutoAttackActive() and WR_SpellUsable("攻击") then
         if WR_ColorFrame_ShowSkill("攻击", 15) then return true end
     end
 
-    -- 5. 战斗主循环门（防 ADD）
+    -- 7. 切换目标（没有可攻击目标时自动找）
+    if RT.TargetSwitchStep() then return true end
+
+    -- 8. 战斗主循环门（防 ADD）
     if not WR_PaladinForever_InCombatGate(PigSet.FANG_ADD_CJQ == 1 or PigSet.FANG_ADD_CJQ == 2) then
         return false
     end
 
-    -- 6. 圣印保持
-    if WR_PaladinForever_Seal(UnitCount8) then return true end
+    -- 9. 圣印层：常驻圣印 / 解封之怒舞 / 保持审判 / 卡CD审判
+    if RT.SealStep() then return true end
 
-    -- 7. 主循环调度：「谁 CD 好了先打谁」
-    --     审判与神圣打击都就绪时比 FreeAt，谁先轮到谁先打；
-    --     审判 CD 随「强化审判」天赋变化（10 → 8 秒），运行时探测。
-    local judgeCD = WR_PaladinForever_GetJudgeCooldown()
+    -- 10. 主循环
     local hsRangeOK = (TargetRange == nil or TargetRange >= 999 or TargetRange <= 8)
-    local candidates = {}
-    if WR_PaladinForever_SealActive() and WR_SpellUsable("审判", true) then
-        candidates["审判"] = judgeCD
+    local danceActive = RT.On("CJ_SY_ON", true) and RT.On("CJ_SY_JF", true) and RT.SpellKnown("解封之怒")
+
+    -- 10.1 神圣打击（核心输出，冷却好了就打）
+    if hsRangeOK and RT.SpellKnown("神圣打击") and WR_SpellUsable("神圣打击", true) then
+        local hsCD = (type(WR_PaladinForever_SkillCD) == "table" and WR_PaladinForever_SkillCD["神圣打击"]) or 6
+        if WR_PaladinForever_ShowSkillCD("神圣打击", 74, hsCD) then return true end
     end
-    if hsRangeOK and (PigSet.FH_HS ~= false) and WR_PaladinForever_SpellKnown("神圣打击") then
-        candidates["神圣打击"] = WR_PaladinForever_SkillCD["神圣打击"]
-    end
-    local scheduled = WR_PaladinForever_PickMostReady(candidates)
-    if scheduled then
-        local slot = (scheduled == "审判") and 33 or 74
-        if WR_PaladinForever_ShowSkillCD(scheduled, slot, candidates[scheduled]) then
-            return true
+
+    -- 10.2 审判兜底（未开「卡CD使用」且非舞印时，保持自动审判）
+    if not danceActive and not RT.On("CJ_SY_KCD", true) then
+        local okA, active = pcall(WR_PaladinForever_SealActive)
+        if okA and active == true and WR_SpellUsable("审判", true) then
+            local okC, judgeCD = pcall(WR_PaladinForever_GetJudgeCooldown)
+            if okC and type(judgeCD) == "number"
+               and WR_PaladinForever_ShowSkillCD("审判", 2, judgeCD) then
+                return true
+            end
         end
     end
 
-    -- 8. 驱邪术（经典即可用，无限按名解析；本地 15 秒 CD）
-    if WR_SpellUsable("驱邪术", true) then
-        if WR_PaladinForever_ShowSkillCD("驱邪术", 20, 15) then return true end
-    end
+    -- 11. 驱邪术（亡灵/恶魔）
+    if RT.ExorcismStep() then return true end
 
-    -- 9. 神圣震击（天赋；已学会才提示）
-    if WR_PaladinForever_CanPrompt("神圣震击", 8)
-       and WR_PaladinForever_Talent("神圣震击", 113) then
-        WR_PaladinForever_MarkPrompt("神圣震击")
-        return true
-    end
+    -- 12. 愤怒之锤（斩杀期）
+    if RT.HammerStep() then return true end
 
-    -- 10. 奉献（受面板「自动 奉献」开关 CJ_FX 控制；仅目标数量 >2、近战 5 码内）
-    local lowMana = PlayerMP < 0.30
-    if (PigSet.CJ_FX ~= false)
-       and UnitCount8 >= 3 and not lowMana
-       and TargetRange ~= nil and TargetRange <= 5
-       and WR_SpellUsable("奉献", true) then
-        if WR_PaladinForever_ShowSkillCD("奉献", 5, 8) then return true end
-    end
-
-    -- 11. 制裁之锤（控制/打断，可用即提示；冷却 60 秒）
-    if WR_SpellUsable("制裁之锤", true) then
-        if WR_PaladinForever_ShowSkillCD("制裁之锤", 22, 60) then return true end
-    end
-
-    -- 12. 愤怒之锤（斩杀；本地 6 秒 CD）
-    --   ★★★ 2026-11-14：与防护共用 WR_PaladinForever_HammerExecuteReady——
-    --   Forever 的 UnitHealth 恒为 secret，旧的 WR_SafeHPPct <0.20 门永远不成立。
-    local hammerReady = false
-    if WR_PaladinForever_HammerExecuteReady ~= nil then
-        local okH, hv = pcall(WR_PaladinForever_HammerExecuteReady)
-        hammerReady = okH and hv == true
-    else
-        hammerReady = WR_SafeHPPct("target") < 0.20 and WR_SpellUsable("愤怒之锤", true)
-    end
-    if hammerReady and WR_SpellUsable("愤怒之锤", true) then
-        if WR_PaladinForever_ShowSkillCD("愤怒之锤", 1, 6) then return true end
-    end
-
-    -- 13. 无限天赋（已学会才提示）
-    --   ★ 2026-11-08：真理之声(115)/光之守夜(116)/迅捷审判(117) 原用色块，
-    --     但这三个槽位是旧版跟随系统专用（115=跟随目标 / 116=设焦点 / 117=跟随焦点），
-    --     点亮即等于命令 AHK 执行 /follow、/focus —— 会造成「莫名其妙跟随/设焦点」。
-    --     改为只弹文字提示，不占色块槽位（迅捷审判的提示已按用户要求删除）。
-    if WR_PaladinForever_Talent("神恩术", 114) then return true end
-    if WR_PaladinForever_SpellKnown("真理之声")
-       and WR_PaladinForever_CanPrompt("真理之声", 60) then
-        PigAlert("可施放 真理之声", 1, 0.8, 0, 1.2)
-        WR_PaladinForever_MarkPrompt("真理之声")
-        return true
-    end
-    if WR_PaladinForever_SpellKnown("光之守夜")
-       and WR_PaladinForever_CanPrompt("光之守夜", 60) then
-        PigAlert("可施放 光之守夜", 1, 0.8, 0, 1.2)
-        WR_PaladinForever_MarkPrompt("光之守夜")
-        return true
-    end
-    -- ★ 2026-11-10 用户要求：删除「可施放 迅捷审判」文字提示，不再提醒。
-    if WR_PaladinForever_Talent("圣殿壁垒", 118) then return true end
+    -- 13. 奉献（8 码内目标数达到拉条）
+    if RT.ConsecrationStep() then return true end
 
     return false
 end

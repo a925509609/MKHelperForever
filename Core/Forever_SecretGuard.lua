@@ -14,16 +14,16 @@
 -- 本层职责（纯附加，SoD / 经典客户端上全部退化为直通）：
 --   【1】WR_IsSecretValue   —— 带存在性兜底的 secret 检测
 --   【2】WR_SafeNumber      —— 把可能为 secret 的值收敛成普通 number
---   【3】WR_SafeHPPct       —— 血量百分比（含吸收盾），secret 时降级
+--   【3】WR_SafeHPPct       —— 血量百分比（含吸收盾），secret 时用战斗估算
 --   【4】WR_SafePowerPct    —— 资源百分比，secret 时降级
 --   【5】WR_SafeUnitHealth  —— 绝对血量安全读取
 --   【6】WR_IsCLEUBlocked / WR_RegisterEventSafe —— CLEU 注册闸门
 --
--- ★ 降级策略（重要）：secret 时统一返回 1（视为满血 / 满资源 / 未知）。
---   这样所有 "HP < 阈值" 的斩杀、低血治疗、危险判定都静默不触发，
---   不会误放技能，也不会因为返回 0 导致斩杀与治疗常开。
---   代价：无限客户端上依赖血量的自动化判定无法工作 —— 这是 12.x 的
---   客户端硬限制（插件不得基于战斗数值做逻辑），不是可绕过的缺陷。
+-- ★ 降级策略（重要）：
+--   · 血量：secret 时优先用 Core/Forever_CombatHealth.lua 的战斗估算；
+--     没有任何记录时才返回 1（视为满血 / 未知）。
+--   · 资源：secret 时返回 1（满资源）。
+--   这样斩杀 / 治疗判定不会因 secret 直接抛错，也不会误读成 0。
 --
 -- 加载顺序：必须晚于 Core/Forever_Compat.lua（依赖 WR_Forever_ClientInfo），
 --           早于 Core/Core_Functions.lua 与 Core/MainLoop.lua（提供工具函数）。
@@ -69,21 +69,43 @@ function WR_SafeHPPct(unit, subAbsorb)
     local hp = UnitHealth(unit)
     local maxHP = UnitHealthMax(unit)
     -- secret 判定必须早于任何算术 / 比较
-    if WR_IsSecretValue(hp) or WR_IsSecretValue(maxHP) then return 1 end
-    hp = WR_SafeNumber(hp, nil)
-    maxHP = WR_SafeNumber(maxHP, 0)
-    if hp == nil or maxHP == 0 then return 1 end
-
-    if subAbsorb then
-        local absorb = 0
-        if type(UnitGetTotalHealAbsorbs) == "function" then
-            local raw = UnitGetTotalHealAbsorbs(unit)
-            if WR_IsSecretValue(raw) then return 1 end
-            absorb = WR_SafeNumber(raw, 0)
+    if not WR_IsSecretValue(hp) and not WR_IsSecretValue(maxHP) then
+        hp = WR_SafeNumber(hp, nil)
+        maxHP = WR_SafeNumber(maxHP, 0)
+        if hp ~= nil and maxHP ~= nil and maxHP > 0 then
+            if subAbsorb then
+                local absorb = 0
+                if type(UnitGetTotalHealAbsorbs) == "function" then
+                    local raw = UnitGetTotalHealAbsorbs(unit)
+                    if not WR_IsSecretValue(raw) then
+                        absorb = WR_SafeNumber(raw, 0)
+                    end
+                end
+                hp = hp - absorb
+            end
+            return hp / maxHP
         end
-        hp = hp - absorb
     end
-    return hp / maxHP
+
+    -- ★★ 2026-11-14：战斗中 UnitHealth 为 secret 时，改用战斗血量估算。
+    -- Forever 的 UNIT_COMBAT amount 可读，Core/Forever_CombatHealth.lua 会
+    -- 维护队伍成员的估算百分比；没有记录的单位再走 UnitHealthPercent 兜底。
+    if type(WR_CombatHealth_GetPct) == "function" then
+        local ok, pct = pcall(WR_CombatHealth_GetPct, unit)
+        if ok and type(pct) == "number" then return pct end
+    end
+
+    if type(UnitHealthPercent) == "function" then
+        local ok, pct = pcall(UnitHealthPercent, unit, true)
+        if ok and pct ~= nil and not WR_IsSecretValue(pct) then
+            pct = WR_SafeNumber(pct, nil)
+            if pct ~= nil then
+                if pct > 1 then pct = pct / 100 end
+                return pct
+            end
+        end
+    end
+    return 1
 end
 
 -- ============================================================
@@ -109,7 +131,7 @@ end
 -- ============================================================
 -- 【5】绝对血量安全读取
 -- 参数：unit     —— 单位 token
---       fallback —— 血量不可读时的代替值；省略时取「最大血量」= 视为满血
+--       fallback —— 血量不可读时的代替值；省略时优先用战斗估算，其次最大血量（视为满血）
 -- 返回：普通 number
 -- 用途：替换 "UnitHealth(unit) < 80000"、"UnitHealth + 即将治疗" 等
 --       以绝对值为起点的算式，避免把 secret 值带入算术链。
@@ -121,15 +143,41 @@ function WR_SafeUnitHealth(unit, fallback)
     if WR_IsSecretValue(v) then
         if fallback ~= nil then return fallback end
         local maxHP = UnitHealthMax(unit)
-        if WR_IsSecretValue(maxHP) then return 1 end
-        return WR_SafeNumber(maxHP, 1)
+        local maxPlain = nil
+        if not WR_IsSecretValue(maxHP) then maxPlain = WR_SafeNumber(maxHP, nil) end
+        -- ★★ 2026-11-14：secret 时用战斗血量估算还原绝对血量
+        if not maxPlain and type(WR_CombatHealth_GetInfo) == "function" then
+            local okInfo, info = pcall(WR_CombatHealth_GetInfo, unit)
+            if okInfo and type(info) == "table" and type(info.maxHp) == "number" and info.maxHp > 0 then
+                maxPlain = info.maxHp
+            end
+        end
+        if type(WR_CombatHealth_GetPct) == "function" then
+            local ok, pct = pcall(WR_CombatHealth_GetPct, unit)
+            if ok and type(pct) == "number" and maxPlain and maxPlain > 0 then
+                return pct * maxPlain
+            end
+        end
+        if maxPlain and maxPlain > 0 then return maxPlain end
+        return 1
     end
     return WR_SafeNumber(v, 0)
 end
 
 -- 最大血量安全读取；不可读时返回 1（保证分母不为 0）
 function WR_SafeUnitMaxHealth(unit)
-    return WR_SafeNumber(UnitHealthMax(unit or "player"), 1)
+    unit = unit or "player"
+    local v = UnitHealthMax(unit)
+    local n = WR_SafeNumber(v, nil)
+    if n and n > 0 then return n end
+    -- secret 时用战斗估算缓存的最大血量兜底
+    if type(WR_CombatHealth_GetInfo) == "function" then
+        local ok, info = pcall(WR_CombatHealth_GetInfo, unit)
+        if ok and type(info) == "table" and type(info.maxHp) == "number" and info.maxHp > 0 then
+            return info.maxHp
+        end
+    end
+    return 1
 end
 
 -- 当前资源 / 资源上限安全读取；不可读时返回 0

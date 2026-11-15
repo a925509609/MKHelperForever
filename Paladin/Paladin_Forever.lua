@@ -352,6 +352,11 @@ WR_PaladinForever_SpellRankIDs = {
     -- ★★★ 2026-11-14：补全 Rank2/3（24274/24239，Forever DB 实测：44/52/60 级）。
     --   当前 rank 换级后施放事件上报的是新 rank ID；只登记 Rank1 会让 6 秒本地 CD 断档（色块反复亮）。
     ["愤怒之锤"] = { 24275, 24274, 24239 },
+    -- ★ 2026-11-15：奶骑 60 级新技能（圣光守望 / 圣光誓约）
+    --   战斗中 UNIT_SPELLCAST_SUCCEEDED 的 spellName 可能是 secret，按 ID 记账才能
+    --   保证本地 CD / 施放确认正常推进。
+    ["圣光守望"] = { 1311595, 1310911 },
+    ["圣光誓约"] = { 1328548 },
 }
 -- 技能名 → 下一次自然冷却结束时间（Ready-first 的排序依据）
 WR_PaladinForever_FreeAt = WR_PaladinForever_FreeAt or {}
@@ -785,6 +790,16 @@ function WR_PaladinForever_ShowSealBlock(skillName, slot)
         WR_PaladinForever_HideNow(skillName, slot)
         return false
     end
+    -- ★★★ 2026-11-14 用户口径：「防骑圣印应该修改为能平砍的时候才挂自身圣印，
+    --   不然会出现空放圣印的情况」。
+    --   不能平砍 = 没有敌对活目标 / 目标在平砍射程外 → 这时点亮圣印色块就是空放：
+    --   AHK 会照着色块连按 /cast 圣印，白烧一个 GCD 和蓝，却打不到任何东西。
+    --   这里做成统一出口门：所有圣印色块（补印 / 切印 / 切回 / 插入）都必须先过。
+    if type(WR_PaladinForever_CanMeleeSwing) == "function"
+       and not WR_PaladinForever_CanMeleeSwing() then
+        WR_PaladinForever_HideNow(skillName, slot)
+        return false
+    end
     local shown = WR_ColorFrame_ShowSkill(skillName, slot)
     if shown then
         -- ★★ 2026-11-09 第十一次修正：记录当前「圣印提示保护窗口」。
@@ -838,6 +853,19 @@ function WR_PaladinForever_RefreshSealPrompt()
         return false
     end
     local slot = WR_PaladinForever_ActiveSealPromptSlot
+    -- ★★★ 2026-11-14 用户口径：「防骑圣印应该修改为能平砍的时候才挂自身圣印，
+    --   不然会出现空放圣印的情况」。
+    --   保护窗口内也要每 tick 复查「能平砍」：目标跑远 / 目标死亡 / 切走目标时，
+    --   立即熄灭圣印色块并清掉窗口，不能让 AHK 在剩下的窗口里继续连按空放。
+    if type(WR_PaladinForever_CanMeleeSwing) == "function"
+       and not WR_PaladinForever_CanMeleeSwing() then
+        WR_PaladinForever_HideNow(name, slot)
+        WR_PaladinForever_ActiveSealPromptName = nil
+        WR_PaladinForever_ActiveSealPromptSlot = nil
+        WR_PaladinForever_ActiveSealPromptUntil = nil
+        WR_PaladinForever_ActiveSealPromptBypass = nil
+        return false
+    end
     if not WR_ColorFrame_ShowSkill(name, slot) then
         WR_PaladinForever_ActiveSealPromptName = nil
         WR_PaladinForever_ActiveSealPromptSlot = nil
@@ -1748,7 +1776,7 @@ end
 --   mainSeal 参数保留给诊断；判定与「当前常驻是哪个圣印」无关：
 --   只要身上有【任意】圣印（含玩家手动切的别的圣印 / 带等级后缀名），
 --   就一律不补、不切 —— 不再反复把它换回常驻圣印。
---   返回 true 时调用方仍需过 CanApplySeal（战斗中 + 近战可攻击）与提示防抖。
+--   返回 true 时调用方仍需过 CanApplySeal（战斗中 + 能平砍）与提示防抖。
 --
 -- ★★ 2026-11-09 第六次修正（用户：「还是存在异常，旧版本都不会反复上buff」+ /mkseal 实测）：
 --   /mkseal 连打两条显示：`state=missing buffRemain=0` 且 `距上次上印=0.92`（甚至 0.02），
@@ -1842,20 +1870,30 @@ end
 --   ★ 不额外要求 target 已进战斗：圣印本来就在第 5 步战斗门之前处理，
 --     玩家进战斗 + 近战能打到目标，即满足「战斗中 + 近战可攻击」。
 -- ============================================================
-function WR_PaladinForever_CanApplySeal()
-    -- 这些全是客户端标准 API / 本插件全局函数，主循环本来就裸调用（见
-    -- WR_PaladinForeverProt 开头的 UnitAffectingCombat / WR_UnitRange），
-    -- 这里不做 type() 防御，保持与既有代码一致。
-    if not UnitAffectingCombat("player") then return false end
-    if not UnitExists("target") then return false end
-    if not UnitCanAttack("player", "target") then return false end
-    if UnitIsDead("target") then return false end
-    local range = WR_UnitRange and WR_UnitRange("target") or 999
-    range = range or 999
-    if type(range) == "number" and range < 999 and range > 8 then
-        return false
-    end
+-- ★★★ 2026-11-14 用户口径：「防骑圣印应该修改为能平砍的时候才挂自身圣印，
+--   不然会出现空放圣印的情况」。
+--   「能平砍」判定（圣印是自身 Buff，放出去不验证目标，所以必须由插件自己确认
+--   这一发打得到东西，否则就是空放）：
+--     ① 有敌对活目标：TargetCastable —— 存在 + 可攻击 + 非尸体/ghost；
+--        统一尸体判定后，目标已死 / 尸体 / ghost 时不再挂印（旧的裸 UnitIsDead
+--        真值判断拿不到 secret 的确认 true，尸体目标会被当活体放行）。
+--     ② 目标在近战平砍距离内：复用「攻击」的射程登记（8 码），
+--        距离读不到（999 / secret）按全项目口径放行 —— 否则无限服战斗中
+--        会退化成永远不补印。
+--   返回 false 时：不点亮任何圣印色块（补印 / 切印 / 切回 / 插入统一口径）。
+function WR_PaladinForever_CanMeleeSwing()
+    if not WR_PaladinForever_TargetCastable("target") then return false end
+    if not WR_PaladinForever_InSpellRange("攻击", "target") then return false end
     return true
+end
+
+function WR_PaladinForever_CanApplySeal()
+    -- 脱战绝不点亮：补印只发生在战斗中（旧口径不变）。
+    if not UnitAffectingCombat("player") then return false end
+    -- ★★★ 2026-11-14：原实现自带一套 target 存在 / UnitCanAttack / 裸 UnitIsDead /
+    --   8 码判定，和「能不能平砍」不是同一套口径（尸体漏判、距离写法分叉）。
+    --   现在统一交给 CanMeleeSwing，保证「能平砍才挂自身圣印」。
+    return WR_PaladinForever_CanMeleeSwing()
 end
 
 -- ============================================================
@@ -2061,7 +2099,7 @@ do
                                --   ② 施放成功就收不掉色块，读条期间又亮新色块
                                --      → 打断自己的治疗读条（白烧蓝、治疗量 0）。
                                "圣光术", "圣光闪现", "神圣震击", "神恩术",
-                               "清洁术", "圣盾术", "光之守夜", "真理之声" }
+                               "清洁术", "圣盾术", "圣光守望", "圣光誓约", "真理之声" }
             for i = 1, #dynNames do
                 local nm = dynNames[i]
                 local ok, id = pcall(WR_ResolveSpellID, nm)
@@ -2110,7 +2148,18 @@ do
 
     local f = CreateFrame("Frame")
     f:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    -- ★★★ 2026-11-15：换目标权威信号。必须在 unit ~= "player" 早退之前处理
+    --   （PLAYER_TARGET_CHANGED 的第二参数是 "target"，不是 "player"）。
+    --   递增 TargetEpoch + 尽力重建目标 key 快照，供审判按目标记账在
+    --   「事件时刻 GUID secret」时仍能落账到正确目标（实战第二版修复）。
+    f:RegisterEvent("PLAYER_TARGET_CHANGED")
     f:SetScript("OnEvent", function(_, event, unit, castGUID, spellID, spellName)
+        if event == "PLAYER_TARGET_CHANGED" then
+            if type(WR_PaladinForever_NoteTargetChanged) == "function" then
+                WR_PaladinForever_NoteTargetChanged()
+            end
+            return
+        end
         if unit ~= "player" then return end
         local sid = spellID
         if type(WR_IsSecretValue) == "function" and WR_IsSecretValue(sid) then
@@ -2174,6 +2223,9 @@ do
                             now + (WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS or 40))
                     elseif judgeSeal == "智慧圣印" then
                         WR_PaladinForever_NoteSingleSlotJudgement("wisdom",
+                            now + (WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS or 40))
+                    elseif judgeSeal == "十字军圣印" then
+                        WR_PaladinForever_NoteSingleSlotJudgement("crusader",
                             now + (WR_PaladinForever_SINGLE_JUDGEMENT_SECONDS or 40))
                     end
                 end
@@ -2483,24 +2535,52 @@ end
 WR_PaladinForever_DISPEL_KINDS = { "Poison", "Disease", "Magic" }
 WR_PaladinForever_DISPEL_LEGACY_NAMES = { "中毒", "疾病", "魔法" }
 
--- dispelType 归一化：英文枚举名与中文显示名都接受；其它（含 Curse）返回 nil
-function WR_PaladinForever_NormalizeDispelType(v)
-    if type(v) ~= "string" or v == "" then return nil end
+-- private: 判断一个值是否是 secret string。
+-- secret 值连 == / ~= / 字符串比较都会抛 "attempt to compare ... secret string value"，
+-- 所以任何比较之前必须先过这里。
+local function WR_PaladinForever_IsSecretText(v)
+    if type(v) ~= "string" then return false end
+    -- WR_IsSecretValue 内部若因 issecretvalue 不可用而返回 false，
+    -- 这里继续用全局 issecretvalue 再兜一次，避免漏判后走字符串比较抛错。
     if WR_IsSecretValue ~= nil then
-        local okS, sec = pcall(WR_IsSecretValue, v)
-        if okS and sec == true then return nil end
+        local ok, sec = pcall(WR_IsSecretValue, v)
+        if ok and sec == true then return true end
     end
-    local okL, s = pcall(string.lower, v)
-    if not okL or type(s) ~= "string" then return nil end
-    if s == "poison" or s == "中毒" then return "poison" end
-    if s == "disease" or s == "疾病" then return "disease" end
-    if s == "magic" or s == "魔法" then return "magic" end
-    if s == "curse" or s == "诅咒" then return "curse" end
-    return nil
+    if issecretvalue ~= nil then
+        local ok, sec = pcall(issecretvalue, v)
+        if ok and sec == true then return true end
+    end
+    return false
+end
+
+-- dispelType 归一化：英文枚举名与中文显示名都接受；其它（含 Curse）返回 nil
+-- ★★★ 2026-11-15 修复用户报错：DebuffFrame.auraInfo[i].debuffType = auraData.dispelName，
+-- 战斗中它是 secret string；旧代码第一行写成 type(v) ~= "string" or v == ""，
+-- secret 字符串参与 == 比较时直接抛 "attempt to compare local 'v' (a secret string value ...)"。
+function WR_PaladinForever_NormalizeDispelType(v)
+    -- 整段 pcall 兜底：即使 secret 检测因客户端差异漏判，也不能让任何比较抛到主循环
+    local ok, result = pcall(function()
+        -- ① 任何比较之前先做 secret 检测（secret string 的 type() 仍是 "string"）
+        if type(v) ~= "string" then return nil end
+        if WR_PaladinForever_IsSecretText(v) then return nil end
+        if v == "" then return nil end
+        local okL, s = pcall(string.lower, v)
+        if not okL or type(s) ~= "string" then return nil end
+        -- ② string.lower 之后再次确认（防御 issecretvalue 未暴露 / 返回值被 secret 包装）
+        if WR_PaladinForever_IsSecretText(s) then return nil end
+        if s == "poison" or s == "中毒" then return "poison" end
+        if s == "disease" or s == "疾病" then return "disease" end
+        if s == "magic" or s == "魔法" then return "magic" end
+        if s == "curse" or s == "诅咒" then return "curse" end
+        return nil
+    end)
+    if not ok then return nil end
+    return result
 end
 
 function WR_PaladinForever_IsCleansableDispelType(v)
-    local k = WR_PaladinForever_NormalizeDispelType(v)
+    local ok, k = pcall(WR_PaladinForever_NormalizeDispelType, v)
+    if not ok or type(k) ~= "string" then return false end
     return k == "poison" or k == "disease" or k == "magic"
 end
 
@@ -2531,6 +2611,183 @@ function WR_PaladinForever_UnitIsFriendly(unit)
     return false
 end
 
+-- ★★★ 2026-11-15 用户口径「防骑的清洁术目前战斗中不驱散，要改」：
+--   12.x 的 SecretWhenAurasRestricted 在「战斗 / 首领战 / 挑战模式 / PVP」中
+--   把所有光环数据变成 secret。WR_ScanAurasForUnit 读到 secret 字段会抛
+--   “Auras cannot be accessed when secret”，整段扫描被 pcall 丢弃 →
+--   WR_AuraCache 里没有 HARMFUL → UnitHasDispel 恒 false → 清洁术色块战斗中永不亮。
+--   ★★ 2026-11-15 复核：Forever 12.1 的 C_UnitAuras.UnitAuraSlots /
+--   GetAuraDataByIndex 都带 RequiresUnitAuraAccess；secret 战斗态下 tainted
+--   插件调用同样抛出 "Auras cannot be accessed when secret while tainted"。
+--   因此本探针只在「光环未受限」时可用（脱战 / 开放世界）；战斗中自己身上
+--   是否有可驱散 debuff 由 WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame
+--   读暴雪 DebuffFrame 的 AuraButton.DebuffBorder 图集名判定，见下方 UnitHasDispel。
+--   返回：true=有可驱散 debuff / false=没有 / nil=当前不可查询，交回旧路径。
+function WR_PaladinForever_ProbeDispellableByFilter(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    if C_UnitAuras == nil then return nil end
+
+    -- ① 槽位枚举：C_UnitAuras.GetAuraSlots 只返回匹配过滤器的槽位号，
+    --    不读取任何光环字段 —— 战斗中光环 secret 时这条最安全。
+    local slotFn = C_UnitAuras.GetAuraSlots
+    if slotFn ~= nil then
+        local okS, token, slot1 = pcall(slotFn, unit, "HARMFUL|RAID", 1)
+        if okS and slot1 then return true end
+    end
+
+    -- ② 数据查询：只判断返回值是否存在，绝不读 name / dispelName 等字段。
+    local answered = false
+    if C_UnitAuras.GetAuraDataByIndex ~= nil then
+        local ok, data = pcall(C_UnitAuras.GetAuraDataByIndex, unit, 1, "HARMFUL|RAID")
+        if ok then
+            answered = true
+            if data then return true end
+        end
+    end
+
+    -- ③ 旧全局 UnitAura 兜底（部分客户端仍暴露且支持过滤器；只做存在性判断）。
+    if UnitAura ~= nil then
+        local okU, name = pcall(UnitAura, unit, 1, "HARMFUL|RAID")
+        if okU then
+            answered = true
+            if name then return true end
+        end
+    end
+    if answered then return false end
+    return nil
+end
+
+-- 当前是否处于「光环数据 secret」状态（战斗 / 首领战 / 挑战模式 / PVP）。
+function WR_PaladinForever_AurasRestricted()
+    if C_Secrets == nil or C_Secrets.ShouldAurasBeSecret == nil then return false end
+    local ok, restricted = pcall(C_Secrets.ShouldAurasBeSecret)
+    return ok and restricted == true
+end
+
+-- ★★★ 2026-11-15 用户报错修复：
+--   DebuffFrameMixin:UpdateAuras 把 auraData.dispelName 原样存进
+--   DebuffFrame.auraInfo[i].debuffType；战斗中 dispelName 仍是 secret string，
+--   插件对 secret 字符串做任何 == / ~= 比较都会抛
+--   "attempt to compare ... secret string value"（本条报错即此）。
+--   所以 auraInfo 只能作为「有 debuff 条目」的存在性信号，绝不能拿 debuffType 比较；
+--   真正的驱散类型改读暴雪 AuraButton 的 DebuffBorder 图集名：
+--   Blizzard 非 taint 代码已用 secret 的 debuffType 调 AuraUtil.SetAuraBorderAtlas，
+--   把普通字符串图集名（ui-debuff-border-poison/-disease/-magic/-curse/-bleed）写在
+--   贴图上，插件读 GetAtlas()/GetTexture() 即可安全区分类型。
+--   返回：true=有可驱散 debuff / false=没有 / nil=帧不可用（交回旧路径）。
+function WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame()
+    local frame = _G and _G.DebuffFrame or nil
+    if type(frame) ~= "table" and type(frame) ~= "userdata" then return nil end
+    local info = frame.auraInfo
+    local deadly = frame.deadlyDebuffInfo
+    local auraFrames = frame.auraFrames
+    if type(info) ~= "table" and type(deadly) ~= "table" and type(auraFrames) ~= "table" then
+        return nil
+    end
+
+    local sawSecretType = false
+    local sawKnownNonCleansable = false
+
+    local function scanValue(v)
+        -- 注意：不能先写 v == nil —— secret string 参与 == 比较同样会抛错。
+        if type(v) ~= "string" then return nil end
+        if WR_PaladinForever_IsSecretText(v) then
+            sawSecretType = true
+            return nil
+        end
+        local k = WR_PaladinForever_NormalizeDispelType(v)
+        if k == "poison" or k == "disease" or k == "magic" then return true end
+        -- ★ 2026-11-15：普通字符串明确是诅咒/流血时记下「不可驱散」，
+        --   阻止后面「secret 类型」兜底把它当成可驱散而乱放清洁术。
+        if k == "curse" or k == "bleed" then
+            sawKnownNonCleansable = true
+        end
+        return nil
+    end
+
+    -- ① auraInfo / deadlyDebuffInfo：只在非 secret 时按字段直接判类型；
+    --    战斗中的 secret debuffType 仅记录「有带类型的 debuff」。
+    local function scanList(list)
+        if type(list) ~= "table" then return false end
+        for i = 1, #list do
+            local okE, entry = pcall(function() return list[i] end)
+            if okE and type(entry) == "table" then
+                local keys = { "dispelType", "debuffType", "dispelName" }
+                for j = 1, #keys do
+                    local okV, v = pcall(function() return entry[keys[j]] end)
+                    if okV then
+                        local okScan, hit = pcall(scanValue, v)
+                        if okScan and hit == true then return true end
+                    end
+                end
+            end
+        end
+        return false
+    end
+    if scanList(info) then return true end
+    if scanList(deadly) then return true end
+
+    -- ② 暴雪 DebuffFrame 的 auraFrames[i].DebuffBorder：
+    --    引擎/非 taint 代码已按真实 debuffType 设置图集（普通字符串），可安全读取。
+    local function borderKind(button)
+        local okB, border = pcall(function() return button.DebuffBorder end)
+        if not okB or border == nil then return nil end
+        local s = nil
+        local okA, atlas = pcall(function() return border:GetAtlas() end)
+        if okA and type(atlas) == "string" and not WR_PaladinForever_IsSecretText(atlas) then
+            local okL, lowered = pcall(string.lower, atlas)
+            if okL and type(lowered) == "string" then s = lowered end
+        end
+        if s == nil then
+            local okT, path = pcall(function() return border:GetTexture() end)
+            if okT and type(path) == "string" and not WR_PaladinForever_IsSecretText(path) then
+                local okL2, lowered2 = pcall(string.lower, path)
+                if okL2 and type(lowered2) == "string" then s = lowered2 end
+            end
+        end
+        if s == nil then return nil end
+        if string.find(s, "curse", 1, true) then return "curse" end
+        if string.find(s, "bleed", 1, true) then return "bleed" end
+        if string.find(s, "poison", 1, true) then return "poison" end
+        if string.find(s, "disease", 1, true) then return "disease" end
+        if string.find(s, "magic", 1, true) then return "magic" end
+        return nil
+    end
+
+    local function scanButtons(list)
+        if type(list) ~= "table" then return false end
+        for i = 1, #list do
+            local okB, button = pcall(function() return list[i] end)
+            if okB and button ~= nil then
+                -- ★ 2026-11-15 修复：不再依赖 hasValidInfo == true。
+                --   12.x 的 hasValidInfo 可能是 secret boolean，一比较就抛错，
+                --   旧写法会把带诅咒边框的按钮整个跳过；随后「secret 类型」
+                --   兜底误判为可驱散 → 中诅咒时清洁术异常乱放。
+                --   直接读 DebuffBorder 的普通字符串图集名即可安全区分类型。
+                local k = borderKind(button)
+                if k == "poison" or k == "disease" or k == "magic" then return true end
+                if k == "curse" or k == "bleed" then sawKnownNonCleansable = true end
+            end
+        end
+        return false
+    end
+    if scanButtons(auraFrames) then return true end
+
+    local container = frame.AuraContainer
+    if container ~= nil then
+        local okC, children = pcall(function() return container:GetChildren() end)
+        if okC and type(children) == "table" then
+            if scanButtons(children) then return true end
+        end
+    end
+
+    -- ③ 极老客户端没有 DebuffBorder / 图集读不到：只要有带类型的 debuff 条目
+    --    （secret 也算）就按「有可驱散」处理，优先保证中毒能驱散；
+    --    但已从图集确认是诅咒/流血时不兜底，避免清洁术白按。
+    if sawSecretType and not sawKnownNonCleansable then return true end
+    return false
+end
+
 function WR_PaladinForever_UnitHasDispel(unit)
     if type(unit) ~= "string" or unit == "" then return false end
     local okE, exists = pcall(UnitExists, unit)
@@ -2538,6 +2795,29 @@ function WR_PaladinForever_UnitHasDispel(unit)
     local okD, dead = pcall(UnitIsDeadOrGhost, unit)
     if okD and dead then return false end
     if not WR_PaladinForever_UnitIsFriendly(unit) then return false end
+
+    -- ★★★ 2026-11-15：战斗内自己身上是否有可驱散 debuff 由
+    --   WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame 判定：
+    --   auraInfo[i].debuffType 在战斗中是 secret，不能比较，只做存在性；
+    --   具体类型读暴雪 AuraButton.DebuffBorder 的普通字符串图集名。
+    --   脱战仍走下面更完整的缓存/接口路径。
+    if unit == "player" then
+        local uiHit = WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame()
+        if uiHit == true then return true end
+        if uiHit == false and WR_PaladinForever_AurasRestricted() then
+            return false
+        end
+    end
+
+    -- ★★★ 2026-11-15：战斗/副本内光环数据是 secret，缓存扫描不可用；
+    --   先走引擎侧 RAID 过滤器问「有没有我能驱散的 debuff」（不读任何光环字段）。
+    local filterHit = WR_PaladinForever_ProbeDispellableByFilter(unit)
+    if filterHit == true then return true end
+    if filterHit == false and WR_PaladinForever_AurasRestricted() then
+        -- secret 状态下过滤器明确为空：缓存扫描只会失败/保留脏数据，直接判无。
+        return false
+    end
+
     if WR_UpdateFrameState ~= nil then pcall(WR_UpdateFrameState) end
 
     -- ① 主通道：刷新并读取 HARMFUL 光环缓存的 dispelType
@@ -2606,6 +2886,19 @@ function WR_PaladinForever_CanCleanseCast()
     if IsPlayerSpell ~= nil then
         local okP, known = pcall(IsPlayerSpell, id)
         if okP and known == true then return true end
+    end
+    -- ★ 2026-11-15：12.x 的 IsPlayerSpell 可能不存在（DeprecatedSpellBook 才提供），
+    --   统一走兼容层「技能是否已知」；否则战斗中 IsUsableSpell 对友方目标技能
+    --   返回 false 时 CanCleanseCast 会恒 false → 清洁术永远不亮。
+    if WR_Forever_IsSpellKnown ~= nil then
+        local okK, known2 = pcall(WR_Forever_IsSpellKnown, "清洁术")
+        if okK and known2 == true then return true end
+    end
+    -- ★ 2026-11-15：最后兜底 —— 法术书索引里存在「清洁术」即视为已学会。
+    --   法术书索引只收录角色已学会的技能，不依赖 12.x 可能缺失的 IsPlayerSpell。
+    if WR_BuildSpellBookIndex ~= nil then
+        local okB, idx = pcall(WR_BuildSpellBookIndex)
+        if okB and type(idx) == "table" and idx["清洁术"] ~= nil then return true end
     end
     return false
 end

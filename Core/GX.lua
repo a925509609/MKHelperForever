@@ -16,6 +16,150 @@ local FontSize = 16
 -- ==========================================
 local UpdateContent = [[
 
+【毁灭】2026-11-15（按猪猪-无限服毁灭页重做毁灭术功能与循环）
+- 用户口径：图片为毁灭术专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧开关（狂咒/邪甲/武器石/暗影烈焰/腐蚀之种/厄运诅咒/地狱火/灵魂碎裂/TOC一键恐惧等），界面仍走 MK 面板，不污染痛苦/恶魔与其他职业。
+- 新增 Warlock/Warlock_Destruction_Features.lua（登记进 TOC）：毁灭默认值/旧档迁移（SS_HM_HJ 护甲下拉→恶魔皮肤/魔甲术二选一、SS_HM_AUTOSUMMON→四宠多选勾）；DOT 右键小窗（腐蚀术/献祭/生命虹吸 + 灾祸痛苦/末日2选1 + 诅咒元素/虚弱/鲁莽/语言/疲劳5选1，预判秒数）；读条引导右键小窗（引导：吸取灵魂预判5秒+目标血量10%、吸取生命无脑/看血量50%；读条：烧尽 → 暗影箭填充）；护甲右键（默认魔甲术）；召唤宠物右键（小鬼/虚空行者/魅魔/地狱猎犬）；切换目标；暗灼（暗影灼烧 <20% 斩杀）；拉条（生命分流30%/高血分流80%/喝红药30%/魔杖回蓝50%）；种族爆全开/全关/切换按钮；插入 浩劫诅咒/死亡缠绕/恐惧术/恐惧嚎叫/地狱烈焰/火焰之雨/生命通道/生命分流（一次性放完自关）。
+- 重写 Warlock/Warlock_Forever_Destruction.lua（仅 Forever 毁灭）：停手门 → 插入 → 自保 → 护甲 → 召唤宠物 → 切目标 → 防ADD门 → 种族爆 → 拉条 → DOT → 燃烧 → 暗灼 → 读条引导 → 魔杖兜底 → 清扫；共享件 Warlock_Forever.lua 零改动。
+- 宏：/WARLOCK_DOT、/WARLOCK_CAST、/WARLOCK_SUMMON、/WARLOCK_ARMOR（与痛苦共用注册，按当前专精派发）；宏表槽位 78 由旧「暗影烈焰」改「浩劫诅咒」，色表补 暗影灼烧=54、浩劫诅咒=78。
+- 验证：新增 .workbuddy/test_warlock_destr_rotation.py / test_warlock_destr_menu.py / test_warlock_destr_ui.py 离线夹具全过；全量 Lua 语法检查通过。
+
+【痛苦】2026-11-15（按彼岸花-无限服痛苦页重做痛苦术功能与循环）
+- 用户口径：图片为痛苦术专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧技能（痛苦无常/鬼影缠身/腐蚀之种/痛苦诅咒/厄运诅咒/地狱火/灵魂碎裂/暗影烈焰/烧尽/混乱之箭），界面仍走 MK 面板，不污染恶魔/毁灭与其他职业。
+- 新增 Warlock/Warlock_Affliction_Features.lua（登记进 TOC）：痛苦默认值/旧档迁移（SS_TK_HJ 护甲下拉→恶魔皮肤/魔甲术二选一、SS_TK_AUTOSUMMON→四宠多选勾）；DOT 右键小窗（腐蚀术/献祭/生命虹吸 + 灾祸痛苦/末日 2选1 + 诅咒元素/虚弱/鲁莽/语言/疲劳 5选1，预判秒数）；读条引导右键小窗（引导：吸取灵魂预判5秒+目标血量10%、吸取生命无脑/看血量50%、折磨；读条：暗影箭填充）；护甲右键（默认魔甲术）；召唤宠物右键（小鬼/虚空行者/魅魔/地狱猎犬）；切换目标；拉条（生命分流30%/高血分流80%/喝红药30%/魔杖回蓝50%）；种族爆全开/全关/切换按钮；插入 死亡缠绕/恐惧术/恐惧嚎叫/地狱烈焰/火焰之雨/生命通道/生命分流（一次性放完自关）。
+- 重写 Warlock/Warlock_Forever_Affliction.lua（仅 Forever 痛苦）：停手门 → 插入 → 自保 → 护甲 → 召唤宠物 → 切目标 → 防ADD门 → 种族爆 → 拉条 → DOT → 读条引导 → 魔杖兜底 → 清扫；共享件 Warlock_Forever.lua 零改动，毁灭/恶魔不受影响。
+- 宏：/WARLOCK_DOT、/WARLOCK_CAST、/WARLOCK_SUMMON、/WARLOCK_ARMOR（带下划线文本，与恶魔术 /WARLOCKDOT 等并存不冲突）；宏槽/色表全部复用现有登记，零改动。
+- 爆发「全开/全关/切换」按钮改挂 DM 行：isButton 按钮属于 DM 渲染路径（无 saveVariable，走 menuButtons），放 CB 段会走 CreateCheckbox 触发 PigSet[nil] 崩溃；恶魔学识段上一轮同款隐患一并修复。
+- 验证：新增 .workbuddy/test_warlock_affl_rotation.py / test_warlock_affl_menu.py / test_warlock_affl_ui.py 离线夹具全过（UI 夹具同时构建痛苦与恶魔学识两段面板）；全量 Lua 语法检查通过。
+
+【恶魔术】2026-11-15（按猪猪-无限服恶魔术页重做恶魔学识功能与循环）
+- 用户口径：图片为恶魔术专精；当前客户端 60 级技能与天赋；按图匹配功能并修复 MK 插件中已不存在/已改动的技能循环，界面仍走 MK 面板，不污染痛苦/毁灭与其他职业。
+- 新增 Warlock/Warlock_Demonology_Features.lua（登记进 TOC）：恶魔默认值/旧档迁移（SS_EM_HJ 护甲下拉→恶魔皮肤/魔甲术二选一、SS_EM_AUTOSUMMON→四宠多选勾）；DOT（腐蚀/献祭/生命虹吸 + 灾祸2选1 + 诅咒5选1，右键预判秒数）、读条引导（吸取灵魂/吸取生命引导，灵魂之火/灼热之痛/暗影箭读条，右键血量门槛）、护甲（恶魔皮肤/魔甲术）、召唤宠物（小鬼/虚空行者/魅魔/地狱猎犬多选）、切换目标、种族爆、拉条（生命分流/高血分流/喝红药/魔杖回蓝）、插入（死亡缠绕/恐惧术/恐惧嚎叫/地狱烈焰/火焰之雨/生命通道/生命分流，一次性放完自关）；右键「额外条件」小窗 4 个；宏 /WARLOCKDOT /WARLOCKCAST /WARLOCKSUMMON /WARLOCKARMOR；爆发全开/全关/切换按钮。
+- 60 级技能口径：痛苦灾祸/末日灾祸（旧 痛苦诅咒/厄运诅咒 本服不存在）；移除 80 级引用（恶魔变形/邪甲术/召唤恶魔卫士/腐蚀之种/灵魂碎裂等）。
+- 宏表：补 13 个职业槽宏（元素/虚弱/鲁莽/语言/疲劳诅咒、痛苦/末日灾祸、生命虹吸、死亡缠绕、恐惧术、恐惧嚎叫、生命通道、治疗药水）；色表 301-309 越界登记改绑 1-199 合法槽；腐蚀术色表改指 41 本体宏（原 14 为焦点宏，对当前目标补 DOT 错位）。
+- 循环顺序：停手门 → 插入 → 自保 → 护甲 → 召唤宠物 → 切目标 → 防ADD门 → 种族爆 → 拉条 → DOT → 读条引导 → 魔杖兜底 → 清扫。
+- 验证：新增 .workbuddy/test_warlock_demo_rotation.py 与 test_warlock_demo_menu.py 离线夹具全过；全量 Lua 语法检查通过。
+
+【惩戒】2026-11-15（按彼岸花-无限服惩戒页重做惩戒功能与循环）
+- 用户口径：图片为惩戒骑专精；当前客户端 60 级技能与天赋；按图匹配功能并删除 MK 插件中 80 级才有的技能，界面仍走 MK 面板。
+- 新增 Paladin/Paladin_Retribution_Features.lua：圣印总开关（右键设置：解封之怒舞[命令↔正义轮流叠3层回响换印、审判好就打、可编十字军/智慧/光明审判]、常驻圣印[7选1+卡CD使用]、保持审判[十字军3号/智慧2号/光明1号按优先级补]）；祝福总开关；切换目标；驱散（右键选常规/优先/目标/指向）；愤怒之锤斩杀；驱邪术（亡灵/恶魔）；拉条 喝红药90/圣疗术69/奉献4目标；插入 制裁/圣佑/审判/奉献（一次性自关）。宏 /PALADIN_RET_SEAL、/PALADIN_RET_BLESS。
+- 重写 Paladin/Paladin_Forever_Ret.lua（仅 Forever 惩戒）：祝福 → 圣疗术自疗 → 喝红药 → 插入 → 驱散 → 自动攻击 → 切换目标 → 防ADD → 圣印层 → 神圣打击 → 审判兜底 → 驱邪术 → 愤怒之锤 → 奉献。
+- 移除 80 级技能引用：复仇之怒/祈求圣光/神圣牺牲/神圣震击/神恩术/真理之声/光之守夜/圣殿壁垒/十字军打击/寒霜刺骨等旧惩戒面板项与循环分支全部下线。
+- 验证：新增 .workbuddy/test_paladin_ret_features.py 与 test_paladin_ret_rotation.py 离线夹具，全量 Lua 语法检查通过。
+
+【防骑】2026-11-15（实战第二版：智慧审判换目标记账的「时序性 secret」盲区）
+- 用户口径：上一版修复后游戏实战依旧复现「切回 A 再次切智慧圣印，A 身上明明还有智慧审判」。
+- 根因（上一版盲区）：审判施放事件回报的那一刻，战斗中 UnitGUID/UnitName 恰好处于
+  secret 状态 → NoteSingleSlotJudgement 里 targetKey=nil 直接 return → A 的按目标账
+  根本没记上；之后切回 A 时 GUID 恢复可读 → mem[keyA] 查不到 + 旧单条账（B 的）又被
+  目标检查判无效（stored=B≠current=A）→ 误判 A 没有智慧审判 → 再次切智慧圣印重打。
+  上一版离线夹具 UnitGUID 恒可读、IsSecretValue 恒 False，从未覆盖
+  「事件记账时刻 secret、查询时刻恢复可读」的时序组合。
+- 修复三件套（Paladin_Forever_Prot.lua + Paladin_Forever.lua 事件帧）：
+  ① PLAYER_TARGET_CHANGED 递增 TargetEpoch（事件必然触发，是换目标的权威信号；
+    事件帧注册，放在 unit~="player" 早退之前处理）；
+  ② 每个 epoch 内第一次读到目标 key（GUID 或名字）即锁定快照，整个 epoch 复用
+    同一把钥匙（防 GUID/名字来源中途漂移导致账键对不上）；
+  ③ 直接读取读不到时回退快照（epoch 必须一致）——审判前一瞬主循环 tick 已锁定的
+    快照，让事件回调记账在 GUID secret 时也能落到正确目标；查询侧同样受益。
+  另：智慧审判维持 phase4 的换目标检查补 TargetEpoch 兜底（两边 key 都读不到时
+  也能检测换目标，不再把 B 的维持期错套在切回的 A 头上）。
+- 验证：新增 .workbuddy/test_paladin_wisdom_target_secret.py（S1-S5：事件时刻
+  secret 落账、A→B→A 全流程不误判不点亮智慧圣印、epoch 保护不把 A 的 key 错给 B、
+  全程 secret 旧单条账兜底、GUID 恢复后 mem[keyA] 命中 39 秒）13 项全过；
+  test_paladin_wisdom_target_switch.py 14 项全过（换目标模拟补发
+  PLAYER_TARGET_CHANGED，与真实客户端行为一致）；全量圣骑士夹具 38 个全绿；
+  全量 Lua 语法 200/200。
+- 夹具工具链修正：lupa 的 Python lambda 在 Lua 侧 type() 是 userdata，
+  会让被测代码里的 type(...)=="function" 守卫失效 → secret 判定 mock 必须用
+  lua.eval 定义 Lua function（此缺陷同样影响所有旧夹具的 secret 模拟可信度）。
+
+【奶骑】2026-11-15（按彼岸花-无限服奶骑页重做神圣专精功能与循环）
+- 用户口径：图片为奶骑（神圣）专精；当前客户端 60 级技能与天赋；按图同步功能并修正 MK 插件中 80 级技能；不污染其他职业。
+- 新增 Paladin/Paladin_Holy_Features.lua：圣印（常驻圣印/卡CD审判/保持十字军·智慧·光明审判，按数字优先级补审判并自动切回常驻圣印）、圣光誓约（右键指定队友，缺 buff 或剩 <15 秒切焦点补，治疗模式「目标」有人要奶时不抢焦点）、祝福总开关、切换目标、驱散、愤怒之锤、驱邪术、奉献目标数、喝红药、一次性插入（制裁/圣佑/审判/奉献）；右键「额外条件」小窗。
+- 重写 Paladin/Paladin_Forever_Holy.lua（仅 Forever 神圣）：圣光术/圣光闪现/神圣震击（10 秒 CD）/神恩术/圣疗术/清洁术/圣盾术/圣光守望/圣光誓约；移除圣光道标、圣洁护盾、神圣牺牲、光环掌握、复仇之怒、祈求圣光、神圣风暴等本服不存在技能；新增 90 槽切换目标、112 槽圣光誓约、4 槽圣光守望宏与色表。
+- 面板：神圣页改为「选择（防ADD/治疗模式）+ 拉条（喝红药/圣疗/奉献目标数/圣光守望/神圣震击/圣光术/圣光闪现）+ 功能 7 图标 + 插入 4 图标」，保留祝福设置按钮；技能槽位只落在神圣专精使用的别名上，防护/惩戒与其他职业不变。
+- 验证：新增 .workbuddy/test_paladin_holy_features.py 29 项全过；全量 Lua 语法 201 文件 0 失败；圣骑士既有夹具回归通过（菜单分区/祝福设置等）。
+
+【防骑】2026-11-15（修复智慧审判维持换目标 A→B→A 重复切智慧圣印）
+- 用户口径：选择「智慧审判」buff 维持，给 A 打上智慧审判后切 B 正常打；再切回 A 时 A 身上明明还有 39 秒「智慧审判」，插件却再次切智慧圣印准备重打。
+- 根因：战斗中目标光环是 secret，WR_GetUnitDebuffTime 对新目标可能读不到；原单审判本地账只有一条，记录的是「最后一次审判的目标 B」，切回 A 时旧账目标不等于 A，状态机判 A 没有 debuff → phase0 重新切智慧圣印。
+- 修复（Paladin/Paladin_Forever_Prot.lua）：新增 WR_PaladinForever_JudgementMemory，按 targetKey 分别记录 light/wisdom/crusader 的 40 秒到期时刻；WR_PaladinForever_NoteSingleSlotJudgement 写入对应目标；JudgementSealDebuffRemain / SingleSlotJudgementInfo 在光环读不到时按当前目标本地账兜底；光明/智慧同槽位互相清账，十字军审判同步补记账。
+- 验证：新增 .workbuddy/test_paladin_wisdom_target_switch.py 15 项全过；全部圣骑士夹具 + 全量 Lua 语法 199 文件 0 失败。
+
+【武器】2026-11-15（按彼岸花-无限服武器页重做武器功能与循环）
+- 用户口径：图片为武器战专精；当前客户端 60 级技能与天赋；按图匹配功能并修复 MK 插件中已不存在/已改动的技能循环，界面仍走 MK 面板；不污染其他职业。
+- 新增 Warrior/Warrior_Arms_Features.lua：武器默认值/旧档迁移；撕裂/雷霆挫志/血性狂暴/破甲攻击/致死打击/横扫攻击/旋风斩/战斗怒吼/切换目标/猛击 功能判定；右键「额外条件」小窗（撕裂不打元素/机械/亡灵、预判秒数；破甲只打1破/高/低优先/续破秒数；致死打击让怒秒数/怒气；横扫攻击怪数/强制留怒或随缘；旋风斩怪数/怒气；血性狂暴怒气/血量；雷霆挫志多目标·单体 保持/卡CD/不放、怪数/缺数）；爆发全开/全关/切换按钮；/WARRIOR_REND、/WARRIOR_SUNDER_DPS、/WARRIOR_MS_POOL、/WARRIOR_WHIRLWIND、/WARRIOR_BLOODRAGE、/WARRIOR_SWEEP_AUTO、/WARRIOR_THUNDER_DEMO 别名。
+- 重写 Warrior/Warrior_Forever_Arms.lua（仅 Forever 武器）：斩杀（目标血量拉条）> 致死打击 > 压制（触发）> 撕裂 > 破甲（只打1破/高/低/续破）> 雷霆/挫志 > 横扫攻击 > 猛击（15秒冷却）> 顺劈/英勇（怒气拉条）；功能 乘胜追击/血性狂暴/战斗怒吼/切换目标/旋风斩姿态舞（战斗→狂暴→旋风斩→战斗）；爆发 鲁莽/种族爆发；插入 反击风暴/穿刺打击/横扫攻击/狂暴之怒（一次性放完自关）；保命 喝红药/狂暴之怒解控。
+- Warrior_Menu.lua：武器页重建为 10 个功能图标（撕裂/雷霆挫志/血性狂暴/破甲攻击/致死打击/横扫攻击/旋风斩/战斗怒吼/切换目标/猛击）+ 4 个插入图标（反击/穿刺/横扫/狂暴之怒）+ 2 个爆发开关（鲁莽/种族爆发）+ 3 个爆发按钮（全开/全关/切换）+ 6 条拉条（顺劈斩/英勇打击/斩杀/乘胜追击/喝红药/打断）；移除旧破甲/怒吼/寒霜/大风车等失效下拉与开关。
+- Warrior_Macros.lua：新增 61 穿刺打击 宏槽与 WR_SkillColor 映射；Warrior_Arms_Features.lua 已加入 TOC。
+- 验证：新增 test_warrior_arms_rotation.py 45 项、test_warrior_arms_menu.py 7 个右键小窗、test_warrior_arms_ui.py 面板构建全过；全量 Lua 语法 199 文件 0 失败。
+
+【防骑】2026-11-15（清洁术不再误驱散诅咒：修复 secret hasValidInfo 导致诅咒边框被跳过）
+- 用户口径：骑士清洁术无法驱散诅咒，中了这个诅咒会异常使用清洁术。
+- 根因：DebuffFrame 的 auraFrames[i].hasValidInfo 在 12.x 可能是 secret boolean，旧代码用 == true 比较直接抛错并被 pcall 吞掉，整个 DebuffBorder 扫描被跳过；随后「secret debuffType 无边框」兜底把所有 secret debuff（含诅咒）当可驱散 → 清洁术对诅咒乱放。
+- 修复：DebuffBorder 扫描不再依赖 hasValidInfo，直接读普通字符串图集名；auraInfo / deadlyDebuffInfo 中明确是 Curse / Bleed 的普通字符串记入 sawKnownNonCleansable，阻止 secret 兜底误判。清洁术仍只认 Poison / Disease / Magic。
+- 验证：test_paladin_cleanse_combat.py 新增 J17-J20（诅咒图集 + hasValidInfo secret / 无 hasValidInfo；毒图集正常）全过；全量 Lua 语法 198 文件 0 失败。
+
+【狂怒】2026-11-15（按彼岸花-无限服狂暴页重做狂怒功能与循环）
+- 用户口径：图片为狂怒（狂暴）专精；当前客户端 60 级技能与天赋；按图匹配功能并修复 MK 插件中已不存在/已改动的技能循环，界面仍走 MK 面板。
+- 新增 Warrior/Warrior_Fury_Features.lua：狂怒默认值/旧档迁移；撕裂/雷霆挫志/血性狂暴/破甲攻击/切姿态/战斗怒吼/切换目标/鲁莽挥击功能判定；右键「额外条件」小窗（不打元素/机械/亡灵、预判秒数；雷霆/挫志分多目标·单体 保持/卡CD/不放、怪物数/缺数；血性狂暴怒气/血量；破甲只打1破/高优先级/低优先级/续破秒数；切姿态脱战切战斗/进战切狂暴）；爆发全开/全关/切换按钮。
+- 重写 Warrior/Warrior_Forever_Fury.lua（仅 Forever 狂怒）：斩杀（目标血量拉条）> 嗜血 > 旋风斩 > 压制（触发）> 猛击 > 顺劈（2+ 目标、怒气拉条）> 英勇（怒气拉条）；功能 乘胜追击/破甲/撕裂/雷霆/挫志；爆发 死亡之愿/鲁莽/种族爆发；插入 反击风暴/鲁莽/狂暴之怒（一次性放完自关）；保命 喝红药/狂暴之怒解控/切姿态。
+- Warrior_Menu.lua：狂怒页重建为 8 个功能图标（撕裂/雷霆挫志/血性狂暴/破甲攻击/切姿态/战斗怒吼/切换目标/鲁莽挥击）+ 3 个插入图标（反击/鲁莽/狂暴之怒）+ 3 个爆发开关（鲁莽/死愿/种族爆发）+ 3 个爆发按钮（全开/全关/切换）+ 6 条拉条（顺劈斩/英勇打击/斩杀/乘胜追击/喝红药/打断）；移除旧破甲/猛击/怒吼/寒霜等失效下拉。
+- Warrior_Macros.lua：60 死亡之愿、64 贯刺打击 宏槽；WR_SkillColor 原 301/302/303/304 越界槽改为真实 64/42/53/60，并登记「种族爆发」=181。
+- 验证：新增 test_warrior_fury_rotation.py 24 项、test_warrior_fury_menu.py 6 项全过；全量 Lua 语法 198 文件 0 失败。
+
+【防战】2026-11-15（按彼岸花-无限服防战页重做防护功能与循环）
+- 用户口径：按图片所示功能优化兼容当前 MK 插件，修复防战循环；只针对防护专精，不污染其他职业；当前客户端为 60 级技能、天赋有改动。
+- 新增 Warrior/Warrior_Protection_Features.lua：防护默认值/旧档兼容、撕裂/雷霆挫志/格挡/血性狂暴/破甲攻击/切姿态/战斗怒吼/切换目标/嘲讽/鲁莽挥击 的功能判定，以及右键「额外条件」小窗（多目标/卡CD/血量、保持/卡CD/不放、只打1破/高/低优先、续破秒数、预判、脱战切战斗/进战切防御）。
+- 重写 Warrior/Warrior_Forever_Protection.lua（仅 Forever 防护）：盾牌猛击 > 复仇 > 盾牌格挡 > 乘胜追击 > 破甲（5层/续破/只打1破/高低优先）> 撕裂 > 雷霆 > 挫志 > 鲁莽挥击 > 顺劈/英勇（怒气拉条）；保命 破釜/盾墙/喝红药；插入 反击/震荡/挑战/盾墙/挫志/拦截/惩戒/狂暴之怒/缴械（一次性放完自关）；切姿态按脱战/进战分支并在插入快好时让路。
+- Warrior_Macros.lua：新增 74 缴械 / 75 治疗药水 / 76 嘲讽 / 78 鲁莽挥击 / 89 震荡猛击 宏槽与 WR_SkillColor 映射；Warrior_Menu.lua：防护页新增 10 个功能图标与 9 个插入图标、补 乘胜追击/喝红药/顺劈/英勇/破釜/打断 拉条，其他专精不受影响。
+- Core/UI_Config.lua：CreateCheckbox 新增 onRightClick（右键打开额外条件，左键仍切换开关；tooltip 自动加右键提示）。
+- 验证：新增 test_warrior_prot_rotation.py 17 项、test_warrior_prot_menu.py 菜单/小窗 5 项全过；test_config_exclusive.py 全过；全量 Lua 语法 197 文件 0 失败。
+
+【防骑】2026-11-15（修复清洁术报错：DebuffFrame.auraInfo.debuffType 是 secret string）
+- 用户报错：Paladin/Paladin_Forever.lua:2521: attempt to compare local 'v' (a secret string value, while execution tainted by 'MKHelperForever')，调用链 WR_PaladinForever_NormalizeDispelType ← IsCleansableDispelType ← PlayerDebuffDispelByBlizzardFrame ← UnitHasDispel ← CleanseStep。
+- 根因：DebuffFrameMixin:UpdateAuras 把 auraData.dispelName 原样存进 DebuffFrame.auraInfo[i].debuffType；战斗中 dispelName 仍是 secret string。旧 NormalizeDispelType 第一行 type(v) ~= "string" or v == "" 对 secret 字符串做 == 比较直接抛错；上一版「DebuffFrame 已解包成普通字符串」的判断不成立。
+- 修复（Paladin/Paladin_Forever.lua）：① NormalizeDispelType 在任何比较前先做 secret 检测（WR_PaladinForever_IsSecretText，含 issecretvalue 兜底），string.lower 结果再检一次；IsCleansableDispelType 全程 pcall。② PlayerDebuffDispelByBlizzardFrame 对 auraInfo / deadlyDebuffInfo 只做「有 debuff 条目」的存在性判断，具体类型改读暴雪 AuraButton 的 DebuffBorder 图集名（ui-debuff-border-poison/-disease/-magic/-curse/-bleed，普通字符串）；诅咒 / 流血图集不误判，无边框的极老客户端才按 secret 条目兜底。
+- 验证：test_paladin_cleanse_combat.py 新增 J10–J16（secret debuffType + 毒 / 诅咒 / 流血图集、无边框兜底、Normalize / IsCleansable 不抛错）全过；全部 29 个圣骑士夹具、57 个离线夹具、197 个 Lua 语法 0 失败。
+
+【防骑】2026-11-15（清洁术战斗中能驱散自己：读暴雪 DebuffFrame 已解包的 debuffType）
+- 用户口径：「防骑没有驱散自己，战斗中毒了」。
+- 根因：Forever 12.1 的 C_UnitAuras.UnitAuraSlots / GetAuraDataByIndex 都带 RequiresUnitAuraAccess，战斗 / 首领战 / 挑战模式 / PVP 中光环 secret 时，tainted 插件调用会直接抛 “Auras cannot be accessed when secret while tainted”，pcall 也拿不到任何结果。上一版按 HARMFUL|RAID 过滤器探针在真机因此恒为空 → 自身中毒也不亮清洁术。
+- 修复（Paladin/Paladin_Forever.lua）：新增 WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame —— 读取暴雪玩家 DebuffFrame.auraInfo / deadlyDebuffInfo 的 debuffType（Blizzard 非 taint 代码已把 auraData.dispelName 解包成普通字符串，随 UNIT_AURA 更新），只认中毒 / 疾病 / 魔法；UnitHasDispel 对 player 优先走该信号，secret 战斗态下直接给出权威 true/false，不再依赖读不到的 C_UnitAuras。脱战 / 可读状态仍保留原缓存 + 接口路径。
+- 验证：.workbuddy/test_paladin_cleanse_combat.py 新增 J1–J9（Poison / 中文「中毒」/ Magic / 诅咒 / 流血 / 空帧 / 无帧 / 不触发 C_UnitAuras 查询）全过；全部 29 个圣骑士夹具、57 个离线夹具全绿；全量 197 个 Lua 文件语法 0 失败。
+
+【防骑】2026-11-15（清洁术战斗中可用：secret 光环下走 HARMFUL|RAID 过滤器探针）
+- 用户口径：「防骑的清洁术目前战斗中不驱散，要改」。
+- 根因：12.x 的 SecretWhenAurasRestricted 在战斗 / 首领战 / 挑战模式 / PVP 中把所有光环数据变成 secret。WR_ScanAurasForUnit 读到 secret 字段会抛 “Auras cannot be accessed when secret”，整段扫描被 pcall 丢弃 → WR_AuraCache 里没有 HARMFUL → WR_PaladinForever_UnitHasDispel 恒 false → 清洁术色块战斗中永远不亮，面板 5 模式和「自己 / 目标」复选框全部失效。
+- 修复（Paladin/Paladin_Forever.lua）：
+  ① 新增 WR_PaladinForever_ProbeDispellableByFilter：优先用 C_UnitAuras.UnitAuraSlots(unit, "HARMFUL|RAID", 1) 只枚举槽位号（不读取任何光环字段）；再退回 C_UnitAuras.GetAuraDataByIndex(unit, 1, "HARMFUL|RAID") 只做存在性布尔判断。HARMFUL|RAID 在引擎侧只返回「玩家自己能驱散」的 debuff（圣骑士 = 中毒 / 疾病 / 魔法），不会把诅咒算进来。
+  ② WR_PaladinForever_UnitHasDispel 在缓存扫描之前先走该探针；探针明确为空且处于 secret 状态时直接判无，避免每 tick 触发必然失败的光环扫描；探针不可用时保留旧缓存 / WR_UnitDebuffType / 旧名字兜底。
+  ③ WR_PaladinForever_CanCleanseCast 增加 WR_Forever_IsSpellKnown 兜底：12.x 的 IsPlayerSpell 可能不存在，战斗中 IsUsableSpell 对需要友方目标的清洁术返回 false 时，仍能凭「已学会」点亮。
+- 验证：新增 .workbuddy/test_paladin_cleanse_combat.py 19 项全过（secret 战斗态过滤器命中、槽位命中、为空、抛错降级、不触发缓存扫描、自身 / 目标 43/44 点亮、非 secret 旧缓存回归）；test_paladin_cleanse.py / test_paladin_cleanse_dispeltype.py 全过；全部 29 个圣骑士夹具、57 个离线夹具全绿；全量 197 个 Lua 文件语法 0 失败。
+
+【防骑】2026-11-14（圣印改为「能平砍的时候才挂自身圣印」，消灭空放）
+- 用户口径：「防骑圣印应该修改为能平砍的时候才挂自身圣印，不然会出现空放圣印的情况」。
+- 根因：圣印是自身 Buff，客户端不验证目标就会放出去；旧 CanApplySeal 自带一套 target / UnitCanAttack / 裸 UnitIsDead / 8 码判定（裸 UnitIsDead 拿不到 secret 的确认 true、也不查 ghost，尸体目标会被当活体放行），且 ShowSealBlock 的切印 / 切回 / 插入路径完全不过距离门，保护窗口 RefreshSealPrompt 每 tick 无条件重亮——没目标 / 目标跑远 / 目标已死时色块照亮，AHK 同色连按就是空放圣印，白烧 GCD 和蓝。
+- 修复（Paladin/Paladin_Forever.lua）：
+  ① 新增 WR_PaladinForever_CanMeleeSwing：有敌对活目标（TargetCastable：存在 + 可攻击 + 非尸体/ghost）+ 在「攻击」平砍射程 8 码内；距离读不到（999/secret）按全项目口径放行，避免无限服退化成永远不补印。
+  ② WR_PaladinForever_CanApplySeal 统一改为「战斗中 + 能平砍」，删除旧的自带重复判定。
+  ③ WR_PaladinForever_ShowSealBlock 增加统一出口门：不能平砍时一律不点亮任何圣印色块（补印 / 切印 / 切回 / 插入全覆盖），并按槽位熄灭残留色块。
+  ④ WR_PaladinForever_RefreshSealPrompt 在 1 秒保护窗口内每 tick 复查「能平砍」，目标跑远 / 死亡时立即熄灭并清窗口，AHK 不再连点空放。
+- 验证：新增 .workbuddy/test_paladin_seal_melee_gate.py 15 项全过（能平砍判定 / 无目标 / 死亡 / 过远 / 不可攻击 / 距离未知放行 / CanApplySeal / ShowSealBlock / RefreshSealPrompt / 端到端）；全部 28 个圣骑士夹具、56 个离线夹具全绿；全量 197 个 Lua 文件语法 0 失败。
+
+【治疗】2026-11-14（战斗中加血修复：secret 血量下用 UNIT_COMBAT 估算队伍血量）
+- 用户口径：「我就是需要战斗中需要加血」。
+- 根因：Forever 继承 12.x secret value —— 战斗中 UnitHealth / UnitHealthMax / UnitHealthPercent 对插件返回 secret，WR_GetUnitHP 统一降级为 1（满血），戒律牧/奶骑等所有按血量选人的治疗逻辑战斗中全部静默；客户端实际仍允许 UNIT_COMBAT 的伤害/治疗量（普通数字）与 UNIT_HEALTH 事件。
+- 修复：新增 Core/Forever_CombatHealth.lua —— 脱战/可读时精确快照；战斗中按 UNIT_COMBAT 的 WOUND / DAMAGE / SPELL_DAMAGE / HEAL 等 amount 增减估算每个队伍成员的血量；未匹配 UNIT_COMBAT 的 UNIT_HEALTH 连续事件按压力逐级压低估算（1 次→85%、2 次→65%、3 次以上→45%），保证持续掉血的目标进入治疗阈值。WR_GetUnitHP 在 secret 时返回估算值；Core/Utils_HealerWeight.lua 的选人权重改走 WR_GetUnitHP。
+- 复核修正（2026-11-14）：CombatHealth 把 focus/target 解析到真实队伍单位（避免焦点血量永远按 100%）；UNIT_HEALTH 先到与 UNIT_COMBAT 后到不再重复计压力；未知最大血时按压力兜底；Utils_HealerWeight 的最大血改走估算缓存。
+- 验证：新增 .workbuddy/test_forever_combat_health.py 11 项、.workbuddy/test_forever_combat_heal_e2e.py 15 项、.workbuddy/test_healer_weight_combat.py 3 项全过；全部 55 个离线夹具 0 失败；全量 197 个 Lua 文件语法 0 失败。
+
+【戒律牧】2026-11-14（恢复老版「焦点目标加血」：自动设焦点 + 完整戒律治疗循环）
+- 用户口径：「查看一下插件中的戒律牧专精，老版本是焦点目标加血的方式，目前更新到了无限服客户端不一样，技能天赋都不同，需要实现以前的加血功能」。
+- 根因：Priest_Macros.lua 所有治疗宏都是 [@focus] 形态（53 治疗祷言 / 54 苦修 / 55 恢复 / 56 联结治疗 / 57 快速治疗 / 58 愈合祷言 / 59 真言术：盾 / 64 痛苦压制 / 150 绝望祷言），但 Forever 版 WR_PriestForeverDiscipline 只用 WR_SoD_GetLowestFriendly 算低血目标、从不点亮「设焦点」色块；AHK 按治疗键时打的是玩家当前焦点（或没有焦点），表现为判 A 治 B / 治不出。
+- 修复（Priest/Priest_Forever_Discipline.lua）：按时光服老版 Priest_Discipline.lua 的链路重建焦点目标加血——每 tick 先按面板「治疗模式」JL_ZLMS（自动/坦克/脆皮/目标）选最低血友方，低于阈值时点亮 192/147/176-179/121-145 的设焦点色块，下一 tick 再用 [@focus] 治疗；当前焦点更危急则保持，尊重玩家手动焦点。治疗优先级：自身绝望祷言 <30% → 痛苦压制 <30%（无限缺失自动跳过）→ 治疗祷言（≥3 人 <70%）→ 愈合祷言 → 真言术：盾（JL_ZYSD 档位 / 全团 JL_QTTD / 坦克 JL_TKZD / 焦点 JL_JDSD）→ 苦修 <90% → 快速治疗/联结治疗 <85% → 恢复 <95%。全部沿用现有 JL_* 存档键与宏槽位。
+- 验证：新增 .workbuddy/test_priest_discipline_focus.py 23 项全过（满血不提示 / 设焦点槽位 / 焦点直达 / 愈合·盾·苦修·快疗·恢复优先级 / 群体治疗 / 坦克·脆皮·目标模式 / 自身保命 / 读条保护 / 痛苦压制缺失）；全量 196 个 Lua 文件语法 0 失败。
+
 【防骑】2026-11-14（新增「愤怒之锤·精英」开关：只对精英怪 / BOSS 斩杀）
 - 用户口径：「防骑再新增一个愤怒之锤的按钮，控制愤怒之锤目标为精英怪，boss的时候才用」。
 - 实现（Paladin/Paladin_Forever_Prot.lua）：新增 WR_PaladinForever_HammerTargetIsEliteOrBoss / WR_PaladinForever_HammerTargetAllowed；hammerEligible 追加目标类型门——勾选「精英」后，仅当目标分类为 elite / rareelite / worldboss / boss、boss1~5 单位帧、骷髅级（等级 -1）或 UnitIsBoss 时才提示愤怒之锤；普通小怪即使进入斩杀期也不点亮（省 0.87 秒读条 + 295 蓝）。主链与第 11 档兜底共用 hammerEligible，行为一致。

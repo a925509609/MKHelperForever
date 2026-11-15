@@ -74,6 +74,7 @@ local SECTION_COLLAPSE_KEYS = {
     ["爆发"] = "FH_BURST_SECTION_COLLAPSED",
     ["审判buff"] = "FH_JUDGEMENT_BUFF_SECTION_COLLAPSED",
     ["圣印"] = "FH_SEAL_SECTION_COLLAPSED",
+    ["功能"] = "FH_FUNC_SECTION_COLLAPSED",
     ["插入"] = "FH_INSERT_SECTION_COLLAPSED",
     -- ★ 2026-11-13：主面板左右两个顶层分区也支持折叠
     --   用户口径：「目前全局，设置无法折叠，全局折叠向右」→ 标题条右侧显示折叠符，点击折叠/展开。
@@ -745,6 +746,7 @@ function WR_LayoutTalentCheckboxes(talentFrame, frameWidth, doLayout)
     -- ★ 2026-11-11：新增「圣印」专区，按用户要求放在「爆发」区下面；
     --   追加「审判buff」专区放在「圣印」专区上面。
     local sectionPriority = { ["自动"] = 1, ["爆发"] = 2, ["审判buff"] = 3, ["圣印"] = 4, ["插入"] = 5 }
+    sectionPriority["功能"] = 4.5   -- 奶骑 2026-11-15 新增「功能」区：排在圣印与插入之间
     table.sort(sectionOrder, function(a, b)
         local pa = sectionPriority[a] or 99
         local pb = sectionPriority[b] or 99
@@ -1677,6 +1679,9 @@ local function CreateCheckbox(config)
                     "\n宏/" .. config.saveVariable .. "空格off 关闭开关" ..
                     "\n|cff00adf0按住图标拖到动作条可生成切换宏（带技能冷却）|r"
             end
+            if type(config.onRightClick) == "function" then
+                usageTip = usageTip .. "\n|cff00adf0右键：打开额外条件设置|r"
+            end
             GameTooltip:SetOwner(self, config.tooltipAnchor or "ANCHOR_RIGHT")
             GameTooltip:SetText(config.tooltipText .. exclusiveTip .. usageTip)
             GameTooltip:Show()
@@ -1701,6 +1706,14 @@ local function CreateCheckbox(config)
     local function OnToggleClick(self, button)
         if draggedMacro then
             draggedMacro = false
+            return
+        end
+        -- ★ 2026-11-15：右键 = 打开该功能的「额外条件」小窗（PigToGo/彼岸花 同款交互）。
+        --   左键仍然是开关切换；右键不再误触发开关。
+        if button == "RightButton" then
+            if type(config.onRightClick) == "function" then
+                pcall(config.onRightClick)
+            end
             return
         end
         if isRadio then

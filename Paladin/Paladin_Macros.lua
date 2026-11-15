@@ -42,11 +42,10 @@ local function CreateClassesMacro()
     WR_CreateMacro("NUMPAD1", "/CAST 愤怒之锤") -- 1
     WR_CreateMacro("NUMPAD2", "/CAST 审判") -- 2
     WR_CreateMacro("NUMPAD3", "/CAST 十字军打击") -- 3
-    -- ★ 2026-11-13：槽 4 由空占位改为「光之守夜」（神圣骑 Holy 天赋技能）。
-    --   原注释「本版本无此技能，已清理」指的是神圣风暴；无限服确实没有神圣风暴，
-    --   但 Holy 天赋给的是「光之守夜」，两者不冲突。
+    -- ★ 2026-11-15：槽 4 = 「圣光守望」（本服 Holy 天赋真实技能名，1311595）。
+    --   旧名「光之守夜」在 60 级法术书里不存在，已统一改为「圣光守望」。
     --   宏写成两段：焦点优先（治疗目标模型一致），无焦点时退回当前目标。
-    WR_CreateMacro("NUMPAD4", "/cast [@focus,help,nodead] 光之守夜; 光之守夜") -- 4（神圣骑：光之守夜）
+    WR_CreateMacro("NUMPAD4", "/cast [@focus,help,nodead] 圣光守望; 圣光守望") -- 4（神圣骑：圣光守望）
     WR_CreateMacro("NUMPAD5", "/CAST 奉献") -- 5
     WR_CreateMacro("NUMPAD6", "/CAST 驱邪术") -- 6
     WR_CreateMacro("NUMPAD7", "/CAST 神圣愤怒") -- 7
@@ -197,7 +196,7 @@ local function CreateClassesMacro()
     WR_CreateMacro("ALT-SHIFT-F12", "/cast [@focus] 圣光闪现") -- 109
     WR_CreateMacro("ALT-SHIFT-F10", "/cast [@focus] 圣光术") -- 110
     WR_CreateMacro("ALT-CTRL-SHIFT--", "/cast [@focus] 圣洁护盾") -- 111
-    WR_CreateMacro("CTRL-SHIFT--", "/cast [@focus] 圣光道标") -- 112
+    WR_CreateMacro("CTRL-SHIFT--", "/cast [@focus,help,nodead] 圣光誓约") -- 112（神圣骑：圣光誓约；旧圣光道标本服不存在）
     WR_CreateMacro("ALT-CTRL--", "/cast [@focus] 神圣震击") -- 113
     WR_CreateMacro("ALT-SHIFT--", "/cast 神恩术") -- 114
     -- ★ 2026-11-08：跟随类宏加 nocombat 守卫
@@ -335,7 +334,11 @@ end)
 -- ============================================================
 WR_SkillColor["PALADIN"] = {
     ["圣疗术"] = 48,
-    ["圣光道标"] = 112,
+    ["圣光道标"] = 112,          -- 旧名保留（本服无此技能，仅兼容旧代码）
+    ["圣光誓约"] = 112,          -- 神圣骑：圣光誓约（宏 CTRL-SHIFT--）
+    ["圣光守望"] = 4,            -- 神圣骑：圣光守望（宏 NUMPAD4）
+    ["切换目标"] = 90,           -- 无目标/目标死亡时 /targetenemy（宏 ALT-CTRL-SHIFT-F10）
+    ["治疗药水"] = 75,           -- 喝红药（AHK 通用治疗药水槽）
     ["神圣震击"] = 113,
     ["圣光术"] = 110,
     ["圣光闪现"] = 10,
@@ -387,8 +390,8 @@ WR_SkillColor["PALADIN"] = {
     --   循环里改为走 PigAlert 文字提示，彻底避免与跟随/焦点键位撞车。
     --   如需恢复色块提示，必须另选 ≥ 241 的空闲槽位并同步 AHK ColorMap。
     ["真理之声"] = nil,       -- 原 115（与旧「目标跟随」撞车）
-    -- ["光之守夜"] 原 116（与旧「设置焦点」撞车）→ 2026-11-13 已迁到空闲职业槽 4，
-    --   见本表末尾的 ["光之守夜"] = 4；此处留注释仅为保留「为什么原来不能用 116」的结论。
+    -- 「圣光守望」原 116（与旧「设置焦点」撞车）→ 2026-11-13 已迁到空闲职业槽 4；
+    --   2026-11-15 起客户端正式名统一为「圣光守望」（旧译「光之守夜」不再使用）。
     ["迅捷审判"] = nil,       -- 原 117（与旧「焦点跟随」撞车）
     -- ★★★ 2026-11-10 修复：圣殿壁垒原写 118，注释说「118 无冲突」是错的。
     --   118 在本文件 :132 已绑定 /target 凯雷塞斯王子（纳克萨玛斯 BOSS）：
@@ -431,5 +434,5 @@ WR_SkillColor["PALADIN"] = {
     ["清洁术(目标)"]   = 44,    -- 宏 SHIFT-F11
     ["清洁术(焦点)"]   = 63,    -- 宏 ALT-CTRL-F3
     ["清洁术(指向)"]   = 59,    -- 宏 CTRL-F12
-    ["光之守夜"]       = 4,     -- 宏 NUMPAD4（2026-11-13 由空占位改为光之守夜）
+    ["圣光守望"]       = 4,     -- 宏 NUMPAD4（2026-11-15 由旧译光之守夜改为客户端正式名）
 }

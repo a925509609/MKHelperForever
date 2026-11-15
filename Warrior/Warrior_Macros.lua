@@ -60,11 +60,11 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-F7", "/cast 冲锋") -- 57
   WR_CreateMacro("CTRL-F8", "") -- 58
   WR_CreateMacro("CTRL-F12", "") -- 59
-  WR_CreateMacro("CTRL-F10", "") -- 60
-  WR_CreateMacro("ALT-CTRL-F1", "") -- 61
+  WR_CreateMacro("CTRL-F10", "/cast 死亡之愿") -- 60
+  WR_CreateMacro("ALT-CTRL-F1", "/cast 穿刺打击") -- 61
   WR_CreateMacro("ALT-CTRL-F2", "") -- 62
   WR_CreateMacro("ALT-CTRL-F3", "") -- 63
-  WR_CreateMacro("ALT-CTRL-F11", "") -- 64
+  WR_CreateMacro("ALT-CTRL-F11", "/cast 贯刺打击") -- 64
   WR_CreateMacro("ALT-CTRL-F5", "") -- 65
   WR_CreateMacro("ALT-CTRL-F6", "/cast 致死打击") -- 66
   WR_CreateMacro("ALT-CTRL-F7", "/cleartarget\n/targetlasttarget\n/startattack") -- 67
@@ -74,11 +74,11 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-SHIFT-F1", "") -- 71
   WR_CreateMacro("CTRL-SHIFT-F2", "") -- 72
   WR_CreateMacro("CTRL-SHIFT-F3", "") -- 73
-  WR_CreateMacro("CTRL-SHIFT-F11", "") -- 74
-  WR_CreateMacro("CTRL-SHIFT-F5", "") -- 75
-  WR_CreateMacro("CTRL-SHIFT-F6", "") -- 76
+  WR_CreateMacro("CTRL-SHIFT-F11", "/cast 缴械") -- 74
+  WR_CreateMacro("CTRL-SHIFT-F5", "/use 阿加治疗药水\n/use 焕生治疗药水") -- 75
+  WR_CreateMacro("CTRL-SHIFT-F6", "/cast 嘲讽") -- 76
   WR_CreateMacro("CTRL-SHIFT-F7", "") -- 77
-  WR_CreateMacro("CTRL-SHIFT-F8", "") -- 78
+  WR_CreateMacro("CTRL-SHIFT-F8", "/cast 鲁莽挥击") -- 78
   WR_CreateMacro("CTRL-SHIFT-F12", "") -- 79
   WR_CreateMacro("CTRL-SHIFT-F10", "") -- 80
   WR_CreateMacro("ALT-CTRL-SHIFT-F1", "") -- 81
@@ -89,7 +89,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-SHIFT-F6", "") -- 86
   WR_CreateMacro("ALT-CTRL-SHIFT-F7", "") -- 87
   WR_CreateMacro("ALT-CTRL-SHIFT-F8", "") -- 88
-  WR_CreateMacro("ALT-CTRL-SHIFT-F12", "") -- 89
+  WR_CreateMacro("ALT-CTRL-SHIFT-F12", "/cast 震荡猛击") -- 89
   WR_CreateMacro("ALT-CTRL-SHIFT-F10", "/targetenemy") -- 90
   WR_CreateMacro("ALT-F1", "") -- 91
   WR_CreateMacro("ALT-F2", "") -- 92
@@ -221,6 +221,7 @@ end)
 -- ============================================================
 WR_SkillColor["WARRIOR"] = {
     ["斩杀"] = 13,
+    ["穿刺打击"] = 61,
     ["压制"] = 41,
     ["旋风斩"] = 3,
     ["顺劈斩"] = 7,
@@ -243,9 +244,28 @@ WR_SkillColor["WARRIOR"] = {
     ["鞭笞"] = 59,
     ["狂暴打击"] = 69,
     ["迅捷打击"] = 70,
-    ["贯刺打击"] = 301,
-    ["横扫攻击"] = 302,
-    ["刺耳怒吼"] = 303,
-    ["死亡之愿"] = 304,
-    ["震荡猛击"] = 305,
+    ["贯刺打击"] = 64,
+    ["横扫攻击"] = 42,
+    ["刺耳怒吼"] = 53,
+    ["死亡之愿"] = 60,
+    ["种族爆发"] = 181,
+    ["震荡猛击"] = 89,
+    ["撕裂"] = 39,
+    ["破甲攻击"] = 1,
+    ["挫志怒吼"] = 25,
+    ["战斗怒吼"] = 10,
+    ["防御姿态"] = 28,
+    ["战斗姿态"] = 9,
+    ["嘲讽"] = 76,
+    ["鲁莽挥击"] = 78,
+    ["盾墙"] = 47,
+    ["拦截"] = 52,
+    ["惩戒痛击"] = 56,
+    ["乘胜追击"] = 36,
+    ["治疗药水"] = 75,
+    ["缴械"] = 74,
+    ["英勇投掷"] = 6,
+    ["切换目标"] = 90,
+    ["盾击"] = 27,
+    ["拳击"] = 24,
 }
