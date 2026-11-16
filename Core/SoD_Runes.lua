@@ -484,6 +484,20 @@ end
 --     让开发者明确知道「该技能没登记槽位」，而不是静默撞到随机键位上。
 function WR_ColorFrame_ShowSkill(skillName, fallbackSlot)
     local slot = WR_SoD_ResolveSlot(skillName) or fallbackSlot
+    -- ★ 2026-11-16：槽位合法性闸。ColorTable 只到 240，任何 301/302… 这类历史遗留
+    --   越界值都会让 WR_CreateSingleColorSlot → PIG_BGRtoBGR(nil) 抛错，整个循环 tick
+    --   崩掉。这里统一按「未登记」处理：不点亮、只告警一次，绝不把错误槽位传给 UI。
+    if slot ~= nil and (type(slot) ~= "number" or slot < 1 or slot > 240) then
+        WR_SoD_UnmappedWarned = WR_SoD_UnmappedWarned or {}
+        local badKey = tostring(skillName) .. "(" .. tostring(slot) .. ")"
+        if not WR_SoD_UnmappedWarned[badKey] then
+            WR_SoD_UnmappedWarned[badKey] = true
+            print("|cffff8040[MKHelper]|r 技能色块槽位越界，已跳过提示：" .. badKey)
+        end
+        -- 主动熄灭上一 tick 的残留色块，避免 AHK 继续按旧键
+        if type(WR_HideColorFrame) == "function" then WR_HideColorFrame(zhandoumoshi) end
+        return false
+    end
     if not slot then
         -- 不猜槽位：静默跳过并只提示一次，避免误触其他功能键位
         WR_SoD_UnmappedWarned = WR_SoD_UnmappedWarned or {}

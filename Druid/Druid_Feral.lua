@@ -34,7 +34,7 @@ function WR_DruidFeral()
 
     -- ===== 3. AoE 分支（3+ 敌近身）=====
     if UnitCount8 >= 3 and inRange and WR_SpellUsable("横扫", true) then
-        if WR_ColorFrame_ShowSkill("横扫", 143) then return true end
+        if WR_ColorFrame_ShowSkill("横扫", 11) then return true end
     end
 
     -- ===== 4. 单体核心（近战，仅当在射程）=====

@@ -1,75 +1,26 @@
 -- ============================================================
--- Shaman Forever · Enhancement 专精循环
--- 共享 helper 见 Shaman_Forever.lua（公共件）
--- 由程序从原单文件物理拆分，逻辑未改动
+-- Shaman_Forever_Enhancement.lua
+-- 《魔兽世界：无限》(Forever) 增强专精循环
+-- 改动日期：2026-11-16（按「猪猪 / 彼岸花-无限服 · 增强页」重做）
+-- ------------------------------------------------------------
+-- 本文件只保留「Forever 增强」入口；具体功能、默认值、右键小窗与
+-- 全部优先级链都在 Shaman/Shaman_Enhancement_Features.lua（新功能层）。
+--
+-- 与旧版的区别：
+-- 1. 不再引用野性狼魂 / 萨满之怒 / 熔岩猛击 / 熔岩爆裂 / 寒霜刺骨 /
+--    潮汐之力等 80 级或 SoD 专属技能；只使用 Forever 60 级真实技能。
+-- 2. 旧「漩涡层数」下拉 → 新拉条「漩涡武器 3层」（层数达到即打闪电箭）；
+--    旧「火系图腾」下拉 → 自动图腾右键小窗（每系勾选）；
+--    旧「武器附魔 / 治疗链 / 寒霜刺骨 / 偷药 / 饰品 / 手套」等旧开关下线，
+--    旧档由 Shaman_Enhancement_Features.lua 迁移。
+-- 3. 优先级链：护盾 → 插入 → 喝红药 → 切目标 → 防ADD门 →
+--    自动图腾 → 种族爆发 → 打断(风剪) → 驱散(净化术) →
+--    震击(烈焰震击/地震术) → 风暴打击 → 漩涡武器(闪电箭) →
+--    火焰新星 → 大地震击。
 -- ============================================================
 
 function WR_ShamanForeverEnhancement()
-    -- ===== 1. 基础变量 =====
-    ShiFaSuDu = 0.3
-    GCD = WR_GetGCD("风暴打击")
-    PlayerHP = WR_GetUnitHP("player")
-    PlayerMP = WR_GetUnitMP("player")
-    PlayerMove = WR_PlayerMove()
-    TargetRange = WR_UnitRange("target")
-    TargetInCombat = WR_UnitInCombat("target")
-    TargetDeathTime = WR_GetUnitDeathTime("target")
-    UnitCount8  = WR_GetRangeHarmUnitCount(8)
-    UnitCount10 = WR_GetRangeHarmUnitCount(10)
-    maelstrom = WR_GetUnitBuffTime("player", "漩涡武器") > 0   -- 漩涡武器(闪电箭/链消耗)
-
-    -- ===== 2. 进入战斗主循环门（防ADD）=====
-    local bossFrameActive = false
-    for i = 1, 4 do if UnitExists("boss" .. i) then bossFrameActive = true; break end end
-    local inBossEncounter = bossFrameActive and (UnitAffectingCombat("player") or UnitAffectingCombat("target"))
-    local allowAdd = (PigSet.FANG_ADD_SM ~= 0)
-    if not (inBossEncounter or (UnitAffectingCombat("player") and TargetInCombat and allowAdd)) then
-        return false
-    end
-
-    local inRange = (TargetRange and TargetRange <= 5)
-
-    -- ===== 3. 核心（近战，仅当在射程）=====
-    if inRange then
-        -- 3.1 烈焰震击（保持，供熔岩猛击增伤）
-        if WR_GetUnitDebuffTime("target", "烈焰震击") == 0 and WR_SpellUsable("烈焰震击", true) then
-            if WR_ColorFrame_ShowSkill("烈焰震击", 5) then return true end
-        end
-
-        -- 3.2 风暴打击（核心，CD 即放）
-        if WR_SpellUsable("风暴打击", true) then
-            if WR_ColorFrame_ShowSkill("风暴打击", 3) then return true end
-        end
-
-        -- 3.3 熔岩猛击（Lava Lash 手符文；有烈焰震击增伤，CD 即放）
-        if WR_GetUnitDebuffTime("target", "烈焰震击") > 0
-           and WR_SpellUsable("熔岩猛击", true) then
-            if WR_ColorFrame_ShowSkill("熔岩猛击", 10) then return true end
-        end
-
-        -- 3.4 漩涡武器消耗（闪电箭/链，满层优先）
-        if maelstrom and WR_SpellUsable("闪电箭", true) then
-            if WR_ColorFrame_ShowSkill("漩涡武器", 120) then return true end
-        end
-
-        -- 3.5 大地震击（填充）
-        if WR_SpellUsable("大地震击", true) then
-            if WR_ColorFrame_ShowSkill("大地震击", 8) then return true end
-        end
-    end
-
-    -- ===== 4. 爆发 / 法力 =====
-    if WR_SpellUsable("野性狼魂", true) then
-        if WR_ColorFrame_ShowSkill("野性狼魂", 18) then return true end
-    end
-    if PlayerMP < 0.30 and WR_SpellUsable("萨满之怒") then
-        if WR_ColorFrame_ShowSkill("萨满之怒", 13) then return true end
-    end
-
-
-    -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
-    if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("先知之怒") and WR_SpellUsable("先知之怒", true) then
-        if WR_ColorFrame_ShowSkill("先知之怒", 301) then return true end
-    end
-    return false
+    local SE = WR_ShamanEnhancementUI
+    if type(SE) ~= "table" or type(SE.Run) ~= "function" then return false end
+    return SE.Run() == true
 end

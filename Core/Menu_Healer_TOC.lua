@@ -54,7 +54,7 @@ local healerSpecs = {
   { menu = Priest_Menu,  key = "神圣" },
   { menu = Druid_Menu,   key = "恢复" },
   { menu = Shaman_Menu,  key = "恢复" },
-  { menu = Monk_Menu,    key = "织雾" },
+  -- 2026-11-16：删除 Monk 行（无限首发无武僧职业，Monk_Menu 永远是 nil）
 }
 
 -- 遍历并注入

@@ -1,75 +1,20 @@
 -- ============================================================
--- Druid Forever · Balance 专精循环
--- 共享 helper 见 Druid_Forever.lua（公共件）
--- 由程序从原单文件物理拆分，逻辑未改动
+-- Druid Forever · Balance 专精薄壳（60级 / 无限服）
+-- ------------------------------------------------------------
+-- 2026-11-15 重做：按「彼岸花-无限服 · 平衡页」截图，逻辑全部在
+-- Druid_Balance_Features.lua（WB 功能层），本文件只做派发。
+-- ★ 本文件不得在采集全局之前读 PlayerHP/TargetDeathTime 等：
+--   那些值由 WB.Base() 每 tick 采集，提前读会拿到上一 tick 脏值。
+-- ★ 共享件 Druid_Forever.lua 零改动：野性/守护/恢复不受影响。
+-- ★ 旧 80 级/SoD 循环参数（星落 / 月神轨道炮 / 星辰坠落 / 阳炎术 /
+--   星涌术符文门 / 自然之力 / 台风等）已废弃，本服 60 级不再引用。
 -- ============================================================
 
+if WR_PlayerClass and WR_PlayerClass ~= "DRUID" then return end
+
 function WR_DruidForeverBalance()
-    -- ===== 1. 基础变量 =====
-    ShiFaSuDu = 0.3
-    GCD = WR_GetGCD("愤怒")
-    PlayerHP = WR_GetUnitHP("player")
-    PlayerMP = WR_GetUnitMP("player")
-    PlayerMove = WR_PlayerMove()
-    TargetRange = WR_UnitRange("target")
-    TargetInCombat = WR_UnitInCombat("target")
-    TargetDeathTime = WR_GetUnitDeathTime("target")
-    UnitCount8  = WR_GetRangeHarmUnitCount(8)
-    UnitCount10 = WR_GetRangeHarmUnitCount(10)
-
-    dotName = sunfire and "阳炎术" or "月火术"
-
-    -- ===== 2. 进入战斗主循环门（防ADD）=====
-    local bossFrameActive = false
-    for i = 1, 4 do if UnitExists("boss" .. i) then bossFrameActive = true; break end end
-    local inBossEncounter = bossFrameActive and (UnitAffectingCombat("player") or UnitAffectingCombat("target"))
-    local allowAdd = (PigSet.FANG_ADD_DRUID ~= 0)
-    if not (inBossEncounter or (UnitAffectingCombat("player") and TargetInCombat and allowAdd)) then
-        return false
-    end
-
-    local inRange = (TargetRange and TargetRange <= 35)
-
-    -- ===== 3. AoE 分支（3+ 敌）=====
-    if UnitCount8 >= 3 and inRange and WR_SpellUsable("飓风", true) then
-        if WR_ColorFrame_ShowSkill("飓风", 24) then return true end
-    end
-
-    -- ===== 4. 单体核心（仅当在射程）=====
-    if inRange then
-        -- 4.1 月火/阳炎 保持（DoT）
-        if WR_GetUnitDebuffTime("target", dotName) == 0 and WR_SpellUsable(dotName, true) then
-            if WR_ColorFrame_Show(131, dotName) then return true end
-        end
-
-        -- 4.2 星涌术（Starsurge 腿符文；瞬发填充，CD 即放）
-        if WR_SpellUsable("星涌术", true) then
-            if WR_ColorFrame_ShowSkill("星涌术", 132) then return true end
-        end
-
-        -- 4.3 星落（爆发，长 CD）
-        if WR_SpellUsable("星落", true) then
-            if WR_ColorFrame_ShowSkill("星落", 135) then return true end
-        end
-
-        -- 4.4 愤怒（常驻填充）
-        if WR_SpellUsable("愤怒", true) then
-            if WR_ColorFrame_ShowSkill("愤怒", 20) then return true end
-        end
-
-        -- 4.5 星火术（备选填充）
-        if PlayerMove and WR_SpellUsable("星火术", true) then
-            if WR_ColorFrame_ShowSkill("星火术", 21) then return true end
-        end
-    end
-
-
-    -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
-    if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("虫群") and WR_SpellUsable("虫群", true) then
-        if WR_ColorFrame_ShowSkill("虫群", 301) then return true end
-    end
-    if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("枭兽形态") and WR_SpellUsable("枭兽形态", true) then
-        if WR_ColorFrame_ShowSkill("枭兽形态", 302) then return true end
+    if WR_DruidBalanceUI and WR_DruidBalanceUI.Run then
+        return WR_DruidBalanceUI.Run()
     end
     return false
 end

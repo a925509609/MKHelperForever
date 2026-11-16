@@ -15,7 +15,7 @@ if WR_PlayerClass ~= "HUNTER" then return end
 
 Hunter_Menu = {
     -- ==========================================================
-    -- 1. 野兽控制专精 (Beast Mastery)
+    -- 1. 野兽控制专精 (Beast Mastery) —— 2026-11-16 按「猪猪 / 彼岸花-无限服 · 兽王页」重做
     -- ==========================================================
     ["野兽控制"] = {
         -- ===== 下拉菜单（DM） =====
@@ -28,125 +28,81 @@ Hunter_Menu = {
                 saveVariable = "FANG_ADD_SWLR",
                 defaultID = 1,
             },
-            -- 瞄准 or 多重选择
+            -- 共享冷却：瞄准射击 / 多重射击 共享 6 秒冷却，选优先项
             {
-                text = "|cffABD473瞄准or多重|r",
-                menuItems = { { text = "|cffABD473多重|r" }, { text = "|cffABD473瞄准|r" } },
-                tooltipText = "选择|cffff0000多重|ror|cffff0000瞄准|r",
+                text = "|cffABD473共享冷却|r",
+                menuItems = { { text = "|cffABD473瞄准射击|r" }, { text = "|cffABD473多重射击|r" } },
+                tooltipText = "瞄准射击与多重射击共享6秒冷却。选「瞄准射击」时优先打瞄准，选「多重射击」时优先打多重。",
                 saveVariable = "LR_SWL_DCMZ",
                 defaultID = 1,
             },
-            -- 召唤宠物
+            -- 喝红药（拉条）
             {
-                text = "|cffABD473召唤宠物|r",
-                menuItems = {
-                    { text = "|cffABD4731号|r" }, { text = "|cffABD4732号|r" },
-                    { text = "|cffABD4733号|r" }, { text = "|cffABD4734号|r" },
-                    { text = "|cffABD4735号|r" }, { text = "|cffABD473不召唤|r" },
-                },
-                tooltipText = "无宝宝时自动召唤哪个宝宝",
-                saveVariable = "LR_SW_ZHBB",
-                defaultID = 1,
+                text = "|cffABD473喝红药|r",
+                isSlider = true, minValue = 0, maxValue = 100, valueStep = 5,
+                defaultVal = 30,
+                tooltipText = "血量低于该百分比时自动喝治疗药水（0 = 关闭，默认30）",
+                saveVariable = "LR_SWL_HXY",
             },
-            -- 治疗宠物（滑条）
+            -- 爆发快捷按钮
             {
-                text = "|cffABD473治疗宠物|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 80,
-                tooltipText = "多少血量治疗宠物",
-                saveVariable = "LR_SWL_ZLCW",
+                text = "|cffABD473爆发全开|r",
+                isButton = true, buttonText = "全部打开", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "一键打开 急速射击 / 狂野怒火 / 种族爆发",
+                onClick = "WR_HunterBMBurstAllOn",
             },
-            -- ★ 循环模式选择（单体/AOE）
             {
-                text = "|cffABD473输出模式|r",
-                menuItems = {
-                    { text = "|cffABD473单体|r" },
-                    { text = "|cffABD473AOE|r" },
-                },
-                tooltipText = "选择输出循环模式\n|cffff0000单体|r：正常单体输出，稳固填充\n|cffff0000AOE|r：只放多重、乱射、爆炸陷阱的极限AOE",
-                saveVariable = "LR_SWL_CYCLE_MODE",
-                defaultID = 1,
+                text = "|cffABD473爆发全关|r",
+                isButton = true, buttonText = "全部关闭", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "一键关闭 急速射击 / 狂野怒火 / 种族爆发",
+                onClick = "WR_HunterBMBurstAllOff",
             },
-            -- ★ 宝宝攻击模式（1=跟随/2=不跟随/3=不控制）
             {
-                text = "|cffABD473宝宝模式|r",
-                menuItems = {
-                    { text = "|cffABD473跟随|r" },
-                    { text = "|cffABD473不跟随|r" },
-                    { text = "|cffABD473不控制|r" },
-                },
-                tooltipText = "选择宝宝控制模式\n|cffff0000跟随|r：自动让宝宝攻击目标并跟随主人（危险目标自动召回）\n|cffff0000不跟随|r：宝宝跟随主人但不自动攻击（黏主人，从战斗中切回会召回）\n|cffff0000不控制|r：宝宝原地待命，完全由玩家手动控制（不攻击不召回）",
-                saveVariable = "LR_SWL_KZBB",
-                defaultID = 1,
+                text = "|cffABD473爆发切换|r",
+                isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "三个爆发开关任意一个开着就全关，全关就全开",
+                onClick = "WR_HunterBMBurstToggle",
             },
         },
         -- ===== 复选框（CB） =====
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 132208, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000急速射击|r", saveVariable = "LR_SWL_ZDJSSJ", defaultState = true },
-            { row = 1, column = 2, IconID = 135727, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000种族|r", saveVariable = "LR_SWL_ZDZZ", section = "爆发", defaultState = true },
-            { row = 1, column = 3, IconID = 236871, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000速度药水|r", saveVariable = "LR_SWL_ZDSRYS", section = "爆发", defaultState = false },
-            -- ★ 第1行第4列：偷药开关
-            { row = 1, column = 4, IconID = 236871, text = "|cffABD473偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "LR_SWL_TOUYAO", section = "爆发", defaultState = false },
-            -- ★ 第1行第5列：毒蛇钉刺BOSS ONLY开关（适配T16）
-            { row = 1, column = 5, IconID = 132204, text = "|cffABD473BOSS|r", tooltipText = "开启后，毒蛇钉刺只对BOSS目标施放（适配T16套装）", saveVariable = "LR_SWL_DSDC_BOSS_ONLY", defaultState = false },
-            { row = 1, column = 6, IconID = 338666, text = "|cffABD473饰品|r", tooltipText = "自动|cff00adf0饰品|r（爆发/斩杀/DBM倒数时触发）", saveVariable = "LR_SWL_ZDSP", section = "爆发", defaultState = true },
+            -- 功能（右键图标打开额外条件）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Marksmanship", text = "|cffABD473远程技能|r", tooltipText = "远程技能总开关：点图标展开右边一栏，这一页会自动放的远程技能（震荡射击、毒蛇钉刺、奥术射击、瞄准射击、多重射击、召唤雄鹰、狙击）一个一行，勾上的才放。\n\n柱顶的「远程技能」去掉勾 = 这些都不放，只留自动射击和近战技能，想留蓝或只想平射时关掉。\n\n猎人印记、急速射击和插入的技能不受影响。\n宏：/HUNTER_RANGED_BM 切换（后面加 on 开、off 关）", saveVariable = "LR_SWL_RANGED_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterBM then WR_HunterBM.ShowOptions("LR_SWL_RANGED_ON") end end },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Ability_Hunter_RaptorStrike", text = "|cffABD473近战技能|r", tooltipText = "近战技能总开关：点图标展开右边一栏，这一页会自动放的近战技能（猫鼬撕咬、摔绊、猛禽一击）一个一行，勾上的才放。\n\n柱顶的「近战技能」去掉勾 = 这些都不放，贴身时只留近战平砍，想把蓝留给远程技能时关掉。\n宏：/HUNTER_MELEE 切换（后面加 on 开、off 关）", saveVariable = "LR_SWL_MELEE_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterBM then WR_HunterBM.ShowOptions("LR_SWL_MELEE_ON") end end },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Ability_Hunter_BeastCall", text = "|cffABD473宠物|r", tooltipText = "宠物总开关：点图标展开右边一栏。\n\n召唤宠物：没有宠物就召唤；宠物死了就复活（下面选战斗中复活，还是脱战才复活）。\n\n治疗宠物：脱战宠物血量低于拉条就给它放治疗宠物。\n\n柱顶的「宠物」去掉勾 = 这些都不管。\n宏：/HUNTER_PET 切换（后面加 on 开、off 关）", saveVariable = "LR_SWL_PET_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterBM then WR_HunterBM.ShowOptions("LR_SWL_PET_ON") end end },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Ability_Hunter_SniperShot", text = "|cffABD473印记|r", tooltipText = "猎人印记总开关：目标身上没有猎人印记就自动补。\n\n右键：只打首领。\n宏：/HUNTER_MARK 切换（后面加 on 开、off 关）", saveVariable = "LR_SWL_MARK_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterBM then WR_HunterBM.ShowOptions("LR_SWL_MARK_ON") end end },
+            { row = 2, column = 1, IconID = 132293, text = "|cffABD473切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标", saveVariable = "LR_SWL_TAB", section = "功能", defaultState = true },
 
-            -- 第2行
-            { row = 2, column = 1, IconID = 336779, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000手套|r", saveVariable = "LR_SWL_ZDST", section = "爆发", defaultState = true },
-            { row = 2, column = 2, IconID = 133712, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000炸弹|r", saveVariable = "LR_SWL_ZDZD", defaultState = true },
-            { row = 2, column = 3, IconID = 132188, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000守护切换|r", saveVariable = "LR_SWL_ZDSH", defaultState = true },
-            { row = 2, column = 4, IconID = 132212, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000猎人印记,只对boss生效|r", saveVariable = "LR_SWL_ZDLRYJ", defaultState = true },
+            -- 爆发（截图：急速 / 狂野 / 种族爆发）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Hunter_RapidKilling", text = "|cffABD473急速|r", tooltipText = "自动使用急速射击（CD 好且身上没有急速射击 buff 时）。\n右键：只打首领。\n宏：/HUNTER_RAPID 切换（后面加 on 开、off 关）", saveVariable = "LR_SWL_ZDJSSJ", section = "爆发", defaultState = true,
+              onRightClick = function() if WR_HunterBM then WR_HunterBM.ShowOptions("LR_SWL_ZDJSSJ") end end },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Ability_Druid_FerociousBite", text = "|cffABD473狂野|r", tooltipText = "自动使用狂野怒火（宠物活着、CD 好且身上没有狂野怒火 buff 时）。\n右键：只打首领。\n宏：/HUNTER_BW 切换（后面加 on 开、off 关）", saveVariable = "LR_SWL_KYNH", section = "爆发", defaultState = true,
+              onRightClick = function() if WR_HunterBM then WR_HunterBM.ShowOptions("LR_SWL_KYNH") end end },
+            { row = 1, column = 3, IconID = 135727, text = "|cffABD473种族爆发|r", tooltipText = "自动使用种族爆发技能", saveVariable = "LR_SWL_ZDZZ", section = "爆发", defaultState = true },
 
-            -- 第3行
-            { row = 3, column = 1, IconID = 132204, text = "|cffABD473指向|r", tooltipText = "自动指向|cffff0000毒蛇钉刺|r", saveVariable = "LR_SWL_ZXDSDC", defaultState = true },
-            { row = 3, column = 2, IconID = 132204, text = "|cffABD473焦点|r", tooltipText = "自动焦点|cffff0000毒蛇钉刺|r", saveVariable = "LR_SWL_JDDSDC", defaultState = true },
-            { row = 3, column = 3, IconID = 132204, text = "|cffABD473目标|r", tooltipText = "自动目标|cffff0000毒蛇钉刺|r", saveVariable = "LR_SWL_MBDSDC", defaultState = true },
-            { row = 3, column = 4, IconID = 132330, text = "|cffABD473屏蔽|r", tooltipText = "议会屏蔽|cffff0000多重射击|r", saveVariable = "LR_SWL_YHDSSJ", defaultState = true },
-            { row = 3, column = 5, IconID = 136047, text = "|cffABD473锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n,这个是TOC的双子自动锁对应目标和ICC议会", saveVariable = "LR_SWL_SUO", defaultState = false },
-
-            -- 第4行
-            { row = 4, column = 1, IconID = 132188, text = "|cffABD473蝰蛇舞|r", tooltipText = "自动|cffff0000蝰蛇舞|r,在射出多重的时候切蝰蛇,在多重击中的时候会到雄鹰,长续航但是会降低dps.如果蓝够的boss不要开", saveVariable = "LR_SWL_ZDSH_KSW", defaultState = true },
-            { row = 4, column = 2, IconID = 135826, text = "|cffABD473全自动|r", tooltipText = "基本无用,推荐插入.全自动|cffff0000爆炸陷阱|r,CD好了就朝鼠标指向的位置扔", saveVariable = "LR_SWL_QZDBZXJ", defaultState = false },
-            { row = 4, column = 3, IconID = 135826, text = "|cffABD473半自动|r", tooltipText = "基本无用,推荐插入.半自动|cffff0000爆炸陷阱|r,需要自己按左键", saveVariable = "LR_SWL_BZDBZXJ", defaultState = false },
-            { row = 4, column = 4, IconID = 132163, text = "|cffABD473自动|r", tooltipText = "复活宠物", saveVariable = "LR_SW_FHCW_ZD", defaultState = true },
-            { row = 4, column = 5, IconID = 136020, text = "|cffABD473自动|r", tooltipText = "是否对特定的怪自动凝神", saveVariable = "LR_SWL_ZDNS", defaultState = true },
-
-            -- 第5行
-            { row = 5, column = 1, IconID = 132160, text = "|cffABD473脱战|r", tooltipText = "脱战蝰蛇.满蓝龙鹰", saveVariable = "LR_SWL_TZKS", defaultState = true },
-            { row = 5, column = 2, IconID = 132180, text = "|cffABD473目标\n的\n目标|r", tooltipText = "给目标的目标上误导", saveVariable = "LR_SW_WD_TARGETTARGET", defaultState = true },
-            -- ★ 第8行第3列：奥术射击总闸（2026-8-15 新增）。原误放在第5行第3列，与焦点误导冲突导致两个复选框闪烁，已移开。
-            { row = 8, column = 3, IconID = 136096, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000奥术射击|r", saveVariable = "LR_SWL_ASSJ", defaultState = true },
-            { row = 5, column = 3, IconID = 132180, text = "|cffABD473焦点|r", tooltipText = "给焦点目标上误导", saveVariable = "LR_SWL_WD_FOCUS", defaultState = false },
-            { row = 5, column = 4, IconID = 132180, text = "|cffABD473宠物|r", tooltipText = "给宠物目标上误导", saveVariable = "LR_SWL_WD_PET", defaultState = false },
-            { row = 5, column = 5, IconID = 132222, text = "|cffABD473无脑|r", tooltipText = "无脑乱射，满足条件就自动放", saveVariable = "LR_SW_WLS", defaultState = false },
-
-            -- 第6行（插入类技能）
-            { row = 6, column = 1, IconID = 132294, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000逃脱|r", saveVariable = "LR_SWL_CRTT", section = "插入", defaultState = false },
-            { row = 6, column = 2, IconID = 132208, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000急速射击|r", saveVariable = "LR_SWL_CRJSSJ", section = "插入", defaultState = false },
-            { row = 6, column = 3, IconID = 132180, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000误导|r", saveVariable = "LR_SWL_CRWD", section = "插入", defaultState = false },
-            { row = 6, column = 4, IconID = 135826, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000爆炸陷阱|r", saveVariable = "LR_SWL_CRBZXJ", section = "插入", defaultState = false },
-            { row = 6, column = 5, IconID = 132222, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000乱射|r", saveVariable = "LR_SWL_CRLS", section = "插入", defaultState = false },
-
-            -- 第7行
-            { row = 7, column = 1, IconID = 135840, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000冰箱陷阱|r", saveVariable = "LR_SWL_CRBSXJ", section = "插入", defaultState = false },
-            { row = 7, column = 2, IconID = 237347, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000豪猪诱饵|r", saveVariable = "LR_SWL_CRHZYR", section = "插入", defaultState = false },
-            { row = 7, column = 3, IconID = 132294, text = "|cffABD473瓦格里|r", tooltipText = "插入|cffff0000瓦格里逃脱|r\n使用方法为插入以后按住左键,视野朝崖外", saveVariable = "LR_SWL_CRWGLTT", defaultState = false },
-            -- ★ 第7行第4列：冰冻之箭
-            { row = 7, column = 4, IconID = 135837, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000冰冻之箭|r\n需要鼠标指向目标位置\n适合用于定身特定BOSS技能", saveVariable = "LR_SWL_BZJJ", section = "插入", defaultState = false },
-            -- ★ 自动切目标开关
-            { row = 8, column = 2, IconID = 132580, text = "|cffABD473小吃|r", tooltipText = "自动给宠物吃香辣猛犸小吃", saveVariable = "LR_SWL_XLMMXC", defaultState = false },
-            { row = 8, column = 1, IconID = 132293, text = "|cffABD473切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "LR_SWL_TAB", defaultState = true },
-            -- ★ ⑧ 杀戮停等开关（宝宝平砍状态判断）
-            { row = 8, column = 3, IconID = 132329, text = "|cffABD473杀戮停等|r", tooltipText = "宝宝超过两个实际平砍间隔未攻击当前目标时，杀戮命令停止提示，避免卡路或离开目标后持续挡住杀戮射击（MK原创·非ZZ对齐）", saveVariable = "LR_SWL_SLMK_PINGKAN", defaultState = true },
+            -- 插入（一次性，放完自关）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Fire_Immolation", text = "|cffABD473献祭|r", tooltipText = "插入 献祭陷阱（一次性，放完自关）", saveVariable = "LR_SWL_CRXJ", section = "插入", defaultState = false },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Frost_FrostNova", text = "|cffABD473冰冻|r", tooltipText = "插入 冰冻陷阱（一次性，放完自关）", saveVariable = "LR_SWL_CRBD", section = "插入", defaultState = false },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Frost_FrostBolt02", text = "|cffABD473冰霜|r", tooltipText = "插入 冰霜陷阱（一次性，放完自关）", saveVariable = "LR_SWL_CRBS", section = "插入", defaultState = false },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Ability_GolemThunderClap", text = "|cffABD473震荡|r", tooltipText = "插入 震荡射击（一次性，放完自关）", saveVariable = "LR_SWL_CRZS", section = "插入", defaultState = false },
+            { row = 2, column = 1, IconID = "Interface\\Icons\\Ability_Hunter_DistractingShot", text = "|cffABD473扰乱|r", tooltipText = "插入 扰乱射击（一次性，放完自关）", saveVariable = "LR_SWL_CRRL", section = "插入", defaultState = false },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Ability_Hunter_MendPet", text = "|cffABD473治疗|r", tooltipText = "插入 治疗宠物（一次性，放完自关）", saveVariable = "LR_SWL_CRZL", section = "插入", defaultState = false },
+            { row = 2, column = 3, IconID = "Interface\\Icons\\Ability_Hunter_RapidKilling", text = "|cffABD473急速|r", tooltipText = "插入 急速射击（一次性，放完自关）", saveVariable = "LR_SWL_CRJSSJ", section = "插入", defaultState = false },
+            { row = 2, column = 4, IconID = "Interface\\Icons\\Ability_Hunter_Flare", text = "|cffABD473照明|r", tooltipText = "插入 照明弹（一次性，放完自关）", saveVariable = "LR_SWL_CRZM", section = "插入", defaultState = false },
+            { row = 3, column = 1, IconID = "Interface\\Icons\\Ability_Marksmanship", text = "|cffABD473乱射|r", tooltipText = "插入 乱射（一次性，放完自关）", saveVariable = "LR_SWL_CRLS", section = "插入", defaultState = false },
+            { row = 3, column = 2, IconID = "Interface\\Icons\\Ability_Devour", text = "|cffABD473胁迫|r", tooltipText = "插入 胁迫（一次性，放完自关）", saveVariable = "LR_SWL_CRXP", section = "插入", defaultState = false },
+            { row = 3, column = 3, IconID = "Interface\\Icons\\Ability_Druid_FerociousBite", text = "|cffABD473狂野|r", tooltipText = "插入 狂野怒火（一次性，放完自关）", saveVariable = "LR_SWL_CRKY", section = "插入", defaultState = false },
+            { row = 3, column = 4, IconID = "Interface\\Icons\\Spell_Fire_Explosion", text = "|cffABD473爆炸陷阱|r", tooltipText = "插入 爆炸陷阱（一次性，放完自关）", saveVariable = "LR_SWL_CRBZXJ", section = "插入", defaultState = false },
+            { row = 4, column = 1, IconID = "Interface\\Icons\\Ability_Rogue_FeignDeath", text = "|cffABD473假死|r", tooltipText = "插入 假死（一次性，放完自关）", saveVariable = "LR_SWL_CRJS", section = "插入", defaultState = false },
         },
     },
 
     -- ==========================================================
-    -- 2. 射击专精 (Marksmanship)
+    -- 2. 射击专精 (Marksmanship) —— 2026-11-16 按「猪猪 / 彼岸花-无限服 · 射击页」重做
     -- ==========================================================
     ["射击"] = {
         -- ===== 下拉菜单（DM） =====
@@ -159,124 +115,80 @@ Hunter_Menu = {
                 saveVariable = "FANG_ADD_SJLR",
                 defaultID = 1,
             },
-            -- 瞄准 or 多重选择
+            -- 共享冷却：瞄准射击 / 多重射击 共享 6 秒冷却，选优先项
             {
-                text = "|cffABD473瞄准or多重|r",
-                menuItems = { { text = "|cffABD473多重|r" }, { text = "|cffABD473瞄准|r" } },
-                tooltipText = "选择|cffff0000多重|ror|cffff0000瞄准|r",
+                text = "|cffABD473共享冷却|r",
+                menuItems = { { text = "|cffABD473瞄准射击|r" }, { text = "|cffABD473多重射击|r" } },
+                tooltipText = "瞄准射击与多重射击共享6秒冷却。选「瞄准射击」时优先打瞄准，选「多重射击」时优先打多重。",
                 saveVariable = "LR_SJL_DCMZ",
                 defaultID = 1,
             },
-            -- 召唤宠物
+            -- 喝红药（拉条）
             {
-                text = "|cffABD473召唤宠物|r",
-                menuItems = {
-                    { text = "|cffABD4731号|r" }, { text = "|cffABD4732号|r" },
-                    { text = "|cffABD4733号|r" }, { text = "|cffABD4734号|r" },
-                    { text = "|cffABD4735号|r" }, { text = "|cffABD473不召唤|r" },
-                },
-                tooltipText = "无宝宝时自动召唤哪个宝宝",
-                saveVariable = "LR_SJ_ZHBB",
-                defaultID = 1,
+                text = "|cffABD473喝红药|r",
+                isSlider = true, minValue = 0, maxValue = 100, valueStep = 5,
+                defaultVal = 30,
+                tooltipText = "血量低于该百分比时自动喝治疗药水（0 = 关闭，默认30）",
+                saveVariable = "LR_SJL_HXY",
             },
-            -- 治疗宠物（滑条）
+            -- 爆发快捷按钮
             {
-                text = "|cffABD473治疗宠物|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 80,
-                tooltipText = "多少血量治疗宠物",
-                saveVariable = "LR_SJL_ZLCW",
+                text = "|cffABD473爆发全开|r",
+                isButton = true, buttonText = "全部打开", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "一键打开 急速射击 / 种族爆发",
+                onClick = "WR_HunterMMBurstAllOn",
             },
-            -- ★ 循环模式选择（单体/AOE）
             {
-                text = "|cffABD473输出模式|r",
-                menuItems = {
-                    { text = "|cffABD473单体|r" },
-                    { text = "|cffABD473AOE|r" },
-                },
-                tooltipText = "选择输出循环模式\n|cffff0000单体|r：正常单体输出，稳固填充\n|cffff0000AOE|r：只放多重、乱射、爆炸陷阱的极限AOE",
-                saveVariable = "LR_SJL_CYCLE_MODE",
-                defaultID = 1,
+                text = "|cffABD473爆发全关|r",
+                isButton = true, buttonText = "全部关闭", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "一键关闭 急速射击 / 种族爆发",
+                onClick = "WR_HunterMMBurstAllOff",
             },
-            -- ★ 宝宝攻击模式（1=跟随/2=不跟随/3=不控制）
             {
-                text = "|cffABD473宝宝模式|r",
-                menuItems = {
-                    { text = "|cffABD473跟随|r" },
-                    { text = "|cffABD473不跟随|r" },
-                    { text = "|cffABD473不控制|r" },
-                },
-                tooltipText = "选择宝宝控制模式\n|cffff0000跟随|r：自动让宝宝攻击目标并跟随主人（危险目标自动召回）\n|cffff0000不跟随|r：宝宝跟随主人但不自动攻击（黏主人，从战斗中切回会召回）\n|cffff0000不控制|r：宝宝原地待命，完全由玩家手动控制（不攻击不召回）",
-                saveVariable = "LR_SJL_KZBB",
-                defaultID = 1,
+                text = "|cffABD473爆发切换|r",
+                isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "两个爆发开关任意一个开着就全关，全关就全开",
+                onClick = "WR_HunterMMBurstToggle",
             },
-            { text = "|cffABD473打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 50, tooltipText = "施法进度达到该百分比时自动打断（0=关闭，默认50）。开启后输出模式部分会失效（与输出模式互斥）", saveVariable = "LR_SJL_ZDCMSJDD" },
         },
         -- ===== 复选框（CB） =====
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 132208, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000急速射击|r", saveVariable = "LR_SJL_ZDJSSJ", defaultState = true },
-            { row = 1, column = 2, IconID = 135727, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000种族|r", saveVariable = "LR_SJL_ZDZZ", section = "爆发", defaultState = true },
-            { row = 1, column = 3, IconID = 236871, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000速度药水|r", saveVariable = "LR_SJL_ZDSRYS", section = "爆发", defaultState = false },
-            -- ★ 第1行第4列：偷药开关
-            { row = 1, column = 4, IconID = 236871, text = "|cffABD473偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "LR_SJL_TOUYAO", section = "爆发", defaultState = false },
-            -- ★ 第1行第5列：沉默射击（输出模式）
-            { row = 1, column = 5, IconID = 132323, text = "|cffABD473输出|r", tooltipText = "自动|cffff0000沉默射击|r当输出打\n（与打断模式互斥，建议只开一个）", saveVariable = "LR_SJL_ZDCMSJ", defaultState = false },
-            { row = 1, column = 6, IconID = 338666, text = "|cffABD473饰品|r", tooltipText = "自动|cff00adf0饰品|r（爆发/斩杀/DBM倒数时触发）", saveVariable = "LR_SJL_ZDSP", section = "爆发", defaultState = true },
+            -- 功能（右键图标打开额外条件）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Marksmanship", text = "|cffABD473远程技能|r", tooltipText = "远程技能总开关：点图标展开右边一栏，这一页会自动放的远程技能（震荡射击、毒蛇钉刺、奥术射击、瞄准射击、多重射击、召唤雄鹰、狙击）一个一行，勾上的才放。\n\n柱顶的「远程技能」去掉勾 = 这些都不放，只留自动射击和近战技能，想留蓝或只想平射时关掉。\n\n猎人印记、急速射击和插入的技能不受影响。\n宏：/HUNTER_RANGED_MM 切换（后面加 on 开、off 关）", saveVariable = "LR_SJL_RANGED_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterMM then WR_HunterMM.ShowOptions("LR_SJL_RANGED_ON") end end },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Ability_Hunter_RaptorStrike", text = "|cffABD473近战技能|r", tooltipText = "近战技能总开关：点图标展开右边一栏，这一页会自动放的近战技能（猫鼬撕咬、摔绊、猛禽一击）一个一行，勾上的才放。\n\n柱顶的「近战技能」去掉勾 = 这些都不放，贴身时只留近战平砍，想把蓝留给远程技能时关掉。\n宏：/HUNTER_MELEE 切换（后面加 on 开、off 关）", saveVariable = "LR_SJL_MELEE_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterMM then WR_HunterMM.ShowOptions("LR_SJL_MELEE_ON") end end },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Ability_Hunter_BeastCall", text = "|cffABD473宠物|r", tooltipText = "宠物总开关：点图标展开右边一栏。\n\n召唤宠物：没有宠物就召唤；宠物死了就复活（下面选战斗中复活，还是脱战才复活）。\n\n治疗宠物：脱战宠物血量低于拉条就给它放治疗宠物。\n\n柱顶的「宠物」去掉勾 = 这些都不管。\n宏：/HUNTER_PET 切换（后面加 on 开、off 关）", saveVariable = "LR_SJL_PET_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterMM then WR_HunterMM.ShowOptions("LR_SJL_PET_ON") end end },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Ability_Hunter_SniperShot", text = "|cffABD473印记|r", tooltipText = "猎人印记总开关：目标身上没有猎人印记就自动补。\n\n右键：只打首领。\n宏：/HUNTER_MARK 切换（后面加 on 开、off 关）", saveVariable = "LR_SJL_MARK_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterMM then WR_HunterMM.ShowOptions("LR_SJL_MARK_ON") end end },
+            { row = 2, column = 1, IconID = 132293, text = "|cffABD473切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标", saveVariable = "LR_SJL_TAB", section = "功能", defaultState = true },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Ability_Hunter_SniperShot", text = "|cffABD473强击|r", tooltipText = "强击光环总开关：自己身上没有强击光环就自动补（30 分钟团队攻强增益）。\n\n右键：额外条件。\n宏：/HUNTER_QS 切换（后面加 on 开、off 关）", saveVariable = "LR_SJL_QSGH_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterMM then WR_HunterMM.ShowOptions("LR_SJL_QSGH_ON") end end },
 
-            -- 第2行
-            { row = 2, column = 1, IconID = 336779, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000手套|r", saveVariable = "LR_SJL_ZDST", section = "爆发", defaultState = true },
-            { row = 2, column = 2, IconID = 133712, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000炸弹|r", saveVariable = "LR_SJL_ZDZD", defaultState = true },
-            { row = 2, column = 3, IconID = 132188, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000守护切换|r", saveVariable = "LR_SJL_ZDSH", defaultState = true },
-            { row = 2, column = 4, IconID = 132212, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000猎人印记,只对boss生效|r", saveVariable = "LR_SJL_ZDLRYJ", defaultState = true },
+            -- 爆发（截图：急速 / 种族爆发）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Hunter_RapidKilling", text = "|cffABD473急速|r", tooltipText = "自动使用急速射击（CD 好且身上没有急速射击 buff 时）。\n右键：只打首领。\n宏：/HUNTER_RAPID 切换（后面加 on 开、off 关）", saveVariable = "LR_SJL_ZDJSSJ", section = "爆发", defaultState = true,
+              onRightClick = function() if WR_HunterMM then WR_HunterMM.ShowOptions("LR_SJL_ZDJSSJ") end end },
+            { row = 1, column = 2, IconID = 135727, text = "|cffABD473种族爆发|r", tooltipText = "自动使用种族爆发技能", saveVariable = "LR_SJL_ZDZZ", section = "爆发", defaultState = true },
 
-            -- 第3行
-            { row = 3, column = 1, IconID = 132204, text = "|cffABD473指向|r", tooltipText = "自动指向|cffff0000毒蛇钉刺|r", saveVariable = "LR_SJL_ZXDSDC", defaultState = true },
-            { row = 3, column = 2, IconID = 132204, text = "|cffABD473焦点|r", tooltipText = "自动焦点|cffff0000毒蛇钉刺|r", saveVariable = "LR_SJL_JDDSDC", defaultState = true },
-            { row = 3, column = 3, IconID = 132204, text = "|cffABD473目标|r", tooltipText = "自动目标|cffff0000毒蛇钉刺|r", saveVariable = "LR_SJL_MBDSDC", defaultState = true },
-            { row = 3, column = 4, IconID = 132330, text = "|cffABD473屏蔽|r", tooltipText = "议会屏蔽|cffff0000多重射击|r", saveVariable = "LR_SJL_YHDSSJ", defaultState = true },
-            { row = 3, column = 5, IconID = 136047, text = "|cffABD473锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n,这个是TOC的双子自动锁对应目标和ICC议会", saveVariable = "LR_SJL_SUO", defaultState = true },
-
-            -- 第4行            -- ★ 第4行第2列：准备就绪自动使用（优化）
-            { row = 4, column = 2, IconID = 132206, text = "|cffABD473准备\n就绪|r", tooltipText = "自动|cffff0000准备就绪|r,爆发技能冷却时自动刷新\n含DBM倒数提前开功能", saveVariable = "LR_SJL_ZDZBJX", section = "爆发", defaultState = true },
-            { row = 4, column = 3, IconID = 132188, text = "|cffABD473蝰蛇舞|r", tooltipText = "自动|cffff0000蝰蛇舞|r,在射出多重的时候切蝰蛇,在多重击中的时候会到雄鹰,长续航但是会降低dps.如果蓝够的boss不要开", saveVariable = "LR_SJL_ZDSH_KSW", defaultState = false },
-            { row = 4, column = 4, IconID = 135826, text = "|cffABD473全自动|r", tooltipText = "基本无用,推荐手动插入.全自动|cffff0000爆炸陷阱|r,朝鼠标指向的位置扔", saveVariable = "LR_SJL_QZDBZXJ", defaultState = false },
-            { row = 4, column = 5, IconID = 135826, text = "|cffABD473半自动|r", tooltipText = "基本无用,推荐手动插入.半自动|cffff0000爆炸陷阱|r,需要自己按左键", saveVariable = "LR_SJL_BZDBZXJ", defaultState = false },
-
-            -- 第5行
-            { row = 5, column = 1, IconID = 132160, text = "|cffABD473脱战|r", tooltipText = "脱战蝰蛇.满蓝龙鹰", saveVariable = "LR_SJL_TZKS", defaultState = false },
-            { row = 5, column = 2, IconID = 132163, text = "|cffABD473自动|r", tooltipText = "复活宠物", saveVariable = "LR_SJ_FHCW_ZD", defaultState = true },
-            { row = 5, column = 3, IconID = 136020, text = "|cffABD473自动|r", tooltipText = "是否对特定的怪自动凝神", saveVariable = "LR_SJL_ZDNS", defaultState = true },
-            { row = 5, column = 4, IconID = 132180, text = "|cffABD473目标\n的\n目标|r", tooltipText = "给目标的目标上误导", saveVariable = "LR_SJL_WD_TARGETTARGET", defaultState = true },
-            { row = 5, column = 5, IconID = 132180, text = "|cffABD473焦点|r", tooltipText = "给焦点目标上误导", saveVariable = "LR_SJL_WD_FOCUS", defaultState = false },
-
-            -- 第6行
-            { row = 6, column = 1, IconID = 132180, text = "|cffABD473宠物|r", tooltipText = "给宠物目标上误导", saveVariable = "LR_SJL_WD_PET", defaultState = false },
-            { row = 6, column = 2, IconID = 132294, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000逃脱|r", saveVariable = "LR_SJL_CRTT", section = "插入", defaultState = false },
-            { row = 6, column = 3, IconID = 132208, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000急速射击|r", saveVariable = "LR_SJL_CRJSSJ", section = "插入", defaultState = false },
-            { row = 6, column = 4, IconID = 132180, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000误导|r", saveVariable = "LR_SJL_CRWD", section = "插入", defaultState = false },
-            { row = 6, column = 5, IconID = 135826, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000爆炸陷阱|r", saveVariable = "LR_SJL_CRBZXJ", section = "插入", defaultState = false },
-
-            -- 第7行
-            { row = 7, column = 1, IconID = 132222, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000乱射|r", saveVariable = "LR_SJL_CRLS", section = "插入", defaultState = false },
-            { row = 7, column = 2, IconID = 135840, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000冰箱陷阱|r", saveVariable = "LR_SJL_CRBSXJ", section = "插入", defaultState = false },
-            { row = 7, column = 3, IconID = 132206, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000准备就绪|r", saveVariable = "LR_SJL_CRZBJX", section = "爆发", defaultState = false },
-            { row = 7, column = 4, IconID = 132294, text = "|cffABD473瓦格里|r", tooltipText = "插入|cffff0000瓦格里逃脱|r\n使用方法为插入以后按住左键,视野朝崖外", saveVariable = "LR_SJL_CRWGLTT", defaultState = false },
-            -- ★ 第7行第5列：冰冻之箭
-            { row = 7, column = 5, IconID = 135837, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000冰冻之箭|r\n需要鼠标指向目标位置\n适合用于定身特定BOSS技能", saveVariable = "LR_SJL_BZJJ", section = "插入", defaultState = false },
-            -- ★ 自动切目标开关
-            { row = 8, column = 2, IconID = 132580, text = "|cffABD473小吃|r", tooltipText = "自动给宠物吃香辣猛犸小吃", saveVariable = "LR_SJL_XLMMXC", defaultState = false },
-            { row = 8, column = 1, IconID = 132293, text = "|cffABD473切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "LR_SJL_TAB", defaultState = true },
-            -- ★ ⑧ 杀戮停等开关（宝宝平砍状态判断）
-            { row = 8, column = 3, IconID = 132329, text = "|cffABD473杀戮停等|r", tooltipText = "宝宝超过两个实际平砍间隔未攻击当前目标时，杀戮命令停止提示，避免卡路或离开目标后持续挡住杀戮射击（MK原创·非ZZ对齐）", saveVariable = "LR_SWL_SLMK_PINGKAN", defaultState = true },
+            -- 插入（一次性，放完自关）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Fire_Immolation", text = "|cffABD473献祭|r", tooltipText = "插入 献祭陷阱（一次性，放完自关）", saveVariable = "LR_SJL_CRXJ", section = "插入", defaultState = false },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Frost_FrostNova", text = "|cffABD473冰冻|r", tooltipText = "插入 冰冻陷阱（一次性，放完自关）", saveVariable = "LR_SJL_CRBD", section = "插入", defaultState = false },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Frost_FrostBolt02", text = "|cffABD473冰霜|r", tooltipText = "插入 冰霜陷阱（一次性，放完自关）", saveVariable = "LR_SJL_CRBS", section = "插入", defaultState = false },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Ability_GolemThunderClap", text = "|cffABD473震荡|r", tooltipText = "插入 震荡射击（一次性，放完自关）", saveVariable = "LR_SJL_CRZS", section = "插入", defaultState = false },
+            { row = 2, column = 1, IconID = "Interface\\Icons\\Ability_Hunter_DistractingShot", text = "|cffABD473扰乱|r", tooltipText = "插入 扰乱射击（一次性，放完自关）", saveVariable = "LR_SJL_CRRL", section = "插入", defaultState = false },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Ability_Hunter_MendPet", text = "|cffABD473治疗|r", tooltipText = "插入 治疗宠物（一次性，放完自关）", saveVariable = "LR_SJL_CRZL", section = "插入", defaultState = false },
+            { row = 2, column = 3, IconID = "Interface\\Icons\\Ability_Hunter_RapidKilling", text = "|cffABD473急速|r", tooltipText = "插入 急速射击（一次性，放完自关）", saveVariable = "LR_SJL_CRJSSJ", section = "插入", defaultState = false },
+            { row = 2, column = 4, IconID = "Interface\\Icons\\Ability_Hunter_Flare", text = "|cffABD473照明|r", tooltipText = "插入 照明弹（一次性，放完自关）", saveVariable = "LR_SJL_CRZM", section = "插入", defaultState = false },
+            { row = 3, column = 1, IconID = "Interface\\Icons\\Ability_Marksmanship", text = "|cffABD473乱射|r", tooltipText = "插入 乱射（一次性，放完自关）", saveVariable = "LR_SJL_CRLS", section = "插入", defaultState = false },
+            { row = 3, column = 2, IconID = "Interface\\Icons\\Spell_Fire_Explosion", text = "|cffABD473爆炸陷阱|r", tooltipText = "插入 爆炸陷阱（一次性，放完自关）", saveVariable = "LR_SJL_CRBZXJ", section = "插入", defaultState = false },
+            { row = 3, column = 3, IconID = "Interface\\Icons\\Ability_Rogue_FeignDeath", text = "|cffABD473假死|r", tooltipText = "插入 假死（一次性，放完自关）", saveVariable = "LR_SJL_CRJS", section = "插入", defaultState = false },
         },
     },
 
     -- ==========================================================
-    -- 3. 生存专精 (Survival)
+    -- ==========================================================
+    -- 3. 生存专精 (Survival) —— 2026-11-16 按「猪猪 / 彼岸花-无限服 · 生存页」重做
     -- ==========================================================
     ["生存"] = {
         -- ===== 下拉菜单（DM） =====
@@ -289,116 +201,72 @@ Hunter_Menu = {
                 saveVariable = "FANG_ADD_SCLR",
                 defaultID = 1,
             },
-            -- 瞄准 or 多重选择
+            -- 共享冷却：瞄准射击 / 多重射击 共享 6 秒冷却，选优先项
             {
-                text = "|cffABD473瞄准or多重|r",
-                menuItems = { { text = "|cffABD473多重|r" }, { text = "|cffABD473瞄准|r" } },
-                tooltipText = "选择|cffff0000多重|ror|cffff0000瞄准|r",
+                text = "|cffABD473共享冷却|r",
+                menuItems = { { text = "|cffABD473瞄准射击|r" }, { text = "|cffABD473多重射击|r" } },
+                tooltipText = "瞄准射击与多重射击共享6秒冷却。选「瞄准射击」时优先打瞄准，选「多重射击」时优先打多重。",
                 saveVariable = "LR_SCL_DCMZ",
                 defaultID = 1,
             },
-            -- 召唤宠物
+            -- 喝红药（拉条）
             {
-                text = "|cffABD473召唤宠物|r",
-                menuItems = {
-                    { text = "|cffABD4731号|r" }, { text = "|cffABD4732号|r" },
-                    { text = "|cffABD4733号|r" }, { text = "|cffABD4734号|r" },
-                    { text = "|cffABD4735号|r" }, { text = "|cffABD473不召唤|r" },
-                },
-                tooltipText = "无宝宝时自动召唤哪个宝宝",
-                saveVariable = "LR_SC_ZHBB",
-                defaultID = 1,
+                text = "|cffABD473喝红药|r",
+                isSlider = true, minValue = 0, maxValue = 100, valueStep = 5,
+                defaultVal = 30,
+                tooltipText = "血量低于该百分比时自动喝治疗药水（0 = 关闭，默认30）",
+                saveVariable = "LR_SCL_HXY",
             },
-            -- 治疗宠物（滑条）
+            -- 爆发快捷按钮
             {
-                text = "|cffABD473治疗宠物|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 80,
-                tooltipText = "多少血量治疗宠物",
-                saveVariable = "LR_SCL_ZLCW",
+                text = "|cffABD473爆发全开|r",
+                isButton = true, buttonText = "全部打开", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "一键打开 急速射击 / 种族爆发",
+                onClick = "WR_HunterSVBurstAllOn",
             },
-            -- ★ 循环模式选择（单体/AOE）
             {
-                text = "|cffABD473输出模式|r",
-                menuItems = {
-                    { text = "|cffABD473单体|r" },
-                    { text = "|cffABD473AOE|r" },
-                },
-                tooltipText = "选择输出循环模式\n|cffff0000单体|r：正常单体输出，稳固填充\n|cffff0000AOE|r：只放多重、乱射、爆炸陷阱的极限AOE",
-                saveVariable = "LR_SCL_CYCLE_MODE",
-                defaultID = 1,
+                text = "|cffABD473爆发全关|r",
+                isButton = true, buttonText = "全部关闭", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "一键关闭 急速射击 / 种族爆发",
+                onClick = "WR_HunterSVBurstAllOff",
             },
-            -- ★ 宝宝攻击模式（1=跟随/2=不跟随/3=不控制）
             {
-                text = "|cffABD473宝宝模式|r",
-                menuItems = {
-                    { text = "|cffABD473跟随|r" },
-                    { text = "|cffABD473不跟随|r" },
-                    { text = "|cffABD473不控制|r" },
-                },
-                tooltipText = "选择宝宝控制模式\n|cffff0000跟随|r：自动让宝宝攻击目标并跟随主人（危险目标自动召回）\n|cffff0000不跟随|r：宝宝跟随主人但不自动攻击（黏主人，从战斗中切回会召回）\n|cffff0000不控制|r：宝宝原地待命，完全由玩家手动控制（不攻击不召回）",
-                saveVariable = "LR_SCL_KZBB",
-                defaultID = 1,
+                text = "|cffABD473爆发切换|r",
+                isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95,
+                tooltipText = "两个爆发开关任意一个开着就全关，全关就全开",
+                onClick = "WR_HunterSVBurstToggle",
             },
         },
         -- ===== 复选框（CB） =====
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 132208, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000急速射击|r", saveVariable = "LR_SCL_ZDJSSJ", defaultState = true },
-            { row = 1, column = 2, IconID = 135727, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000种族|r", saveVariable = "LR_SCL_ZDZZ", section = "爆发", defaultState = true },
-            { row = 1, column = 3, IconID = 236871, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000速度药水|r", saveVariable = "LR_SCL_ZDSRYS", section = "爆发", defaultState = false },
-            -- ★ 第1行第4列：偷药开关
-            { row = 1, column = 4, IconID = 236871, text = "|cffABD473偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "LR_SCL_TOUYAO", section = "爆发", defaultState = false },
-            { row = 1, column = 6, IconID = 338666, text = "|cffABD473饰品|r", tooltipText = "自动|cff00adf0饰品|r（爆发/斩杀/DBM倒数时触发）", saveVariable = "LR_SCL_ZDSP", section = "爆发", defaultState = true },
+            -- 功能（右键图标打开额外条件）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Marksmanship", text = "|cffABD473远程技能|r", tooltipText = "远程技能总开关：点图标展开右边一栏，这一页会自动放的远程技能（震荡射击、毒蛇钉刺、奥术射击、瞄准射击、多重射击、狙击）一个一行，勾上的才放。\n\n柱顶的「远程技能」去掉勾 = 这些都不放，只留自动射击和近战技能，想留蓝或只想平射时关掉。\n\n猎人印记、急速射击和插入的技能不受影响。\n宏：/HUNTER_RANGED_SV 切换（后面加 on 开、off 关）", saveVariable = "LR_SCL_RANGED_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterSV then WR_HunterSV.ShowOptions("LR_SCL_RANGED_ON") end end },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Ability_Hunter_RaptorStrike", text = "|cffABD473近战技能|r", tooltipText = "近战技能总开关：点图标展开右边一栏，这一页会自动放的近战技能（反击、猫鼬撕咬、陆行鸟踢击、摔绊、猛禽一击）一个一行，勾上的才放。\n\n柱顶的「近战技能」去掉勾 = 这些都不放，贴身时只留近战平砍，想把蓝留给远程技能时关掉。\n宏：/HUNTER_MELEE 切换（后面加 on 开、off 关）", saveVariable = "LR_SCL_MELEE_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterSV then WR_HunterSV.ShowOptions("LR_SCL_MELEE_ON") end end },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Ability_Hunter_BeastCall", text = "|cffABD473宠物|r", tooltipText = "宠物总开关：点图标展开右边一栏。\n\n召唤宠物：没有宠物就召唤；宠物死了就复活（下面选战斗中复活，还是脱战才复活）。\n\n治疗宠物：脱战宠物血量低于拉条就给它放治疗宠物。\n\n柱顶的「宠物」去掉勾 = 这些都不管。\n宏：/HUNTER_PET 切换（后面加 on 开、off 关）", saveVariable = "LR_SCL_PET_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterSV then WR_HunterSV.ShowOptions("LR_SCL_PET_ON") end end },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Ability_Hunter_SniperShot", text = "|cffABD473印记|r", tooltipText = "猎人印记总开关：目标身上没有猎人印记就自动补。\n\n右键：只打首领。\n宏：/HUNTER_MARK 切换（后面加 on 开、off 关）", saveVariable = "LR_SCL_MARK_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_HunterSV then WR_HunterSV.ShowOptions("LR_SCL_MARK_ON") end end },
+            { row = 2, column = 1, IconID = 132293, text = "|cffABD473切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标", saveVariable = "LR_SCL_TAB", section = "功能", defaultState = true },
 
-            -- 第2行
-            { row = 2, column = 1, IconID = 336779, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000手套|r", saveVariable = "LR_SCL_ZDST", section = "爆发", defaultState = true },
-            { row = 2, column = 2, IconID = 133712, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000炸弹|r", saveVariable = "LR_SCL_ZDZD", defaultState = true },
-            { row = 2, column = 3, IconID = 132188, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000守护切换|r", saveVariable = "LR_SCL_ZDSH", defaultState = true },
-            { row = 2, column = 4, IconID = 132212, text = "|cffABD473自动|r", tooltipText = "自动|cffff0000猎人印记,只对boss生效|r", saveVariable = "LR_SCL_ZDLRYJ", defaultState = true },
+            -- 爆发（截图：急速 / 种族爆发）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Hunter_RapidKilling", text = "|cffABD473急速|r", tooltipText = "自动使用急速射击（CD 好且身上没有急速射击 buff 时）。\n右键：只打首领。\n宏：/HUNTER_RAPID 切换（后面加 on 开、off 关）", saveVariable = "LR_SCL_ZDJSSJ", section = "爆发", defaultState = true,
+              onRightClick = function() if WR_HunterSV then WR_HunterSV.ShowOptions("LR_SCL_ZDJSSJ") end end },
+            { row = 1, column = 2, IconID = 135727, text = "|cffABD473种族爆发|r", tooltipText = "自动使用种族爆发技能", saveVariable = "LR_SCL_ZDZZ", section = "爆发", defaultState = true },
 
-            -- 第3行
-            { row = 3, column = 1, IconID = 132204, text = "|cffABD473指向|r", tooltipText = "自动指向|cffff0000毒蛇钉刺|r", saveVariable = "LR_SCL_ZXDSDC", defaultState = true },
-            { row = 3, column = 2, IconID = 132204, text = "|cffABD473焦点|r", tooltipText = "自动焦点|cffff0000毒蛇钉刺|r", saveVariable = "LR_SCL_JDDSDC", defaultState = true },
-            { row = 3, column = 3, IconID = 132204, text = "|cffABD473目标|r", tooltipText = "自动目标|cffff0000毒蛇钉刺|r", saveVariable = "LR_SCL_MBDSDC", defaultState = true },
-            { row = 3, column = 4, IconID = 132330, text = "|cffABD473屏蔽|r", tooltipText = "议会屏蔽|cffff0000多重射击|r", saveVariable = "LR_SCL_YHDSSJ", defaultState = true },
-            { row = 3, column = 5, IconID = 136047, text = "|cffABD473锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n,这个是TOC的双子自动锁对应目标和ICC议会", saveVariable = "LR_SCL_SUO", defaultState = false },
-
-            -- 第4行
-            { row = 4, column = 1, IconID = 132188, text = "|cffABD473蝰蛇舞|r", tooltipText = "自动|cffff0000蝰蛇舞|r,在射出多重的时候切蝰蛇,在多重击中的时候会到雄鹰,长续航但是会降低dps.如果蓝够的boss不要开", saveVariable = "LR_SCL_ZDSH_KSW", defaultState = false },
-            { row = 4, column = 2, IconID = 135826, text = "|cffABD473全自动|r", tooltipText = "基本无用,推荐手动插入.全自动|cffff0000爆炸陷阱|r,朝鼠标指向的位置扔", saveVariable = "LR_SCL_QZDBZXJ", defaultState = false },
-            { row = 4, column = 3, IconID = 135826, text = "|cffABD473半自动|r", tooltipText = "基本无用,推荐手动插入.半自动|cffff0000爆炸陷阱|r,需要自己按左键", saveVariable = "LR_SCL_BZDBZXJ", defaultState = false },
-            { row = 4, column = 4, IconID = 132163, text = "|cffABD473自动|r", tooltipText = "复活宠物", saveVariable = "LR_SC_FHCW_ZD", defaultState = true },
-            { row = 4, column = 5, IconID = 136020, text = "|cffABD473自动|r", tooltipText = "是否对特定的怪自动凝神", saveVariable = "LR_SCL_ZDNS", defaultState = true },
-
-            -- 第5行
-            { row = 5, column = 1, IconID = 132160, text = "|cffABD473脱战|r", tooltipText = "脱战蝰蛇.满蓝龙鹰", saveVariable = "LR_SCL_TZKS", defaultState = false },
-            { row = 5, column = 2, IconID = 132180, text = "|cffABD473目标\n的\n目标|r", tooltipText = "给目标的目标上误导", saveVariable = "LR_SCL_WD_TARGETTARGET", defaultState = true },
-            { row = 5, column = 3, IconID = 132180, text = "|cffABD473焦点|r", tooltipText = "给焦点目标上误导", saveVariable = "LR_SCL_WD_FOCUS", defaultState = false },
-            { row = 5, column = 4, IconID = 132180, text = "|cffABD473宠物|r", tooltipText = "给宠物目标上误导", saveVariable = "LR_SCL_WD_PET", defaultState = false },
-            { row = 5, column = 5, IconID = 132222, text = "|cffABD473无脑|r", tooltipText = "无脑乱射，满足条件就自动放", saveVariable = "LR_SCL_WLS", defaultState = false },
-
-            -- 第6行（插入类技能）
-            { row = 6, column = 1, IconID = 132294, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000逃脱|r", saveVariable = "LR_SCL_CRTT", section = "插入", defaultState = false },
-            { row = 6, column = 2, IconID = 132208, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000急速射击|r", saveVariable = "LR_SCL_CRJSSJ", section = "插入", defaultState = false },
-            { row = 6, column = 3, IconID = 132180, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000误导|r", saveVariable = "LR_SCL_CRWD", section = "插入", defaultState = false },
-            { row = 6, column = 4, IconID = 135826, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000爆炸陷阱|r", saveVariable = "LR_SCL_CRBZXJ", section = "插入", defaultState = false },
-            { row = 6, column = 5, IconID = 132222, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000乱射|r", saveVariable = "LR_SCL_CRLS", section = "插入", defaultState = false },
-
-            -- 第7行
-            { row = 7, column = 1, IconID = 136181, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000黑箭|r", saveVariable = "LR_SCL_CRHJ", section = "插入", defaultState = false },
-            { row = 7, column = 2, IconID = 135840, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000冰箱陷阱|r", saveVariable = "LR_SCL_CRBSXJ", section = "插入", defaultState = false },
-            { row = 7, column = 3, IconID = 132294, text = "|cffABD473瓦格里|r", tooltipText = "插入|cffff0000瓦格里逃脱|r\n使用方法为插入以后按住左键,视野朝崖外", saveVariable = "LR_SCL_CRWGLTT", defaultState = false },
-            -- ★ 第7行第4列：冰冻之箭
-            { row = 7, column = 4, IconID = 135837, text = "|cffABD473插入|r", tooltipText = "插入|cffff0000冰冻之箭|r\n需要鼠标指向目标位置\n适合用于定身特定BOSS技能", saveVariable = "LR_SCL_BZJJ", section = "插入", defaultState = false },
-            -- ★ 自动切目标开关
-            { row = 8, column = 2, IconID = 132580, text = "|cffABD473小吃|r", tooltipText = "自动给宠物吃香辣猛犸小吃", saveVariable = "LR_SCL_XLMMXC", defaultState = false },
-            { row = 8, column = 1, IconID = 132293, text = "|cffABD473切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "LR_SCL_TAB", defaultState = true },
-            -- ★ ⑧ 杀戮停等开关（宝宝平砍状态判断）
-            { row = 8, column = 3, IconID = 132329, text = "|cffABD473杀戮停等|r", tooltipText = "宝宝超过两个实际平砍间隔未攻击当前目标时，杀戮命令停止提示，避免卡路或离开目标后持续挡住杀戮射击（MK原创·非ZZ对齐）", saveVariable = "LR_SWL_SLMK_PINGKAN", defaultState = true },
+            -- 插入（一次性，放完自关）
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Fire_Immolation", text = "|cffABD473献祭|r", tooltipText = "插入 献祭陷阱（一次性，放完自关）", saveVariable = "LR_SCL_CRXJ", section = "插入", defaultState = false },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Frost_FrostNova", text = "|cffABD473冰冻|r", tooltipText = "插入 冰冻陷阱（一次性，放完自关）", saveVariable = "LR_SCL_CRBD", section = "插入", defaultState = false },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Frost_FrostBolt02", text = "|cffABD473冰霜|r", tooltipText = "插入 冰霜陷阱（一次性，放完自关）", saveVariable = "LR_SCL_CRBS", section = "插入", defaultState = false },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Ability_GolemThunderClap", text = "|cffABD473震荡|r", tooltipText = "插入 震荡射击（一次性，放完自关）", saveVariable = "LR_SCL_CRZS", section = "插入", defaultState = false },
+            { row = 2, column = 1, IconID = "Interface\\Icons\\Ability_Hunter_DistractingShot", text = "|cffABD473扰乱|r", tooltipText = "插入 扰乱射击（一次性，放完自关）", saveVariable = "LR_SCL_CRRL", section = "插入", defaultState = false },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Ability_Hunter_MendPet", text = "|cffABD473治疗|r", tooltipText = "插入 治疗宠物（一次性，放完自关）", saveVariable = "LR_SCL_CRZL", section = "插入", defaultState = false },
+            { row = 2, column = 3, IconID = "Interface\\Icons\\Ability_Hunter_RapidKilling", text = "|cffABD473急速|r", tooltipText = "插入 急速射击（一次性，放完自关）", saveVariable = "LR_SCL_CRJSSJ", section = "插入", defaultState = false },
+            { row = 2, column = 4, IconID = "Interface\\Icons\\Ability_Hunter_Flare", text = "|cffABD473照明|r", tooltipText = "插入 照明弹（一次性，放完自关）", saveVariable = "LR_SCL_CRZM", section = "插入", defaultState = false },
+            { row = 3, column = 1, IconID = "Interface\\Icons\\Ability_Marksmanship", text = "|cffABD473乱射|r", tooltipText = "插入 乱射（一次性，放完自关）", saveVariable = "LR_SCL_CRLS", section = "插入", defaultState = false },
+            { row = 3, column = 2, IconID = "Interface\\Icons\\Spell_Fire_Explosion", text = "|cffABD473爆炸陷阱|r", tooltipText = "插入 爆炸陷阱（一次性，放完自关）", saveVariable = "LR_SCL_CRBZXJ", section = "插入", defaultState = false },
+            { row = 3, column = 3, IconID = "Interface\\Icons\\Ability_Rogue_FeignDeath", text = "|cffABD473假死|r", tooltipText = "插入 假死（一次性，放完自关）", saveVariable = "LR_SCL_CRJS", section = "插入", defaultState = false },
         },
     },
 }

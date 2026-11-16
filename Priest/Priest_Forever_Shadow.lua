@@ -73,13 +73,13 @@ function WR_PriestForeverShadow()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("吸血鬼的拥抱") and WR_SpellUsable("吸血鬼的拥抱", true) then
-        if WR_ColorFrame_ShowSkill("吸血鬼的拥抱", 305) then return true end
+        if WR_ColorFrame_ShowSkill("吸血鬼的拥抱", 10) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("沉默") and WR_SpellUsable("沉默", true) then
-        if WR_ColorFrame_ShowSkill("沉默", 306) then return true end
+        if WR_ColorFrame_ShowSkill("沉默", 80) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("暗影形态") and WR_SpellUsable("暗影形态", true) then
-        if WR_ColorFrame_ShowSkill("暗影形态", 307) then return true end
+        if WR_ColorFrame_ShowSkill("暗影形态", 8) then return true end
     end
     return false
 end

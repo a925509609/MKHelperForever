@@ -3840,6 +3840,7 @@ local CoreDefaults = {
     FrameAlpha = 100,
     ChatNoticeMode = 2,
     ScreenTextNotice = false,  -- ★ 2026-11-11：屏幕文字提示总闸，默认全部关闭（/screentip on 或面板复选框开启）
+    ColorBlockNameShow = true,  -- ★ 2026-11-17：色块下方技能名标签（默认显示）
     MONSTER_BLOCK_ENABLED = false,  -- 怪物屏蔽总开关（原 WCL 冲分模式已并入此开关）
     DBM_PREPULL_POTION = false,
     TOUYAO_TIME = 3,       -- 全职业偷药/爆发预开窗口（DBM倒数秒数，0-3 可调，默认3）
@@ -3869,7 +3870,7 @@ local CoreDefaults = {
     DZ_CS_TAB = false,      -- 奇袭贼 自动切目标
     DZ_ZD_TAB = false,      -- 战斗贼 自动切目标
     DZ_MR_TAB = false,      -- 敏锐贼 自动切目标
-    YD_TAB = false,         -- 野性德(猫) 自动切目标
+    YD_TAB = true,          -- 野性德(猫) 自动切目标（2026-11-16 按彼岸花野性页截图默认开启）
     SM_ZQ_TAB = false,      -- 增强萨 自动切目标
     -- 远程DPS（默认开启）
     PH_TAB = true,          -- 平衡德 自动切目标

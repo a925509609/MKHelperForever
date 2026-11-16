@@ -4,7 +4,7 @@
 --   功能 / 插入 / 爆发 三块（本次优化交付）
 -- ------------------------------------------------------------
 -- 交付：功能·插入·爆发模块 + 天赋技能兼容核对
--- 落地：由整合者在 MKHelperForever.toc 追加本文件一行（见补丁 A）
+-- 落地：已于 2026-11-16 接入 MKHelperForever.toc（紧跟 Priest_Forever_Discipline.lua）
 --
 -- 【硬约束 / 与现有架构的关系】
 -- 1. 加血方式 100% 沿用「焦点权重 + 治疗法术」：本文件不重写
@@ -25,13 +25,12 @@
 --    PigSet(## SavedVariablesPerCharacter: PigSet)、JL_* 前缀、WR_* 函数。
 --    未在插件既有代码/客户端实测报告中出现的 spellID 一律不臆造。
 --
--- 【补丁 A · MKHelperForever.toc】
---   在「# 4. 职业模块」段，紧跟
+-- 【补丁 A · MKHelperForever.toc（已完成 2026-11-16）】
+--   已登记在「# 4. 职业模块」段，紧跟
 --       Priest\Priest_Forever_Discipline.lua
---   之后新增一行：
+--   之后：
 --       Priest\Priest_Forever_Discipline_Features.lua
 --   必须晚于 Priest_Forever_Discipline.lua（本文件要 hook 它的全局函数）。
---   ★ 本补丁未由我改动 .toc（避免与整合者/其他模块并行写冲突）。
 --
 -- 【精简兼容表（详见交付文档；标「待核实」者不得当既定事实使用）】
 --   苦修       Penance            戒律天赋  ID 1240720(7位新增段,SkillRegistry) 存在/天赋
@@ -89,10 +88,10 @@ local SLOT = {
     ["坚韧祷言"]   = 51,  -- :54  "/cast [@focus] 坚韧祷言"
     ["心灵之火"]   = 31,  -- :34  "/CAST [nochanneling:暗言术：渊]心灵之火"
     ["暗言术：灭"] = 87,  -- :90  "/cast 暗言术：灭"
-    ["能量灌注"]   = 302, -- WR_SkillColor["PRIEST"] 既有登记
-    ["神圣新星"]   = 303,
-    ["心灵专注"]   = 301,
-    ["联结治疗"]   = 304,
+    ["能量灌注"]   = 149, -- Priest_Macros.lua:152 ALT-SHIFT-,（原 302 越界，2026-11-16 修正）
+    ["神圣新星"]   = 49,  -- Priest_Macros.lua SHIFT-F12（原 303 越界，宏原为空槽，2026-11-16 补）
+    ["心灵专注"]   = 23,  -- Priest_Macros.lua:26 ALT-NUMPAD3（原 301 越界，2026-11-16 修正）
+    ["联结治疗"]   = 56,  -- Priest_Macros.lua:59 CTRL-F6（原 304 越界，2026-11-16 修正）
     ["治疗祷言"]   = 53,
     ["苦修"]       = 54,
     ["愈合祷言"]   = 58,
@@ -100,9 +99,8 @@ local SLOT = {
 }
 -- 惩击：Priest_Macros.lua 全文件无 WR_CreateMacro 绑定、WR_SkillColor 亦无登记，
 --      故 SLOT["惩击"] 故意留空 → 见补丁 C 补宏，补之前不点亮(不猜槽位)。
--- 301~304 超出 Priest_Macros.lua 注释所称的 1-199 职业槽范围：这是既有代码
---      事实(现有 Priest_Forever_Holy.lua 已用 303/304)，本文件照用不臆改，
---      是否有对应 AHK 按键绑定标「待核实」。
+-- 301~304 为历史越界槽（ColorTable 只有 1~240，会被 WR_ColorFrame_ShowSkill
+--      直接拦截）；2026-11-16 已按当前 Priest_Macros.lua 的真实宏槽改回 23/149/49/56。
 
 local RACE_BURST_SLOT = 181  -- Priest_Macros.lua 槽位181 / ALT-CTRL-SHIFT-PAGEDOWN
                              -- 种族三连宏(血性狂怒/狂暴/狮心)；

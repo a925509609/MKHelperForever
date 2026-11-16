@@ -23,7 +23,7 @@ function WR_PriestForeverHoly()
 
     -- ===== 1. 紧急救场 =====
     if lowHP < 0.30 and WR_SpellUsable("守护之魂", true) then
-        if WR_ColorFrame_ShowSkill("守护之魂", 187) then return true end
+        if WR_ColorFrame_ShowSkill("守护之魂", 64) then return true end
     end
 
     -- ===== 2. 群体治疗 =====
@@ -60,10 +60,10 @@ function WR_PriestForeverHoly()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("神圣新星") and WR_SpellUsable("神圣新星", true) then
-        if WR_ColorFrame_ShowSkill("神圣新星", 303) then return true end
+        if WR_ColorFrame_ShowSkill("神圣新星", 49) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("联结治疗") and WR_SpellUsable("联结治疗", true) then
-        if WR_ColorFrame_ShowSkill("联结治疗", 304) then return true end
+        if WR_ColorFrame_ShowSkill("联结治疗", 56) then return true end
     end
     return false
 end

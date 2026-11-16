@@ -50,7 +50,7 @@ function WR_DruidGuardian()
         if WR_SoD_HasRune("DRUID", "Mangle")
            and WR_GetUnitDebuffTime("target", "裂伤") == 0
            and WR_SpellUsable("裂伤", true) then
-            if WR_ColorFrame_ShowSkill("裂伤", 137) then return true end
+            if WR_ColorFrame_ShowSkill("裂伤(熊)", 30) then return true end
         end
 
         -- 4.3 重殴（Maul；怒气填充）

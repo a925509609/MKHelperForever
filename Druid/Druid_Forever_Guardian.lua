@@ -45,7 +45,7 @@ function WR_DruidForeverGuardian()
         -- 4.2 裂伤（Mangle 手符文；保持 debuff 增伤）
         if WR_GetUnitDebuffTime("target", "裂伤") == 0
            and WR_SpellUsable("裂伤", true) then
-            if WR_ColorFrame_ShowSkill("裂伤", 137) then return true end
+            if WR_ColorFrame_ShowSkill("裂伤(熊)", 30) then return true end
         end
 
         -- 4.3 重殴（Maul；怒气填充）
@@ -55,7 +55,7 @@ function WR_DruidForeverGuardian()
 
         -- 4.4 痛击（Swipe；3+ 敌 AoE 仇恨）
         if UnitCount8 >= 3 and WR_SpellUsable("痛击", true) then
-            if WR_ColorFrame_ShowSkill("痛击", 144) then return true end
+            if WR_ColorFrame_ShowSkill("痛击", 197) then return true end
         end
 
         -- 4.5 挑战咆哮（OT 时嘲讽；需手动或 PigSet 开）
@@ -67,10 +67,10 @@ function WR_DruidForeverGuardian()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("野性冲锋") and WR_SpellUsable("野性冲锋", true) then
-        if WR_ColorFrame_ShowSkill("野性冲锋", 305) then return true end
+        if WR_ColorFrame_ShowSkill("野性冲锋", 196) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("狂暴") and WR_SpellUsable("狂暴", true) then
-        if WR_ColorFrame_ShowSkill("狂暴", 306) then return true end
+        if WR_ColorFrame_ShowSkill("狂暴", 3) then return true end
     end
     return false
 end

@@ -66,13 +66,13 @@ function WR_RogueForeverCombat()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("还击") and WR_SpellUsable("还击", true) then
-        if WR_ColorFrame_ShowSkill("还击", 303) then return true end
+        if WR_ColorFrame_ShowSkill("还击", 59) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("剑刃乱舞") and WR_SpellUsable("剑刃乱舞", true) then
-        if WR_ColorFrame_ShowSkill("剑刃乱舞", 304) then return true end
+        if WR_ColorFrame_ShowSkill("剑刃乱舞", 60) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("冲动") and WR_SpellUsable("冲动", true) then
-        if WR_ColorFrame_ShowSkill("冲动", 305) then return true end
+        if WR_ColorFrame_ShowSkill("冲动", 37) then return true end
     end
     return false
 end

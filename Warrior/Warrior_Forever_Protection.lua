@@ -1,13 +1,15 @@
 -- ============================================================
 -- Warrior Forever · Protection 专精循环（60级 / 无限服）
 -- ------------------------------------------------------------
--- 2026-11-15 按「彼岸花-无限服 · 防战页」重做：
---   核心：盾牌猛击 > 复仇 > 破甲攻击（5层/续破）> 撕裂 > 雷霆一击 > 挫志怒吼
---         > 乘胜追击（自己血量低于拉条）> 鲁莽挥击 > 顺劈斩/英勇打击（怒气拉条）
---   保命：破釜沉舟 / 盾墙 / 喝红药 / 盾牌格挡（多目标·卡CD·血量）
+-- 2026-11-16 按「猪猪 / 彼岸花-无限服 · 防战页」同步：
+--   核心：盾牌猛击 > 复仇 > 破甲攻击（只打1破/高优先/低优先/续破）> 撕裂
+--         > 雷霆一击 > 挫志怒吼 > 乘胜追击（自己血量低于拉条）
+--         > 鲁莽挥击 > 顺劈斩/英勇打击（怒气拉条）
+--   保命：破釜沉舟 / 喝红药 / 盾牌格挡（多目标·卡CD·血量）
+--   爆发：种族爆发（全开/全关/切换按钮）
 --   功能：切姿态 / 战斗怒吼 / 切换目标 / 嘲讽 / 血性狂暴
---   插入：反击风暴 / 震荡猛击 / 挑战怒吼 / 盾墙 / 挫志怒吼 /
---         拦截 / 惩戒痛击 / 狂暴之怒 / 缴械（一次性，放完自关）
+--   插入：反击 / 震荡 / 挑战 / 盾墙 / 挫志怒吼 / 拦截 / 惩戒痛击 / 狂暴之怒
+--         （一次性，放完自关；80 级遗留的英勇投掷 / 缴械 / 碎裂投掷 / 自动盾墙已下线）
 --
 -- 数据依据：
 --   · 当前客户端 60 级法术书（DungeonsForeverSpell/Core/Data/Data_SpellBook.lua
@@ -91,27 +93,12 @@ function WR_WarriorForeverProtection()
         if WP.Show("破釜沉舟", 30) then return true end
     end
 
-    -- 自动盾墙：面板下拉 1~9 = 10%~90%，10 = 禁用
-    local swStep = tonumber(PigSet.FZ_KG_SHIELDWALL) or 3
-    if swStep > 0 and swStep < 10 and PlayerHP < swStep / 10 and WR_SpellUsable("盾墙", true) then
-        if WP.Show("盾墙", 47) then return true end
-    end
-
     -- 喝红药：血量低于拉条且药水可用
     local hxyHP = WP.Val("FZ_HXY", 30)
     if hxyHP > 0 and PlayerHP < hxyHP / 100 and type(WR_Use_ZLYS) == "function" then
         local okUse, canUse = pcall(WR_Use_ZLYS)
         if okUse and canUse == true then
             if WP.Show("治疗药水", 73) then return true end
-        end
-    end
-
-    -- 狂暴之怒解恐惧 / 昏迷（旧功能，默认开）
-    if PigSet.FZ_KBZN ~= false and WR_SpellUsable("狂暴之怒", true) then
-        local fear = WR_GetUnitDebuffTime("player", "恐惧") > 0
-        local stun = WR_GetUnitDebuffTime("player", "昏迷") > 0
-        if fear or stun then
-            if WP.Show("狂暴之怒(解控)", 58) then return true end
         end
     end
 
@@ -123,13 +110,6 @@ function WR_WarriorForeverProtection()
     if WP.On("FZ_FJFB_CR", false) and WP.InsertOnce("FZ_FJFB_CR", "反击风暴", 14) then return true end
     if WP.On("FZ_CZNH_CR", false) and WP.InsertOnce("FZ_CZNH_CR", "挫志怒吼", 25) then return true end
     if WP.On("FZ_KBZN_CR", false) and WP.InsertOnce("FZ_KBZN_CR", "狂暴之怒", 11) then return true end
-
-    -- 插入缴械：仅人型 / 野兽
-    if WP.On("FZ_JF_CR", false) then
-        local ct = WP.CreatureType()
-        local disarmable = (ct == "人型" or ct == "Humanoid" or ct == "野兽" or ct == "Beast")
-        if disarmable and WP.InsertOnce("FZ_JF_CR", "缴械", 74) then return true end
-    end
 
     -- 插入拦截：8~25 码；先切战斗姿态再拦截，放完由「进战切防御」切回
     if WP.On("FZ_JL_CR", false) and TargetRange and TargetRange > 8 and TargetRange <= 25 then
@@ -182,17 +162,15 @@ function WR_WarriorForeverProtection()
         if WP.Show("盾牌格挡", 31) then return true end
     end
 
+    -- 种族爆发：面板「种族爆发」勾选时，种族爆发技能可用就提示（宏 181）
+    if WP.RacialBurstWanted() then
+        if WP.Show("种族爆发", 181) then return true end
+    end
+
     -- ===== 10.5 自动攻击 =====
     if WP.AutoAttack() then return true end
 
-    -- ===== 11. 英勇投掷（目标 >8 码或目标不是自己，旧功能）=====
-    if WP.On("FZ_YYTZ", true) and TargetRange and TargetRange > 8 and TargetRange <= 30 then
-        if WR_SpellUsable("英勇投掷", true) then
-            if WP.Show("英勇投掷", 6) then return true end
-        end
-    end
-
-    -- ===== 12. 近战核心 =====
+    -- ===== 11. 近战核心 =====
     local inRange = (TargetRange == nil) or (TargetRange <= 5) or (TargetRange >= 900)
 
     if inRange then

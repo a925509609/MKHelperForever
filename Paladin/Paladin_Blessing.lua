@@ -13,8 +13,8 @@
 -- · 小队：一人一行，加普通祝福；没单独点过的人按团队那张职业表加；
 --   点「无」= 这个人不加。
 -- · 团队：一个职业一行，加强效祝福。
--- · 每段标题前面的勾 = 这种状态下补不补（比如去掉「团队」的勾，
---   进了团就不自动补）。
+-- · 每段标题前面的勾 = 该段的祝福对象补不补；三段互相独立。
+--   比如去掉「团队」的勾：团队队友不补，但「个人」段仍按自己的勾选生效。
 -- · 身上没有或快到期才补，别的圣骑士加了同一种也算有；
 --   战斗中、骑着坐骑、吃喝时不补；补祝福全程不占用游戏焦点。
 -- · 额外条件：总闸「祝福」。
@@ -596,6 +596,8 @@ function WR_PaladinBlessing_UnitPick(unit, mode, classToken)
     if mode == "solo" then
         return tonumber(c.soloPick) or 0, false
     elseif mode == "party" then
+        -- ★ 2026-11-16：个人段没勾 → 自己不再参与祝福队列（Auto 也不会把自己放进 units）。
+        if unit == "player" and c.solo ~= true then return 0, false end
         local name = WR_PaladinBlessing_UnitName(unit)
         local explicit = name and tonumber(c.partyPick[name]) or nil
         if explicit ~= nil then
@@ -614,6 +616,8 @@ function WR_PaladinBlessing_UnitPick(unit, mode, classToken)
         local byClass = classToken and tonumber(c.raidPick[classToken]) or 0
         return byClass or 0, false
     elseif mode == "raid" then
+        -- ★ 2026-11-16：个人段没勾 → 自己在团队里也不再参与。
+        if unit == "player" and c.solo ~= true then return 0, true end
         -- ★ 2026-11-12 修复一「团队裹自己不跟随单人行选择」：
         --   团队模式原来只按职业表 raidPick[classToken] 算自己 → 单人行（行标签
         --   就是角色名）选的格子被完全忽略，与小队修复前同样的表现。
@@ -1514,20 +1518,24 @@ function WR_PaladinBlessing_Auto()
     if WR_PaladinBlessing_Blocked() then return false end
 
     local mode, count = WR_PaladinBlessing_GroupState()
-    -- 每段标题前面的勾 = 这种状态下补不补
-    if mode == "solo" and c.solo ~= true then return false end
-    if mode == "party" and c.party ~= true then return false end
-    if mode == "raid" and c.raid ~= true then return false end
 
-    -- 目标单位列表（自己在最前，保证优先给自己补）
-    local units = { "player" }
-    if mode == "party" then
+    -- ★★★ 2026-11-16 修复「只勾个人、小队不勾 → 个人祝福不生效」：
+    --   段勾选只决定该段的目标是否参与本轮，不能按「当前队伍状态」整体短路。
+    --   旧写法 mode=="party" and c.party~=true 直接 return false，把单人段（自己）
+    --   也一起挡掉了 —— 玩家在小队里只勾「个人」时什么都不补，个人选的祝福失效。
+    --   现在：单人段独立生效（player 永远第一优先），小队/团队段按各自勾选追加。
+    local units = {}
+    if c.solo == true then
+        units[#units + 1] = "player"       -- 单人段：自己（任何队伍状态下都生效）
+    end
+    if mode == "party" and c.party == true then
         for i = 1, 4 do units[#units + 1] = "party" .. i end
-    elseif mode == "raid" then
+    elseif mode == "raid" and c.raid == true then
         local n = count
         if n > 25 then n = 25 end                              -- 焦点宏覆盖 raid1~25
         for i = 1, n do units[#units + 1] = "raid" .. i end
     end
+    if #units == 0 then return false end
 
     -- ★★★ 2026-11-12 用户口径「脱战了没有第一时间补祝福」「给队友加也是这样，
     --   补的时机太晚」：GCD 间隔闸。
@@ -1787,7 +1795,7 @@ function WR_PaladinBlessing_BuildFrame()
         .. "（力量 / 智慧 / 王者），每行只能亮一个，再点一下取消。\n"        .. "单人：给自己加（普通祝福）。\n"
         .. "小队：一人一行，加普通祝福；没单独点过的人按团队那张职业表加，点「无」= 这个人不加。\n"
         .. "团队：一个职业一行，加强效祝福。\n"
-        .. "每段标题前面的勾 = 这种状态下补不补（比如去掉「团队」的勾，进了团就不自动补）。\n"
+        .. "每段标题前面的勾 = 该段对象补不补；三段互相独立（去掉「小队」只停队友，个人段仍按自己的勾选生效）。\n"
         .. "身上没有或快到期才补，别的圣骑士加了同一种也算有；战斗中、骑着坐骑、吃喝时不补。"
         .. "补祝福不占用焦点：单人直接对自己施放，小队/团队由直施宏指向对应队友。\n"
         .. "★ 距离条件：队友不在祝福射程内（普通祝福 30 码 / 强效祝福 40 码）时"
@@ -1828,13 +1836,13 @@ function WR_PaladinBlessing_BuildFrame()
         "不勾选时整个自动补祝福功能不生效", "enable")
 
     local soloChk = WR_PaladinBlessing_MakeCheck(content, 18, -ySolo, "单人（普通祝福）当前",
-        "去掉勾：单人状态下不自动补祝福", "solo")
+        "去掉勾：自己的个人祝福不自动补", "solo")
     local soloRow = WR_PaladinBlessing_MakeRow(content, 42, -ySoloRow,
         UnitName and (select(1, UnitName("player")) or "当前角色") or "当前角色",
         "solo", function() return nil end)
 
     local partyChk = WR_PaladinBlessing_MakeCheck(content, 18, -yParty, "小队（普通祝福，一人一行）",
-        "去掉勾：小队状态下不自动补祝福", "party")
+        "去掉勾：小队队友不自动补祝福（个人段仍独立生效）", "party")
     local partyNote = WR_PaladinBlessing_MakeFontString(content,
         "进了小队才列出队友；没单独点的人按下面的职业表", 12, 0.6, 0.6, 0.6, 360)
     partyNote:SetPoint("TOPLEFT", content, "TOPLEFT", 42, -yPartyNote)
@@ -1860,7 +1868,7 @@ function WR_PaladinBlessing_BuildFrame()
     -- 团队段
     local yRaid = yPartyRow0 + 4 * WR_PAL_BLESS_ROW_H + 18
     local raidChk = WR_PaladinBlessing_MakeCheck(content, 18, -yRaid, "团队（强效祝福，一个职业一行）",
-        "去掉勾：进了团队也不自动补祝福", "raid")
+        "去掉勾：团队队友不自动补祝福（个人段仍独立生效）", "raid")
     local yRaidRow0 = yRaid + 28
     local raidRows = {}
     for i = 1, #WR_PAL_BLESS_CLASSES do

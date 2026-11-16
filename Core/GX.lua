@@ -3,7 +3,7 @@
 -- ==========================================
 
 -- 当前版本号（用于显示和哈希校验）
-local CurrentVersion = "2026-8-30"
+local CurrentVersion = "2026-11-17"
 
 -- 销售标识（防盗版标记）
 local _GxSaleTag = "9"
@@ -15,6 +15,182 @@ local FontSize = 16
 -- 更新日志正文（按时间倒序排列）
 -- ==========================================
 local UpdateContent = [[
+
+【全局】2026-11-17（色块下方显示对应技能名）
+- 用户口径：1级小号猎人看到左上角一直亮着的色块，不知道是什么技能；要求色块都写上对应技能。
+- 实现（Core/UI_ColorFrame.lua / Core/UI_ColorFrame_1.lua）：每个色块（左上/右上）的 FontString 改为锚定在 42×42 色块区（含 2px 黑保护底）的下方，绝不压住 AHK 主采样点 (1,1) 与备用采样点；字号 10、白字黑描边。WR_ShowColorFrame 写入技能名（「指向保护/填充奉献」等描述型提示映射为真实技能名），默认常显。
+- 开关：PigSet.ColorBlockNameShow（默认开，Core/ZZ_Features_Migration 的 CoreDefaults 已登记），与「屏幕文字提示」总闸独立；置 false 即隐藏色块技能名。
+- 结论：1 级猎人左上角常亮色块 = 槽位 40 = 自动射击（Auto Shot）。
+
+【防骑】2026-11-17（清洁术战斗内不驱散疾病/中毒：引擎级「玩家本人可驱散」探测容器）
+- 用户口径：骑士清洁术还是无法在战斗中驱散疾病和中毒（截图「感染之伤」法术ID 3427，类型：疾病，剩余5分钟）。
+- 根因：12.x 战斗内 name / dispelName / dispelType 全部 secret，C_UnitAuras 的 GetAuraDataByIndex / GetAuraSlots 被 RequiresUnitAuraAccess 拒绝；AuraUtil.SetAuraBorderAtlas 写入的图集也是 secret（GetAtlas 读不出类型），旧「secret 串 / 整条 AuraData」双探针在战斗内必然失败；EUI 战斗内 solid strip 的顶点色同样是 secret，旧扫描还可能被另一枚可见诅咒按钮压成 false。
+- 修复（Paladin/Paladin_Forever.lua）：
+  ① 新增 WR_PaladinForever_CleanseProbe 引擎级探测容器：登录/进世界时预创建 1×1 透明 AuraContainer（战斗内不能创建），声明 filter = "HARMFUL|RAID"。该过滤器由引擎侧求值，语义为「只包含当前玩家本人能驱散的 debuff」——圣骑士恰好是魔法 / 疾病 / 中毒，不含诅咒 / 流血，与清洁术范围完全一致。每 tick 只读 group:GetFramesByIndex() 的数组长度，>0 即存在可驱散，完全不读任何 secret 光环字段。
+  ② UnitHasDispel 在友方检查后优先调用该探测器，命中直接返回 true，不再被 EUI / DebuffFrame / secret 探针的 false 提前否决。
+  ③ EUI 扫描新增 sawUnknownButton：只要存在「可见按钮但纹理类型读不出」的未知项就不再返回 false，避免旧诅咒按钮把当前疾病 / 中毒压成「无驱散」。
+- 验证：新增 .workbuddy/test_paladin_cleanse_engine_probe.py（探测器命中/未命中/不可用/容器绑定/UnitHasDispel 早返回/诅咒不误放）；全部圣骑士夹具与全量 Lua 语法通过。
+
+【防骑】2026-11-16（修复「打断」滑条无效：滑条控制制裁之锤施法打断）
+- 用户口径：防骑打断滑条目前无效，需要修复；打断滑块控制制裁之锤用作施法打断。
+- 根因：Paladin_Menu.lua 防护 DM 的「打断」滑块 saveVariable = "FH_DD"，但 Paladin_Forever_Prot.lua 从未读取 FH_DD，滑条没有任何消费点；旧版自动制裁之锤提示又已在 2026-11-11 删除，只剩「插入 制裁之锤」一次性手动开关。
+- 修复：Paladin_Forever_Prot.lua 新增 WR_PaladinForever_InterruptStep / WR_PaladinForever_DurationCastPercent / WR_PaladinForever_TargetCastProgress；按 FH_DD 阈值（0=关闭，5~100=目标施法/引导进度百分比，默认50，兼容旧布尔 true=50 / false=关闭）在目标可打断读条达到阈值时提示制裁之锤（槽22 / ALT-NUMPAD2，本地冷却按「基础60秒 - 强化制裁之锤天赋每级5秒」计算）；排在生存自保之后、清洁术之前，沿用 Core/InterruptController 的 WR_ShouldInterrupt；Forever 12.x 优先用 UnitCastingDuration/UnitChannelDuration 的 EvaluateElapsedPercent 做 secret-safe 进度判断（原始时间戳是 secret number，不能做算术），该通道不可用时退回 UnitCastingInfo/UnitChannelInfo 时间戳。
+- 面板（Paladin/Paladin_Menu.lua）：打断滑块 tooltip 明确「自动用制裁之锤打断」。
+- 验证：.workbuddy/test_paladin_interrupt_slider.py（R1-R18、R10b、M1-M2 共 24 项）全绿；全量 Lua 语法 215/215。
+
+【防骑】2026-11-16（神圣之盾新增「目标为我」开关）
+- 用户口径：防骑神圣之盾添加一个按钮，控制当怪的目标为自己的时候才释放神圣之盾，否则不用。
+- 面板（Paladin/Paladin_Menu.lua）：防护「自动」组神圣之盾右侧新增「目标为我」复选框（FH_SZS_TARGETME，默认关 = 原行为），愤怒之锤/精英顺延到第 3/4 列。
+- 逻辑（Paladin/Paladin_Forever_Prot.lua）：新增 WR_PaladinForever_TargetTargetIsPlayer（目标必须是可攻击活体 + targettarget 存在 + UnitIsUnit("targettarget","player") 为真，任何读不到/抛错按不满足）；holyShieldEligible 在勾选该开关时追加此条件，未勾选完全保持原逻辑。
+- 验证：.workbuddy/test_paladin_holy_shield_targetme.py（R1-R10、M1-M2 共 14 项）全绿；全量 Lua 语法 215/215。
+
+【防骑】2026-11-16（正义之怒：战斗/脱战只要 Buff 消失就立马补）
+- 用户口径：防骑正义之怒不管战斗还是脱战，只要是 buff 消失了，就要立马补。
+- 根因：旧 WR_PaladinForever_FuryUp 在光环不可读（战斗中 secret）时先靠「30 分钟施放成功记录」硬判已开启，Buff 中途被驱散或提前到期后仍要等记录过期才补，表现为「消失了很久不补」。
+- 修复（Paladin/Paladin_Forever.lua）：新增 FuryLastUpAt / FuryLastUpRemain 观测记录；光环可读且缺失 → 立即判缺失（下一 tick 就亮）；可读且存在 → 记录观测时刻与剩余；光环缓存剩余 >0 同样记录；战斗中光环 secret 读不到时按「最后观测时刻 + 剩余」推算到期，一到即判缺失立刻补；30 分钟施放成功记录降级为「完全没有任何可读/投影证据」时的兜底。施放成功事件（按名 / 按 spellID 25780）同步清空旧观测，避免旧投影压住新 Buff。
+- 回归：.workbuddy/test_paladin_fury_refill.py（L/F1–F9 共 13 项）全绿；全量 Lua 语法 215/215。
+【增强萨】2026-11-16（按猪猪 / 彼岸花-无限服增强页重做增强萨功能与循环）
+- 用户口径：图片为增强萨满专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染元素/恢复与其他职业。
+- 新增 Shaman/Shaman_Enhancement_Features.lua（登记进 TOC）：增强萨默认值/旧档迁移（FANG_ADD_ZQS/FANG_ADD_SM→SM_ZQ_FADD、SM_ZQ_XWWQCS 漩涡层数下拉→SM_ZQ_XWWQ 拉条、SM_ZQ_ZDHYXX→SM_ZQ_HXX、SM_ZQ_ZDQS→SM_ZQ_QS、SM_ZQ_HXTT 火系图腾下拉→自动图腾火系勾选、SM_ZQ_GJTT→SM_ZQ_TT_GJ）；选择 防ADD/护盾(水之护盾/闪电之盾/禁用，截图默认禁用)；拉条 喝红药30%/漩涡武器3层(层数达到打闪电箭，0=关闭)/打断60%；功能 震击（右键小窗：烈焰震击+预判6秒/地震术/震击留打断/等级满级1级，宏 /SHAMAN_SHOCK）/自动图腾（右键小窗：火/土/水/风每系总开关+图腾勾选每系一个，与恢复萨共用 /SHAMAN_TOTEM 按专精分流）/切换目标/火焰新星/驱散（净化术驱散敌方魔法增益）；爆发 种族爆发+全开/全关/切换；插入 呼吸(水下呼吸)/元素(元素的召唤)/灵魂(灵魂的召唤)/先知(先知之怒)/灼热/熔岩 一次性放完自关。
+- 输出优先级：烈焰震击保持(预判)→风暴打击→漩涡武器层数闪电箭→火焰新星→大地震击；震击留打断开着时烈焰震击/地震术/大地震击全部让路给打断。
+- 移除 80 级/不存在技能引用：野性狼魂、萨满之怒、熔岩猛击、熔岩爆裂、寒霜刺骨、武器附魔下拉、治疗链五星；宏补槽 107=水下呼吸、108=烈焰震击(等级1)、109=地震术。
+
+【防骑】2026-11-16（清洁术战斗内不驱散魔法/中毒/疾病：EUI 未读类型不再判无 + secret dispelName 双探针）：EUI 未读类型不再判无 + secret dispelName 图集探针）
+- 用户口径：骑士战斗中清洁术再次失效，魔法 debuff 不驱散；诅咒仍绝不能解。
+- 根因：EllesmereUI 自定义按钮的 dispel 纹理在战斗中或隐藏按钮上读不到图集/颜色时，旧实现把「扫到纹理但类型未知」当作「明确无驱散」返回 false；隐藏按钮子纹理只看 IsShown 也会把旧诅咒 strip 当当前类型，导致战斗内魔法/中毒/疾病被提前否决。
+- 修复：EUI 扫描未知类型一律返回 nil（只有明确 curse/bleed 才 false）；纹理可见性改用 IsVisible（父级隐藏也过滤）；AK hook 覆盖 dispelBorder 与 dispelTypeIcon 两条通道并缓存 iconTex/strips 引用，登录/进世界预热；secret dispelName 双探针 —— AuraUtil.SetAuraBorderAtlas(secret 串) 与 AuraUtil.SetAuraBorderAtlasFromAura(整条 AuraData，引擎内部解析 secret，中毒/疾病在战斗内的识别主通道)，探针纹理缓存走 _G 并在每次探测前清空旧图集。清洁术仍只放行 Poison/Disease/Magic，6909 与 Curse/Bleed 永不驱动。
+- 验证：test_paladin_cleanse_combat.py 新增 J31-J42 全过（含 Poison/Disease 图集、FromAura 探针、战斗端到端 secret AuraData）；全量圣骑士夹具通过；全量 Lua 语法 215 文件通过。
+
+【恢复萨】2026-11-16（按猪猪 / 彼岸花-无限服恢复萨满页重做恢复萨功能与循环）
+- 用户口径：图片为恢复萨满专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染元素/增强与其他职业。
+- 新增 Shaman/Shaman_Restoration_Features.lua（登记进 TOC）：恢复萨默认值/旧档迁移（HF_ZLMS 旧治疗模式→SM_HF_ZLMS、HF_ZRXJ/HF_JL/HF_ZLL/HF_ZLB/HF_CJZLB 拉条→SM_HF_*、HF_TT→SM_HF_TT_ON、HF_QS 驱散下拉→SM_HF_QS_ON）；选择 防ADD/治疗模式(全团~五队)/护盾(水之护盾/大地之盾/禁用)；拉条 喝红药30%/迅捷波30%/激流80%/治疗链54%/治疗波60%/次级治疗波85%/打断60%；治疗优先级 迅捷波→激流→治疗链→治疗波→次级治疗波；功能 自动图腾（右键小窗：火/土/水/风每系总开关+图腾勾选，每系只插一个，GetTotemInfo 检测缺图腾自动补）/切换目标/驱散（右键小窗：自己/小队）；爆发 种族爆发+全开/全关/切换；插入 呼唤(元素的召唤)/元素(火元素图腾)/灵魂(土元素图腾)/法力潮(法力之潮图腾) 一次性放完自关。
+- 治疗链右键小窗按截图：等级（最高级/1级40级学/2级46级学/3级54级学，走宏 75/102/103/104）+ 人数（1=单人阈值，2以上=至少这么多人掉血且最低几人平均血量低于阈值）；宏 /SHAMAN_TOTEM 与 /SHAMAN_CHAINHEAL<数值>。
+- 重写 Shaman/Shaman_Forever_Restoration.lua（仅 Forever 恢复）：薄壳派发到功能层；移除治疗之雨/潮汐之力/狂咒/过量停条等 80 级/SoD 遗留。Shaman_Macros.lua 补 图腾/迅捷波/治疗链等级 宏槽 85-88/91-96/101-106 与色表登记（灼热45/熔岩6/火舌96/抗寒95/抗火91/大地之力15/石肤85/地缚86/战栗33/法力之泉105/治疗之泉106/清毒87/祛病88/风怒92/风之优雅93/自然抗性94/根基55/元素的召唤2/土元素25/迅捷波101/治疗链等级102-104/风剪17/净化灵魂71）。
+【防护】2026-11-16（按猪猪 / 彼岸花-无限服防战页同步防护功能与循环）
+- 用户口径：图片为防护战专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染武器/狂怒与其他职业。
+- Warrior_Protection_Features.lua：默认值对齐截图——雷霆一击多目标默认「不放」、单体「保持」；挫志怒吼只保留 保持/不放 两档且多目标/单体默认「不放」；格挡额外条件默认勾「多目标(2个)+卡CD」、血量不勾；破甲攻击「只打1破/高优先级/低优先级」默认全不勾（普通优先位），只打1破补充「目标快死时不放」；撕裂/血性狂暴/切姿态默认值与截图一致；右键小窗文案同步截图（含宏命令 /WARRIOR_REND、/WARRIOR_SUNDER、/WARRIOR_BLOODRAGE、/WARRIOR_THUNDER_DEMO、/WARRIOR_STANCE、/WARRIOR_SHIELDBLOCK）。
+- Warrior_Menu.lua：防护页 DM 移除 怒吼/狂怒回复/自动盾墙/输出循环 旧项，只保留 防ADD + 顺劈斩30/英勇打击20/乘胜追击70/破釜沉舟20/喝红药30/打断60；自动组移除 英勇投掷/自动缴械；爆发组收敛为 全开/全关/切换 按钮 + 种族爆发（FZ_KG_ZDZZ）；插入组移除 碎裂投掷/缴械，保留 反击/震荡/挑战/盾墙/挫志怒吼/拦截/惩戒痛击/狂暴之怒 八项。
+- Warrior_Forever_Protection.lua：下线 80 级遗留逻辑（自动盾墙、英勇投掷、缴械插入、狂暴之怒自动解控）；新增种族爆发步（宏 181，与狂怒同一 WR_Forever_GetRacialBursts 口径）；破甲 攻击按 只打1破/高优先/低优先/续破 四档接入循环。
+- 命令分流修复：防护最后加载，共享命令直接捕获当前处理函数作为回落（不再写 WR_WarriorSharedCommandPrev），修复防护注册后狂怒专精 /WARRIOR_REND 会回落到武器战变量的问题。
+- 验证：test_warrior_prot_rotation.py 22 项、test_warrior_prot_menu.py、test_warrior_prot_commands.py 10 项新增，狂怒 27 项 / 武器 45 项回归全过；全量 Lua 语法检查通过。
+【狂怒】2026-11-16（按猪猪 / 彼岸花-无限服狂暴页重做狂怒功能与循环）
+- 用户口径：图片为狂暴战专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染武器/防护与其他职业。
+- Warrior_Fury_Features.lua：右键「额外条件」小窗对齐截图（撕裂/雷霆挫志/血性狂暴/破甲攻击/切姿态/鲁莽挥击均带顶层开关）；破甲攻击默认关闭，只打1破/高优先级/低优先级默认关闭；挫志怒吼按截图只保留保持/不放两档；新增 /WARRIOR_REND、/WARRIOR_SUNDER_DPS、/WARRIOR_BLOODRAGE、/WARRIOR_THUNDER_DEMO、/WARRIOR_STANCE 命令，与武器战按专精分流不互相覆盖。
+- Warrior_Menu.lua：狂怒页按截图收敛为 8 个功能图标 + 3 个爆发开关（鲁莽/死愿/种族爆发）+ 3 个插入图标，移除速度药水/偷药/工程手套/饰品等 80 级遗留开关；破甲攻击默认不勾。
+- Warrior_Forever_Fury.lua：切换目标默认开启；脱战切战斗补充「防御姿态 + 天赋先锋」豁免。
+- 验证：test_warrior_fury_rotation.py 27 项、test_warrior_fury_menu.py、test_warrior_fury_ui.py、test_warrior_fury_commands.py 11 项全过；全量 Lua 语法检查通过。
+【防骑】2026-11-16（修复 Paladin_Forever_Prot.lua:1799 attempt to call a nil value：EUI 严格表读取导致整文件加载中断）
+- 用户报错：防护循环反复在 Paladin_Forever_Prot.lua:1799 报 attempt to call a nil value，局部变量 FH_QJS / priority / FH_QJS_Player / FH_QJS_Target。
+- 根因：Paladin_Forever.lua 的 WR_PaladinForever_EUI_Install 读取 EllesmereUI._pabInternals.__WR_PaladinCleanseSetter。_pabInternals 由 NewInternals 生成，未登记字段的读取会走 __index 直接 error（不是返回 nil）；而该 install 是文件级调用，一抛错 Paladin_Forever.lua 从该行起后续全部未加载，CleanseStep / Seal / SpellKnown / UnitHasDispel 等全部变成 nil。
+- 修复：EUI / _pabInternals 的所有字段读取改用 rawget（不改 EllesmereUI 文件）；文件级 install 与 ADDON_LOADED 重试均包 pcall，任何 EUI 版本差异都不再中断 Paladin_Forever.lua 的剩余函数定义。
+- 验证：新增 .workbuddy/test_paladin_eui_load.py 12 项全过（strict _pabInternals / AuraKit hook / 无 EUI / 全异常 EUI 四种场景）；清洁术三套夹具与全量 Lua 语法检查通过。
+【生存】2026-11-16（按猪猪 / 彼岸花-无限服生存页重做生存猎功能与循环）
+- 用户口径：图片为生存猎专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染兽王/射击与其他职业。
+- 新增 Hunter/Hunter_Survival_Features.lua（登记进 TOC）：生存默认值/旧档迁移（LR_SCL_DCMZ 旧「1=多重/2=瞄准」→ 新「共享冷却 1=瞄准/2=多重」、LR_SC_ZHBB 召唤宠物下拉→开关、LR_SC_FHCW_ZD→复活模式、LR_SCL_ZDLRYJ→只打首领、LR_SCL_CRBSXJ→冰冻陷阱）；功能 5 项（远程技能/近战技能/宠物/印记/切换目标），右键「额外条件」小窗 5 个（远程技能：震荡/毒蛇/奥术/瞄准/多重/狙击 + 毒蛇不打机械/预判7秒；近战技能：反击/猫鼬撕咬/陆行鸟踢击/摔绊/猛禽一击；宠物：召唤/无脑复活或脱战复活/脱战治疗50%；印记：只打首领；急速：只打首领）；拉条 喝红药30%；爆发 急速/种族爆发 + 全开/全关/切换；插入 献祭/冰冻/冰霜/震荡/扰乱/治疗/急速/照明/乱射/爆炸陷阱/假死（一次性放完自关）。
+- 重写 Hunter/Hunter_Forever_SV.lua（仅 Forever 生存）：宠物维护 → 切换目标 → 自动射击 → 防ADD门 → 守护 → 插入 → 喝红药 → 猎人印记 → 爆发 → 远程技能 → 近战技能；移除杀戮射击/杀戮命令/眼镜蛇射击/奇美拉射击/稳固射击/爆炸射击/黑箭/削砍等 80 级/SoD 技能。
+- Hunter_Menu.lua 生存页按截图重做：防ADD / 共享冷却下拉、喝红药拉条、爆发三按钮、功能 5 复选框、插入 11 项（献祭/冰冻/冰霜/震荡/扰乱/治疗/急速/照明/乱射/爆炸陷阱/假死）。
+- Hunter_Macros.lua：SV 天赋「陆行鸟踢击」替换旧「长足踢击」宏文本（槽 96），WR_SkillColor 新增「陆行鸟踢击」=96（旧名保留兼容）；近战反击=101 / 猫鼬=106 / 猛禽=107 / 摔绊=79 沿用。
+- 验证：test_hunter_sv_rotation.py / test_hunter_sv_menu.py / test_hunter_sv_ui.py / test_hunter_sv_migration.py / test_hunter_shared_cmd.py 全过；全量 Lua 语法检查通过。
+【冰霜】2026-11-16（按猪猪 / 彼岸花-无限服冰霜页重做冰法专精功能与循环）
+- 用户口径：图片为冰法专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染奥法/火法与其他职业。
+- 新增 Mage/Mage_Frost_Features.lua（登记进 TOC）：冰法默认值/旧档迁移（FADD_BF→BF_FADD、BF_ZDZZ→BF_ZZ、BF_JCZZ*/BF_ZDFSTQ→BF_QS*、BF_BFX_CR→BF_CRBFX）；功能 6 项（读条引导/护甲/奥术智慧/切换目标/驱散/寒冰护体），右键「额外条件」小窗 4 个（读条引导：炎爆术-火焰/灼烧/寒冰箭/霜火之箭/火球术 + 移动中冰枪填充；护甲：冰甲术/魔甲术二选一；奥术智慧：自己/小队；驱散：自己/小队/法术偷取）；拉条 喝红药30%/打断60%/魔杖回蓝50%/奥爆关闭；爆发 种族爆发 + 全开/全关/切换；插入 冰环/烈焰风暴/暴风雪/魔爆术/闪现/寒冰屏障/寒冰护体（一次性放完自关）。
+- 重写 Mage/Mage_Forever_Frost.lua（仅 Forever 冰霜）：停手门 → 插入 → 喝红药 → 护甲 → 奥术智慧 → 切换目标 → 防ADD门 → 打断 → 驱散 → 种族爆发 → 寒冰护体保持 → 唤醒 → 奥爆 → 读条引导（炎爆术→灼烧→寒冰箭→霜火之箭→火球术 + 冰枪填充，本地 CD 记账）→ 魔杖回蓝 → 清色块；移除狂咒/镜像/冰冷血脉/法力宝石/隐身术/深冻/寒冰宝珠/召唤水元素等 80 级/SoD 技能。
+- Mage_Forever.lua：冰霜防ADD改读 BF_FADD（旧 FADD_BF 兼容）；MAGE_CAST / MAGE_ARMOR_ON / MAGE_INTELLECT / MAGE_QS 命令分流表新增「冰霜」专精，三系互不覆盖。
+- Mage_Menu.lua 冰霜页按截图重做：防ADD 下拉、喝红药/打断/魔杖回蓝/奥爆拉条、爆发三按钮、功能 6 复选框（含寒冰护体）、插入 7 项（冰环/烈焰风暴/暴风雪/魔爆术/闪现/寒冰屏障/寒冰护体）。
+- 离线夹具：test_mage_frost_rotation.py / test_mage_frost_ui.py / test_mage_frost_migration.py / test_mage_shared_cmd.py（冰霜加入分流表）。
+【火焰】2026-11-16（按猪猪 / 彼岸花-无限服火法页重做火焰专精功能与循环）
+- 用户口径：图片为火法专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染奥术/冰霜与其他职业。
+- 新增 Mage/Mage_Fire_Features.lua（登记进 TOC）：火法默认值/旧档迁移（FANG_ADD_HUOFA→HY_FADD、HY_HQS→HY_CAST_FIREBALL/HY_CAST_FROSTFIRE、HY_ZDRS→HY_ZD_RS、HY_JCZZ*→HY_QS*、HY_ZDFSTQ→HY_QS_STEAL）；功能 5 项（读条引导/护甲/奥术智慧/切换目标/驱散），右键「额外条件」小窗 4 个（读条引导：炎爆术-火焰/灼烧/霜火之箭/火球术/寒冰箭；护甲：冰甲术/魔甲术二选一；奥术智慧：自己/小队；驱散：自己/小队/法术偷取）；拉条 喝红药30%/打断60%/魔杖回蓝50%/奥爆关闭；爆发 燃烧/种族爆发 + 全开/全关/切换；插入 冰环/烈焰风暴/暴风雪/魔爆术/闪现/冲击波（一次性放完自关）。
+- 重写 Mage/Mage_Forever_Fire.lua（仅 Forever 火焰）：停手门 → 插入 → 喝红药 → 护甲 → 奥术智慧 → 切换目标 → 防ADD门 → 打断 → 驱散 → 爆发 → 唤醒 → 奥爆 → 读条引导（炎爆术→灼烧→霜火之箭→火球术→寒冰箭，本地 CD 记账）→ 魔杖回蓝 → 清色块；移除活动炸弹/镜像/冰冷血脉/法力宝石/法术连击等 80 级/SoD 技能。
+- Mage_Forever.lua：火焰防ADD改读 HY_FADD（旧 FANG_ADD_HUOFA 兼容）；MAGE_CAST / MAGE_ARMOR_ON / MAGE_INTELLECT / MAGE_QS 命令按专精分流，奥法与火法互不覆盖。
+- 验证：新增 test_mage_fire_rotation.py / test_mage_fire_ui.py / test_mage_fire_migration.py 离线夹具全过；全量 Lua 语法检查通过。
+
+【奥法】2026-11-16（按猪猪 / 彼岸花-无限服奥法页重做奥术专精功能与循环）
+- 用户口径：图片为奥法专精；当前客户端 60 级天赋与技能；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染火焰/冰霜与其他职业。
+- 新增 Mage/Mage_Arcane_Features.lua（登记进 TOC）：奥法默认值/旧档迁移（AF_ASQH→AF_ZDASQH、AF_JCZZ*→AF_QS*、AF_ZDFSTQ→AF_QS_STEAL）；功能 5 项（读条引导/护甲/奥术智慧/切换目标/驱散），右键「额外条件」小窗 4 个（读条引导：打法叠加/无脑/奥术愤怒、叠层层数 0 层、愤怒层数 4 层、蓝量 40%、有节能就打、奥术冲击/奥术飞弹/寒冰箭/霜火之箭/火球术；护甲：冰甲术/魔甲术二选一；奥术智慧：自己/小队；驱散：自己/小队/法术偷取）；拉条 喝红药30%/打断60%/魔杖回蓝50%/奥爆关闭；爆发 奥术强化/气定神闲/种族爆发 + 全开/全关/切换；插入 冰环/烈焰风暴/暴风雪/魔爆术/闪现（一次性放完自关）。
+- 重写 Mage/Mage_Forever_Arcane.lua（仅 Forever 奥术）：停手门 → 插入 → 喝红药 → 护甲 → 奥术智慧 → 切换目标 → 防ADD门 → 打断 → 驱散 → 爆发 → 奥爆 → 读条引导（叠加/无脑/奥术愤怒，本地 CD 记账）→ 魔杖回蓝 → 清色块；移除奥术弹幕/奥术涌动/法力宝石/镜像/冰冷血脉等 80 级/SoD 技能。
+- Mage_Macros.lua：新增 106 冰甲术 / 107 魔甲术 / 108 奥术智慧 / 109 奥术智慧(队友) / 110 奥术愤怒 / 111 治疗药水 / 112 解除次级诅咒 / 113 解除次级诅咒(队友) 宏槽与 WR_SkillColor 映射（含霜火之箭 20 / 烈焰风暴 23 / 闪现 31 / 法术反制 46 / 法术吸取 43 / 切换目标 40）。
+- 验证：新增 test_mage_arcane_rotation.py 49 项、test_mage_arcane_ui.py 面板与 4 个右键小窗全过；全量 Lua 语法检查通过。
+
+【射击】2026-11-16（按猪猪 / 彼岸花-无限服射击页重做射击猎功能与循环）
+- 用户口径：图片为射击猎专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染兽王/生存与其他职业。
+- 新增 Hunter/Hunter_Marksmanship_Features.lua（登记进 TOC）：射击默认值/旧档迁移（LR_SJL_DCMZ 旧「1=多重/2=瞄准」→ 新「共享冷却 1=瞄准/2=多重」、LR_SJ_ZHBB 召唤宠物下拉→开关、LR_SJ_FHCW_ZD→复活模式、LR_SJL_ZDLRYJ→只打首领、LR_SJL_CRBSXJ→冰冻陷阱）；功能 6 项（远程技能/近战技能/宠物/印记/切换目标/强击），右键「额外条件」小窗 6 个（远程技能：震荡/毒蛇/奥术/瞄准/多重/召唤雄鹰/狙击 + 毒蛇不打机械/预判7秒；近战技能：猫鼬撕咬/摔绊/猛禽一击；宠物：召唤/无脑复活或脱战复活/脱战治疗50%；印记：只打首领；急速：只打首领；强击：强击光环）；拉条 喝红药30%；爆发 急速/种族爆发 + 全开/全关/切换按钮；插入 献祭陷阱/冰冻陷阱/冰霜陷阱/震荡射击/扰乱射击/治疗宠物/急速射击/照明弹/乱射/爆炸陷阱/假死（一次性放完自关）。
+- 重写 Hunter/Hunter_Forever_MM.lua（仅 Forever 射击）：宠物维护（脱战召唤/复活/治疗）→ 切换目标 → 自动射击 → 防ADD门 → 守护 → 强击光环 → 插入 → 喝红药 → 猎人印记 → 爆发 → 远程技能（毒蛇→召唤猎鹰→奥术→瞄准/多重共享冷却二选一→狙击→震荡）→ 近战技能（猫鼬→摔绊→猛禽）；「共享冷却」下拉 1=瞄准射击/2=多重射击。
+- 移除 80 级/无限不存在技能开关：杀戮射击/杀戮命令/眼镜蛇射击/奇美拉射击/稳固射击/爆炸射击填充/准备就绪/沉默射击/偷药/速度药水/饰品/手套/炸弹/蝰蛇舞/杀戮停等旧项全部下线（旧档由功能层迁移）。
+- 验证：新增 test_hunter_mm_rotation.py / test_hunter_mm_menu.py / test_hunter_mm_ui.py / test_hunter_mm_migration.py 离线夹具全过；全量 Lua 语法检查通过。
+
+【全局】2026-11-16（色块增加黑色保护底色：防游戏背景色误识别）
+- 用户口径：MK 插件目前没有色块保护底色，游戏中的背景颜色会导致脚本误识别；需要在色块出现的位置添加黑色底色，防止识别到其他颜色。
+- 实现（Core/UI_ColorFrame.lua）：左上/右上两个色块定位锚点各挂一张纯黑 BACKGROUND 纹理（左上常驻；右上在该侧首次出现色块时亮起并常驻），不随 WR_HideColorFrame 隐藏；锚点 FrameLevel=0，所有色块 FrameLevel=2，实色块永远压在黑底之上。
+- 覆盖范围：保护底色比 42×42 色块区向外扩 2px（46×46），覆盖 AHK 主采样点 (1,1) 与备用采样点 (8,8)/(21,21)/(34,34)/(8,34)/(34,8)；色块未点亮时全部采样点读黑，不会再匹配到任何技能颜色。
+- 不变项：ColorTable 240 个颜色值、槽位映射、WR_ShowColorFrame/WR_HideColorFrame 显隐逻辑全部不变，AHK 侧颜色表无需改动。
+- 验证：新增 .workbuddy/test_color_guard.py（G1~G8）通过；全量 Lua 语法检查通过。
+
+【防骑】2026-11-16（清洁术再复查：脱战诅咒不触发，战斗内可驱散类型要能触发）
+- 用户口径：截图「荆棘诅咒」法术ID 6909；脱战后仍会用清洁术；战斗中魔法/疾病/中毒反而不用清洁术。
+- 根因：① 只看 DebuffFrame / 只读 C_UnitAuras 的旧路径在部分 UI（或 secret 战斗态）下拿不到真实类型，隐藏按钮/旧缓存还保留旧毒图集；② canActivePlayerDispel 在部分客户端会把诅咒误报为 true；③ 之前 AurasRestricted() 一律提前判无，导致战斗中可驱散类型也不亮。
+- 修复：① 新增 WR_PaladinForever_ScanUnitDebuffTypes，交叉读取 C_UnitAuras / UnitDebuff / UnitAura；名称含「诅咒/Curse」或 spellID 6909 直接判不可驱散；② 多 API 扫描优先于 DebuffFrame，DebuffFrame 只作为回退；③ DebuffFrame 只在帧可见且确实扫到条目时判无，隐藏帧/被其他 UI 接管不再误判；④ AuraData 先读 dispelName/dispelType，secret 时不信任 canActivePlayerDispel=true；⑤ 战斗内 UnitDebuff/UnitAura 可读时不因 AurasRestricted 一律判无；⑥ 新增 EllesmereUI Player Aura Bars 桥接：捕获其 debuffsContainer，扫描自定义 AuraButton 的引擎 dispel 纹理/颜色，处理 EUI 替代 Blizzard BuffFrame 后读不到类型的情况。
+- 回归：test_paladin_cleanse_combat.py 新增 J27-J32（UnitDebuff Poison 可用、荆棘诅咒 6909 名称/ID、canActivePlayerDispel 误报、spellId 6909、EUI dispel 图集 Magic/Curse）；三个清洁术夹具全过；全部 35 个圣骑士夹具与全量 Lua 语法通过。
+
+【兽王】2026-11-16（按猪猪 / 彼岸花-无限服兽王页重做兽王猎功能与循环）
+- 用户口径：图片为兽王猎专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧开关，界面仍走 MK 面板，不污染射击/生存与其他职业。
+- 新增 Hunter/Hunter_BeastMastery_Features.lua（登记进 TOC）：兽王默认值/旧档迁移（LR_SWL_DCMZ 旧「瞄准or多重」→「共享冷却」1=瞄准/2=多重、LR_SW_ZHBB 召唤宠物下拉→开关、LR_SW_FHCW_ZD→复活模式、LR_SWL_ZDLRYJ→印记只打首领）；功能 5 项（远程技能/近战技能/宠物/印记/切换目标），右键「额外条件」小窗 6 个（远程技能：震荡/毒蛇/奥术/瞄准/多重/召唤雄鹰/狙击 + 毒蛇不打机械/预判7秒；近战技能：猫鼬撕咬/摔绊/猛禽一击；宠物：召唤/无脑复活或脱战复活/脱战治疗50%；印记：只打首领；急速/狂野：只打首领）；拉条 喝红药30%；爆发 急速/狂野/种族爆发 + 全开/全关/切换按钮；插入 献祭陷阱/冰冻陷阱/冰霜陷阱/震荡射击/扰乱射击/治疗宠物/急速射击/照明弹/乱射/胁迫/狂野怒火/爆炸陷阱/假死（一次性放完自关）。
+- 重写 Hunter/Hunter_Forever_BM.lua（仅 Forever 野兽控制）：宠物维护（脱战召唤/复活/治疗）→ 切换目标 → 自动射击 → 防ADD门 → 守护 → 插入 → 喝红药 → 猎人印记 → 爆发 → 远程技能（毒蛇→召唤猎鹰→奥术→瞄准/多重共享冷却二选一→狙击→震荡）→ 近战技能（猫鼬→摔绊→猛禽）；「共享冷却」下拉 1=瞄准射击/2=多重射击。
+- 移除 80 级/无限不存在技能开关：杀戮射击/杀戮命令/眼镜蛇射击/奇美拉射击/稳固射击/爆炸射击填充/偷药/速度药水/饰品/手套/炸弹/蝰蛇舞/杀戮停等旧项全部下线（旧档由功能层迁移）。
+- Hunter_Macros.lua：新增 105 治疗药水 / 106 猫鼬撕咬 / 107 猛禽一击 / 108 献祭陷阱 / 109 照明弹 / 110 冰冻陷阱 / 111 爆炸陷阱 宏槽与 WR_SkillColor 映射（种族爆发复用既有 181 宏）。
+- 验证：新增 test_hunter_bm_rotation.py / test_hunter_bm_menu.py / test_hunter_bm_ui.py 离线夹具全过；全量 Lua 语法检查通过。
+
+【防骑】2026-11-16（复查清洁术：诅咒绝不再触发清洁术）
+- 用户口径：清洁术只能驱散疾病 / 中毒 / 魔法，不能驱散诅咒；实战中中了诅咒后会不断使用清洁术。
+- 根因一：WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame 旧兜底「secret debuffType + 无边框 = 可驱散」，诅咒的 debuffType 在战斗中同样是 secret，读不到图集时被误判为可驱散。
+- 根因二：DebuffBorder 扫描遍历所有 auraFrames（含隐藏按钮），隐藏按钮保留上一次的中毒图集，会把旧毒图集当成本次诅咒的证据。
+- 根因三：WR_PaladinForever_ProbeDispellableByFilter 只要 HARMFUL|RAID 有槽位就返回 true，存在性判断会把诅咒算进来。
+- 根因四：旧 SoD 路径 Paladin_Holy / Paladin_Protection / Paladin_Retribution 仍用 WR_GetUnitDebuffTime("player", "诅咒") 判驱散。
+- 修复：① 删除「secret 类型 = 可驱散」兜底，类型读不到一律返回 nil，绝不猜；② DebuffBorder 只扫描 IsVisible()/IsShown()==true 的按钮，隐藏按钮旧图集不再参与；③ 探针改为读 AuraData 的 canActivePlayerDispel / dispelName，只有明确 Poison/Disease/Magic 才返回 true，明确 Curse/Bleed 返回 false，其余 nil；④ NormalizeDispelType 补 Bleed/流血；⑤ 旧 SoD 三文件移除诅咒条件。
+- 回归：test_paladin_cleanse.py / test_paladin_cleanse_dispeltype.py / test_paladin_cleanse_combat.py 全过（含 J21 隐藏旧毒图集 + 可见诅咒、J22 过滤器返回诅咒 AuraData、J24 过滤器返回 Poison AuraData）；全量 Lua 语法 207/207。
+
+【戒律】2026-11-16（戒律牧功能层接入 TOC）
+- 用户口径：戒律牧功能层从未接入 TOC，这一步先做。
+- MKHelperForever.toc 在 Priest\Priest_Forever_Discipline.lua 之后追加 Priest\Priest_Forever_Discipline_Features.lua，保证功能层加载时 WR_PriestForeverDiscipline 已存在并可被 hook。
+- 功能层内 301~304 历史越界回退槽按当前 Priest_Macros.lua 改为 23/149/49/56（ColorTable 仅 1-240）。
+- 验证：新增 .workbuddy/test_priest_discipline_features_load.py（T1~T5）通过；test_priest_discipline_focus.py 回归通过；全量 Lua 语法 207/207。
+
+【修复】2026-11-16（全项目静态审计：色块槽位越界 / 错键与宏绑定）
+- 用户口径：阅读整个项目，修复能确认的损坏、不一致与低效项，其余列清单复核。
+- 色块槽位越界（ColorTable 仅 1-240，越界会让 PIG_BGRtoBGR(nil) 抛错并崩掉整个循环 tick）：Priest 心灵专注/能量灌注/神圣新星/联结治疗/吸血鬼的拥抱/沉默/暗影形态 301-307 → 23/149/49/56/10/80/8；Rogue 冷血/淬毒/还击/剑刃乱舞/冲动/幽魂击/预谋/伺机待发/出血 301-309 → 1/54/59/60/37/64/40/47/33；Shaman 先知之怒/水之护盾/法力之潮图腾/自然迅捷 301-304 → 61/22/83/74。
+- 错键修复：Priest 守护之魂 187（萨隆邪铁炸弹）→64；Shaman 火元素图腾 116（SHIFT-- 设焦点）→59、漩涡武器 120（/target 瓦拉纳王子）→4；Druid 裂伤 137（/focus raid17）→8（新增裂伤(熊)=30）、痛击 144（/focus raid24）→197（新增宏）、横扫 143（/focus raid23）→11；Warrior 狂暴之怒(解控) 58 空槽→11、迅捷打击 70（/focus 双子）→77（新增宏）、鞭笞 59 空槽补宏、攻击 4 /stopattack→/startattack；Rogue 要害打击/军刀猛刺/剔骨 156/154/160（/focus raidN）→71/72/73（新增宏）；Paladin 治疗药水 75（[@focus] 庇护祝福）→79（新增药水宏）、复仇之怒 28（制裁之锤）→32。
+- 防御闸：WR_ColorFrame_ShowSkill / WR_ColorFrame_Show 对 1-240 之外的数值统一拦截并熄灭残留色块，任何职业再遇越界槽都不会崩 tick。
+- 卫生：删除 Menu_Healer_TOC 的 Monk_Menu 死引用；/mkfear 对未定义的 WR_FZ_KBZN 加守卫。
+
+【恢复】2026-11-16（按彼岸花-无限服恢复页重做恢复德功能与循环）
+- 用户口径：图片为恢复德（奶德）专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧开关（生命绽放/滋养/野性赐福/治疗之树/起死回生/树皮术/旋风/狂咒/血肉成灰/无脑回春/99%回春/偷药/爆发手套饰品/过量停条等），界面仍走 MK 面板，不污染其他专精与职业。
+- 新增 Druid/Druid_Restoration_Features.lua（登记进 TOC）：恢复默认值/旧档迁移（HF_QS 驱散下拉→HF_QS_ON 开关、HF_YH 愈合模式→HF_YH_HP 阈值、HF_JH→HF_JH_HP、HF_NJ_HP→HF_NJ_CR）；选择 防ADD/治疗模式（全团/目标/预读/坦克/脆皮/一~五队）；拉条 喝红药30%/迅捷治触30%/迅捷治愈50%/野性成长80%/回春术95%/治疗之触60%/愈合85%；功能 6 项（野性印记/复生/激活/荆棘术/切换目标/驱散）；爆发 种族爆发 + 全开/全关/切换按钮；插入 宁静（一次性放完自关）；激活右键阈值小窗。
+- 重写 Druid/Druid_Forever_Restoration.lua（仅 Forever 恢复）：停手门 → 野性印记/荆棘术/复生/激活/驱散 → 插入宁静 → 喝红药 → 切目标 → 防ADD门 → 种族爆 → 迅捷治触（自然迅捷+治疗之触）→ 迅捷治愈 → 野性成长 → 回春术 → 治疗之触 → 愈合（焦点宏施放）；共享件 Druid_Forever.lua 零改动。
+- 宏表/色表：迅捷治愈 307（越界）→ 111、自然迅捷 308（越界）→ 112，新增「迅捷治触」=112；其余复用现有宏槽（回春术109/愈合110/治疗之触104/野性成长107/宁静64/激活93/103/复生13/野性印记149/荆棘术150/切目标46/种族爆发181）。
+- 移除 80 级/SoD 技能引用：生命绽放/滋养/野性赐福/治疗之树/起死回生/树皮术/旋风/狂咒/血肉成灰等本服 60 级不存在技能不再出现在面板与循环。
+- 验证：新增 .workbuddy/test_druid_restoration_rotation.py / test_druid_restoration_menu.py / test_druid_restoration_ui.py 离线夹具全过；全量 Lua 语法检查通过。
+
+【野性】2026-11-16（按彼岸花-无限服野性页重做野德功能与循环）
+- 用户口径：图片为野德（野性）专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧开关（寒霜刺骨/愈合/打断/2T5/偷药/速度药水/炸弹/自动横扫/屏蔽横扫/强制横扫/锁BOSS/工程手套/解定身/插入猫/搭脉等），界面仍走 MK 面板，不污染其他专精与职业。
+- 新增 Druid/Druid_Feral_Features.lua（登记进 TOC）：野性默认值/旧档迁移（YD_MHZN 布尔→YD_MHZN_NL 能量阈值、YD_ZMLS→YD_ZM、YD_CAT_CAT_AUTO→YD_BX、YD_JH→YD_JH_HP）；功能 15 项（变形/切换目标/精灵之火 + 猫专属 扫击/终结技/变形之力/正面 + 熊专属 挫志咆哮/挥击/割伤/嘲讽/野性印记/复生/激活/荆棘术）；拉条 喝红药30%/猛虎之怒30%/槌击25%/狂暴回复40%；爆发 狂暴+种族爆发 + 全开/全关/切换按钮；插入 冲锋/群嘲/重击（一次性放完自关）。
+- 重写 Druid/Druid_Forever_Feral.lua（仅 Forever 野性）：停手门 → 变形 → 野性印记/荆棘术/复生/激活 → 插入 → 喝红药 → 切目标 → 防ADD门 → 狂暴/种族爆 → 猫：精灵之火→猛虎之怒→变形之力→斜掠→割裂→凶猛撕咬→扫击→撕碎/爪击；熊：狂暴回复→挫志咆哮→割伤→挥击→槌击→嘲讽；共享件 Druid_Forever.lua 零改动。
+- 宏表：194 变形之力 / 195 低吼 / 196 野性冲锋 三个空槽启用；色表补 猛虎之怒=2、变形之力=194、低吼=195、野性冲锋=196、挫志咆哮=79、割伤=31、重击=51、挥击=53、扫击=57、槌击=52、精灵之火（野性）=10、狂暴=3。
+- 移除 80 级/SoD 技能引用：野蛮咆哮/割碎/痛击/重殴/横扫（豹/熊）/寒霜刺骨/狂咒等本服 60 级不存在技能不再出现在面板与循环。
+- 验证：新增 .workbuddy/test_druid_feral_rotation.py / test_druid_feral_menu.py / test_druid_feral_ui.py 离线夹具全过；全量 Lua 语法检查通过。
+
+【防骑】2026-11-16（祝福段勾选互相独立：仅勾「个人」时个人所选祝福生效）
+- 用户口径：防骑在小队中，祝福设置里不勾「小队」、只勾「个人」并选好特定祝福时，实际施放没有应用个人所选 buff。
+- 根因：Paladin/Paladin_Blessing.lua 的 WR_PaladinBlessing_Auto() 按当前队伍状态整体短路——mode=="party" 且 c.party~=true 时直接 return false，把「单人（个人）」段也一并挡掉；团队段关闭同理。
+- 修复：段勾选改为只控制该段目标是否参与本轮；单人段（自己）独立生效并保持第一优先，小队/团队段按各自勾选追加目标。仅勾个人时个人所选祝福正常点亮（小队内为普通祝福自施槽 91~93，团队内按团队口径强效祝福）。
+- 验证：test_paladin_blessing.py 新增 T1~T6 回归段（小队关闭+个人开、个人关闭+小队开、团队关闭+个人开、静态接线）全过；全部祝福相关夹具与全量 Lua 语法检查通过。
+
+【平衡】2026-11-15（按彼岸花-无限服平衡页重做平衡德功能与循环）
+- 用户口径：图片为鸟德（平衡）专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧开关（狂咒 / ICC 统御心灵旋风 / 麻痹诅咒 / 虫群月火三连 / 轨道炮 / 星辰坠落 / 自然之力 / 台风 / 树皮插入等），界面仍走 MK 面板，不污染其他职业。
+- 新增 Druid/Druid_Balance_Features.lua（登记进 TOC）：平衡默认值/旧档迁移（PH_JCZZ、PH_JCWR_P→PH_QS；PH_JH/PH_JH_PLAYER→PH_JH_HP）；功能 8 项（枭兽形态、DOT 月火/虫群右键预判、野性印记、复生、激活右键阈值、荆棘术、切换目标、驱散）；拉条 喝红药30%；爆发 种族爆发 + 全开/全关/切换按钮；插入 飓风（一次性放完自关）；右键「额外条件」小窗 2 个。
+- 重写 Druid/Druid_Forever_Balance.lua（仅 Forever 平衡）：停手门 → 枭兽/野性印记/荆棘术/复生/激活/驱散 → 插入 → 喝红药 → 切目标 → 防ADD门 → 种族爆 → 飓风AoE → 月火/虫群 DOT → 星涌术 → 星火术/愤怒 → 清扫；共享件 Druid_Forever.lua 零改动。
+- 宏表：新增 149 野性印记 / 150 荆棘术 / 193 治疗药水 宏槽，86 原月神轨道炮改 星涌术；WR_SkillColor 原 301/302 越界槽改为真实 19/16，星涌术 132（原为 /focus raid12）改 86，并登记 切目标=46、种族爆发=181、复生=13、激活=93。
+- 移除 80 级/SoD 技能引用：星落 / 月神轨道炮 / 星辰坠落 / 阳炎术 / 自然之力 / 台风 / 树皮术插入等本服 60 级不存在技能不再出现在面板与循环。
+- 验证：新增 .workbuddy/test_druid_balance_rotation.py / test_druid_balance_menu.py / test_druid_balance_ui.py 离线夹具全过；全量 Lua 语法检查通过。
 
 【毁灭】2026-11-15（按猪猪-无限服毁灭页重做毁灭术功能与循环）
 - 用户口径：图片为毁灭术专精；当前客户端 60 级技能与天赋；按图匹配功能并移除 80 级旧开关（狂咒/邪甲/武器石/暗影烈焰/腐蚀之种/厄运诅咒/地狱火/灵魂碎裂/TOC一键恐惧等），界面仍走 MK 面板，不污染痛苦/恶魔与其他职业。

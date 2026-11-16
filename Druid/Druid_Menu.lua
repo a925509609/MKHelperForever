@@ -16,435 +16,182 @@ if WR_PlayerClass ~= "DRUID" then return end
 
 Druid_Menu = {
     -- ==========================================================
-    -- 1. 平衡专精（鸟德 / 月神轨道炮流）
+    -- 1. 平衡专精（鸟德）—— 2026-11-15 按「彼岸花-无限服 · 平衡页」重做（Forever 60级）
     -- ==========================================================
     ["平衡"] = {
-        -- ===== 下拉菜单（DM） =====
+        -- ===== 下拉菜单（DM）：选择 / 拉条 / 爆发按钮 =====
         DM = {
             -- 防ADD开关
             {
                 text = "|cffFF7D0A防ADD|r",
                 menuItems = { { text = "|cffFF7D0A是|r" }, { text = "|cffFF7D0A否|r" } },
-                tooltipText = "是否开启防ADD,打开的情况下需要目标进入战斗才会攻击",
+                tooltipText = "是否开启防ADD：打开时，需要目标进入战斗才会主动攻击",
                 saveVariable = "FANG_ADD_PH",
-                defaultID = 1,
+                defaultID = 1
             },
-            -- 狂咒停手层数（冰龙技能）
-            {
-                text = "|cffFF7D0A狂咒|r",
-                menuItems = {
-                    { text = "|cffFF7D0A停手|r" },
-                    { text = "|cffFF7D0A1层|r" },
-                    { text = "|cffFF7D0A2层|r" },
-                    { text = "|cffFF7D0A3层|r" },
-                    { text = "|cffFF7D0A4层|r" },
-                    { text = "|cffFF7D0A5层|r" },
-                    { text = "|cffFF7D0A不停手|r" },
-                },
-                tooltipText = "中几层|cff00adf0狂咒|r停手",
-                saveVariable = "PH_KZ",
-                section = "自动",
-                defaultID = 1,
-            },
-            -- 给队友激活（蓝量阈值滑条）
-            {
-                text = "|cffFF7D0A选目标激活|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 80,
-                tooltipText = "选中的队友后使用|cff00adf0激活|r\n(当队友蓝量低于设定值时才使用)",
-                saveVariable = "PH_JH",
-            },
-            -- 给自己激活（蓝量阈值滑条）
-            {
-                text = "|cffFF7D0A给自己激活|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 80,
-                tooltipText = "选中的队友后使用|cff00adf0激活|r\n(当队友蓝量低于设定值时才使用)",
-                saveVariable = "PH_JH_PLAYER",
-            },
-            -- 愈合给自己加血（血量阈值滑条）
-            {
-                text = "|cffFF7D0A愈合|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 0,
-                tooltipText = "给自己加血)",
-                saveVariable = "PH_YH",
-            },
+            -- 拉条：喝红药
+            { text = "|cffFF7D0A喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 10, defaultVal = 30,
+              tooltipText = "自己血量低于该百分比时自动喝治疗药水（0 = 关闭）", saveVariable = "PH_HXY" },
+            -- 爆发快捷按钮
+            { text = "|cffFF7D0A爆发全开|r", isButton = true, buttonText = "全开", buttonWidth = 90, labelWidth = 95, tooltipText = "一键打开 种族爆发", onClick = "WR_DruidBalanceBurstAllOn" },
+            { text = "|cffFF7D0A爆发全关|r", isButton = true, buttonText = "全关", buttonWidth = 90, labelWidth = 95, tooltipText = "一键关闭 种族爆发", onClick = "WR_DruidBalanceBurstAllOff" },
+            { text = "|cffFF7D0A爆发切换|r", isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95, tooltipText = "种族爆发开着就全关，全关就全开", onClick = "WR_DruidBalanceBurstToggle" },
         },
         -- ===== 复选框（CB） =====
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 136018, text = "|cffFF7D0A全局|r", tooltipText = "ICC2号的功能,对被|cff00adf0统御心灵|r的队友使用|cff00adf0旋风|r\n", saveVariable = "PH_XF", defaultState = false },
-            { row = 1, column = 2, IconID = 135952, text = "|cffFF7D0A全局r|", tooltipText = "对被|cff00adf0麻痹诅咒|r或者|cff00adf0MC1老1诅咒|r的队友使用|cff00adf0解除诅咒|r\n", saveVariable = "PH_JCZZ", defaultState = false },
-            { row = 1, column = 3, IconID = 136045, text = "|cffFF7D0A全局|r", tooltipText = "对队友的目标|cff00adf0虫群|r\n", saveVariable = "PH_CQ_QJ", defaultState = false },
-            { row = 1, column = 4, IconID = 136096, text = "|cffFF7D0A全局|r", tooltipText = "对队友的目标|cff00adf0月火术|r\n", saveVariable = "PH_YHS_QJ", defaultState = false },
-            { row = 1, column = 5, IconID = 429383, text = "|cffFF7D0ABOSS|r", tooltipText = "只有在boss目标开启轨道炮", saveVariable = "PH_GDP_BOSS", defaultState = false },
+            -- ===== 功能（截图 8 个图标，默认全勾） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Nature_ForceOfNature", text = "|cffFF7D0A枭兽|r", tooltipText = "没有枭兽形态时自动补（平衡天赋，未学会自动跳过）", saveVariable = "PH_XN", section = "功能", defaultState = true },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Nature_InsectSwarm", text = "|cffFF7D0ADOT|r", tooltipText = "按右键设置给目标上月火术、虫群。\n右键：月火术 / 虫群 / 预判秒数", saveVariable = "PH_DOT", section = "功能", defaultState = true,
+              onRightClick = function() if WR_DruidBalanceUI then WR_DruidBalanceUI.ShowOptions("PH_DOT") end end },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Nature_Regeneration", text = "|cffFF7D0A野性印记|r", tooltipText = "自己身上没有野性印记/野性赐福时自动补", saveVariable = "PH_YXYZ", section = "功能", defaultState = true },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Spell_Nature_Reincarnation", text = "|cffFF7D0A复生|r", tooltipText = "队友死亡时自动选中并复生（40 码内）", saveVariable = "PH_FS", section = "功能", defaultState = true },
+            { row = 2, column = 1, IconID = "Interface\\Icons\\Spell_Nature_Lightning", text = "|cffFF7D0A激活|r", tooltipText = "蓝量低于阈值时给自己激活；焦点队友蓝量低时给焦点激活。\n右键：开关 / 蓝量阈值", saveVariable = "PH_JH_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_DruidBalanceUI then WR_DruidBalanceUI.ShowOptions("PH_JH_ON") end end },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Spell_Nature_Thorns", text = "|cffFF7D0A荆棘术|r", tooltipText = "自己身上没有荆棘术时自动补", saveVariable = "PH_JJS", section = "功能", defaultState = true },
+            { row = 2, column = 3, IconID = 132293, text = "|cffFF7D0A切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标", saveVariable = "PH_TAB", section = "功能", defaultState = true },
+            { row = 2, column = 4, IconID = "Interface\\Icons\\Spell_Nature_RemoveCurse", text = "|cffFF7D0A驱散|r", tooltipText = "自动解除自己/焦点/队友身上的诅咒", saveVariable = "PH_QS", section = "功能", defaultState = true },
 
-            -- 第2行
-            { row = 2, column = 1, IconID = 236868, text = "|cffFF7D0A自动|r", tooltipText = "BOSS战自动吃|cff00adf0狂野魔法药水|r\n", saveVariable = "PH_KYMFYS1", defaultState = false },
-            { row = 2, column = 2, IconID = 136045, text = "|cffFF7D0A目标|r", tooltipText = "对目标使用|cff00adf0虫群|r\n", saveVariable = "PH_CQ1", defaultState = true },
-            { row = 2, column = 3, IconID = 136045, text = "|cffFF7D0A指向|r", tooltipText = "对指向单位使用|cff00adf0虫群|r\n", saveVariable = "PH_CQ2", defaultState = true },
-            { row = 2, column = 4, IconID = 136045, text = "|cffFF7D0A移动|r", tooltipText = "移动时使用|cff00adf0虫群|r\n", saveVariable = "PH_CQ3", defaultState = true },
-            { row = 2, column = 5, IconID = 136047, text = "|cffFF7D0A锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n,这个是TOC的双子自动锁对应目标和ICC议会", saveVariable = "PH_Suo", defaultState = true },
+            -- ===== 爆发（默认和截图一致：种族爆发勾选） =====
+            { row = 1, column = 1, IconID = 135727, text = "|cffFF7D0A种族爆发|r", tooltipText = "自动使用种族爆发技能", saveVariable = "PH_ZDZZ", section = "爆发", defaultState = true },
 
-            -- 第3行
-            { row = 3, column = 1, IconID = 136096, text = "|cffFF7D0A目标|r", tooltipText = "对目标使用|cff00adf0月火术|r\n", saveVariable = "PH_YHS1", defaultState = true },
-            { row = 3, column = 2, IconID = 136096, text = "|cffFF7D0A指向|r", tooltipText = "对指向单位使用|cff00adf0月火术|r\n", saveVariable = "PH_YHS2", defaultState = true },
-            { row = 3, column = 3, IconID = 136096, text = "|cffFF7D0A移动|r", tooltipText = "移动时使用|cff00adf0月火术|r\n", saveVariable = "PH_YHS3", defaultState = true },
-            { row = 3, column = 4, IconID = 133712, text = "|cffFF7D0A移动|r", tooltipText = "使用|cff00adf0通用热力工程炸药|r或|cff00adf0萨隆邪铁炸弹|r\n", saveVariable = "PH_ZD", defaultState = false },
-            { row = 3, column = 5, IconID = 136033, text = "|cffFF7D0ABOSS|r", tooltipText = "对团本BOSS才会使用|cff00adf0精灵之火|r\n", saveVariable = "PH_JLZH", defaultState = true },
-
-            -- 第4行
-            { row = 4, column = 1, IconID = 132129, text = "|cffFF7D0A自动|r", tooltipText = "使用|cff00adf0自然之力|r\n", saveVariable = "PH_ZRZL", defaultState = true },
-            { row = 4, column = 2, IconID = 135952, text = "|cffFF7D0A自己|r", tooltipText = "对自己解|cff00adf0麻痹诅咒|r\n", saveVariable = "PH_JCWR_P", defaultState = true },
-            { row = 4, column = 3, IconID = 429383, text = "|cffFF7D0A自动|r", tooltipText = "轨道炮好了就用", saveVariable = "PH_YSGDP_ZD", defaultState = true },
-            { row = 4, column = 4, IconID = 236168, text = "|cffFF7D0A自动|r", tooltipText = "自动使用|cff00adf0星辰坠落|r\n", saveVariable = "PH_XCZL_ZD", defaultState = true },
-            -- ★ 第4行第5列：新增偷药开关
-            { row = 4, column = 5, IconID = 236871, text = "|cffFF7D0A偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "PH_TOUYAO", section = "爆发", defaultState = false },
-
-            -- 第5行（插入类技能）
-            { row = 5, column = 1, IconID = 236868, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0狂野魔法药水|r\n", saveVariable = "PH_KYMFYS2", section = "插入", defaultState = false },
-            { row = 5, column = 2, IconID = 132962, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0手套|r\n", saveVariable = "PH_ST", section = "插入", defaultState = false },
-            { row = 5, column = 3, IconID = 134228, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0饰品|r\n", saveVariable = "PH_SP", section = "插入", defaultState = false },
-            { row = 5, column = 4, IconID = 136097, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0树皮术|r\n", saveVariable = "PH_SPS", section = "插入", defaultState = false },
-            { row = 5, column = 5, IconID = 132129, text = "|cffFF7D0A插入|r", tooltipText = "使用|cff00adf0自然之力|r\n", saveVariable = "PH_CRZRZL", section = "插入", defaultState = false },
-
-            -- 第6行（插入类技能）
-            { row = 6, column = 1, IconID = 236170, text = "|cffFF7D0A插入|r", tooltipText = "使用|cff00adf0台风|r\n", saveVariable = "PH_CRTF", section = "插入", defaultState = false },
-            { row = 6, column = 2, IconID = 136018, text = "|cffFF7D0A插入|r", tooltipText = "使用|cff00adf0飓风|r\n", saveVariable = "PH_CRJF", section = "插入", defaultState = false },
-            { row = 6, column = 3, IconID = 236168, text = "|cffFF7D0A插入|r", tooltipText = "使用|cff00adf0星辰坠落|r\n", saveVariable = "PH_CRXCZL", section = "插入", defaultState = false },
-            { row = 6, column = 4, IconID = 429383, text = "|cffFF7D0A插入|r", tooltipText = "使用|cff00adf0月神轨道炮|r\n", saveVariable = "PH_YSGDP_CR", showSpell = "月神轨道炮", section = "插入", defaultState = false },
-            -- ★ 自动切目标开关
-            { row = 7, column = 1, IconID = 132293, text = "|cffFF7D0A切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "PH_TAB", defaultState = true },
+            -- ===== 插入（一次性，放完自关） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Nature_Cyclone", text = "|cffFF7D0A飓风|r", tooltipText = "插入 飓风（一次性，施放后自关）", saveVariable = "PH_CRJF", section = "插入", defaultState = false },
         },
     },
 
     -- ==========================================================
-    -- 2. 野性战斗专精（猫德/熊德）
+    -- 2. 野性战斗专精（野德/猫德/熊德）—— 2026-11-16 按「彼岸花-无限服 · 野性页」重做（Forever 60级）
     -- ==========================================================
     ["野性战斗"] = {
+        -- ===== 下拉菜单（DM）：选择 / 拉条 / 爆发按钮 =====
         DM = {
-            -- 防ADD开关
             {
                 text = "|cffFF7D0A防ADD|r",
                 menuItems = { { text = "|cffFF7D0A是|r" }, { text = "|cffFF7D0A否|r" } },
-                tooltipText = "是否开启防ADD,打开的情况下需要目标进入战斗才会攻击",
+                tooltipText = "是否开启防ADD：打开时，需要目标进入战斗才会主动攻击",
                 saveVariable = "FANG_ADD_YD",
                 defaultID = 1,
             },
-            -- 形态选择：猫形态 / 熊形态
             {
-                text = "|cffFF7D0A形态选择|r",
+                text = "|cffFF7D0A形态|r",
                 menuItems = { { text = "|cffFF7D0A猫形态|r" }, { text = "|cffFF7D0A熊形态|r" } },
-                tooltipText = "选择野德形态\n",
+                tooltipText = "选择野德形态\n猫形态：输出循环\n熊形态：坦克循环",
                 saveVariable = "YD_XTXZ",
                 defaultID = 1,
             },
-            -- 寒霜刺骨停手层数（冰龙技能）
-            {
-                text = "|cffFF7D0A寒霜刺骨|r",
-                menuItems = {
-                    { text = "|cffFF7D0A5|r" }, { text = "|cffFF7D0A6|r" },
-                    { text = "|cffFF7D0A7|r" }, { text = "|cffFF7D0A8|r" },
-                    { text = "|cffFF7D0A9|r" }, { text = "|cffFF7D0A10|r" },
-                    { text = "|cffFF7D0A禁用|r" },
-                },
-                tooltipText = "|cff00adf0寒霜刺骨|r层数大于等于设定值，自动停手(|cff00adf0冰龙|r技能)",
-                saveVariable = "YD_HSCG",
-                section = "自动",
-                defaultID = 7,  -- 默认禁用
-            },
-            -- 给队友激活（蓝量阈值滑条）
-            {
-                text = "|cffFF7D0A激活|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 0,
-                tooltipText = "选中的队友后使用|cff00adf0激活|r\n(当队友蓝量低于设定值时才使用)\n",
-                saveVariable = "YD_JH",
-            },
-            -- 愈合（仅野外有迅捷时生效）
-            {
-                text = "|cffFF7D0A愈合|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 0,
-                tooltipText = "只在野外有迅捷的情况下生效",
-                saveVariable = "YD_YH",
-            },
-            { text = "|cffFF7D0A打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 50, tooltipText = "施法进度达到该百分比时自动打断（0=关闭，默认50）", saveVariable = "YD_DD" },
+            -- 拉条：喝红药
+            { text = "|cffFF7D0A喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 10, defaultVal = 30,
+              tooltipText = "自己血量低于该百分比时自动喝治疗药水（0 = 关闭）", saveVariable = "YD_HXY" },
+            -- 拉条：猫专属 猛虎之怒
+            { text = "|cffFF7D0A猛虎之怒|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30,
+              tooltipText = "猫专属：能量低于该百分比时使用猛虎之怒（0 = 关闭）", saveVariable = "YD_MHZN_NL" },
+            -- 拉条：熊专属 槌击 / 狂暴回复
+            { text = "|cffFF7D0A槌击|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 25,
+              tooltipText = "熊专属：怒气高于该百分比时用槌击倾泻怒气（0 = 关闭）", saveVariable = "YD_CJ_NL" },
+            { text = "|cffFF7D0A狂暴回复|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 40,
+              tooltipText = "熊专属：自己血量低于该百分比时使用狂暴回复（0 = 关闭）", saveVariable = "YD_KBHF_HP" },
+            -- 爆发快捷按钮
+            { text = "|cffFF7D0A爆发全开|r", isButton = true, buttonText = "全开", buttonWidth = 90, labelWidth = 95, tooltipText = "一键打开 狂暴 / 种族爆发", onClick = "WR_DruidFeralBurstAllOn" },
+            { text = "|cffFF7D0A爆发全关|r", isButton = true, buttonText = "全关", buttonWidth = 90, labelWidth = 95, tooltipText = "一键关闭 狂暴 / 种族爆发", onClick = "WR_DruidFeralBurstAllOff" },
+            { text = "|cffFF7D0A爆发切换|r", isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95, tooltipText = "狂暴/种族爆发都开着就全关，否则全开", onClick = "WR_DruidFeralBurstToggle" },
         },
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 136018, text = "|cffFF7D0A全局|r", tooltipText = "对被|cff00adf0统御心灵|r的队友使用|cff00adf0旋风|r\n", saveVariable = "YD_XF", defaultState = false },
-            { row = 1, column = 2, IconID = 135952, text = "|cffFF7D0A全局|r", tooltipText = "对被|cff00adf0麻痹诅咒|r或者|cff00adf0MC1老1诅咒|r的队友使用|cff00adf0解除诅咒|r\n", saveVariable = "YD_JCZZ", defaultState = false },
-            { row = 1, column = 3, IconID = 136085, text = "|cffFF7D0A2T5|r", tooltipText = "是否开启2T5愈合功能,实战好像并不怎么样.不要问我开不开我不知道", saveVariable = "YD_YH_2T5", defaultState = false },
-            { row = 1, column = 4, IconID = 236149, text = "|cffFF7D0A自动|r", tooltipText = "会在猛虎以后使用|cff00adf0狂暴|r\n,只对boss生效", saveVariable = "YD_KB", section = "爆发", defaultState = true },
-            -- ★ 第1行第5列：新增偷药开关
-            { row = 1, column = 5, IconID = 236871, text = "|cffFF7D0A偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "YD_TOUYAO", section = "爆发", defaultState = false },
+            -- ===== 功能：通用 3 个 =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Druid_CatForm", text = "|cffFF7D0A变形|r", tooltipText = "按「形态」选择自动补猎豹形态/巨熊形态", saveVariable = "YD_BX", section = "功能", defaultState = true },
+            { row = 1, column = 2, IconID = 132293, text = "|cffFF7D0A切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标", saveVariable = "YD_TAB", section = "功能", defaultState = true },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Nature_FaerieFire", text = "|cffFF7D0A精灵之火|r", tooltipText = "目标没有精灵之火（野性）时自动补", saveVariable = "YD_JLZF", section = "功能", defaultState = true },
+            -- ===== 功能：猫专属 4 个 =====
+            { row = 2, column = 1, IconID = "Interface\\Icons\\Ability_Druid_Swipe", text = "|cffFF7D0A扫击|r", tooltipText = "猫专属：8 码内 3+ 目标时使用扫击（AoE）", saveVariable = "YD_SJ", section = "功能", defaultState = true },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Ability_Druid_FerociousBite", text = "|cffFF7D0A终结技|r", tooltipText = "猫专属：维持 5 星割裂；目标快死/低血时用凶猛撕咬", saveVariable = "YD_ZJJ", section = "功能", defaultState = true },
+            { row = 2, column = 3, IconID = "Interface\\Icons\\Spell_Druid_Displacement", text = "|cffFF7D0A变形之力|r", tooltipText = "猫专属：能量不溢出时使用变形之力（8 秒 CD，法力换 40 能量）", saveVariable = "YD_BXZL", section = "功能", defaultState = true },
+            { row = 2, column = 4, IconID = "Interface\\Icons\\Ability_Druid_Mangle", text = "|cffFF7D0A正面|r", tooltipText = "猫专属：不能打背时允许用爪击正面输出", saveVariable = "YD_ZM", section = "功能", defaultState = true },
+            -- ===== 功能：熊专属 8 个 =====
+            { row = 3, column = 1, IconID = "Interface\\Icons\\Ability_Druid_DemoralizingRoar", text = "|cffFF7D0A挫志咆哮|r", tooltipText = "熊专属：目标没有挫志咆哮时自动补", saveVariable = "YD_CZPX", section = "功能", defaultState = true },
+            { row = 3, column = 2, IconID = "Interface\\Icons\\Ability_Druid_Maul", text = "|cffFF7D0A挥击|r", tooltipText = "熊专属：8 码内 3+ 目标时使用挥击（AoE）", saveVariable = "YD_HJ", section = "功能", defaultState = true },
+            { row = 3, column = 3, IconID = "Interface\\Icons\\Ability_Druid_Lacerate", text = "|cffFF7D0A割伤|r", tooltipText = "熊专属：割伤剩余小于 5 秒就补，保持 5 层", saveVariable = "YD_GS", section = "功能", defaultState = true },
+            { row = 3, column = 4, IconID = "Interface\\Icons\\Ability_Physical_Taunt", text = "|cffFF7D0A嘲讽|r", tooltipText = "熊专属：目标不在打自己时用低吼嘲讽（默认关闭）", saveVariable = "YD_CS", section = "功能", defaultState = false },
+            { row = 4, column = 1, IconID = "Interface\\Icons\\Spell_Nature_Regeneration", text = "|cffFF7D0A野性印记|r", tooltipText = "自己身上没有野性印记/野性赐福时自动补", saveVariable = "YD_YXYZ", section = "功能", defaultState = true },
+            { row = 4, column = 2, IconID = "Interface\\Icons\\Spell_Nature_Reincarnation", text = "|cffFF7D0A复生|r", tooltipText = "队友死亡时自动选中并复生（40 码内）", saveVariable = "YD_FS", section = "功能", defaultState = true },
+            { row = 4, column = 3, IconID = "Interface\\Icons\\Spell_Nature_Lightning", text = "|cffFF7D0A激活|r", tooltipText = "自己/焦点蓝量低于阈值时使用激活", saveVariable = "YD_JH_ON", section = "功能", defaultState = true },
+            { row = 4, column = 4, IconID = "Interface\\Icons\\Spell_Nature_Thorns", text = "|cffFF7D0A荆棘术|r", tooltipText = "自己身上没有荆棘术时自动补", saveVariable = "YD_JJS", section = "功能", defaultState = true },
 
-            -- 第2行
-            { row = 2, column = 1, IconID = 132242, text = "|cffFF7D0A自动|r", tooltipText = "使用|cff00adf0猛虎之怒|r\n", saveVariable = "YD_MHZN", defaultState = true },
-            { row = 2, column = 2, IconID = 236871, text = "|cffFF7D0A自动|r", tooltipText = "使用|cff00adf0速度药水|r\n", saveVariable = "YD_ZDSDYS", section = "爆发", defaultState = false },
-            { row = 2, column = 3, IconID = 133712, text = "|cffFF7D0A自动|r", tooltipText = "使用|cff00adf0通用热力工程炸药|r或|cff00adf0萨隆邪铁炸弹|r\n", saveVariable = "YD_ZD", defaultState = false },
-            { row = 2, column = 4, IconID = 132122, text = "|cffFF7D0A自动|r", tooltipText = "|cff00adf0斜掠|r控制开关\n", saveVariable = "YD_XL", defaultState = true },
-            { row = 2, column = 5, IconID = 134296, text = "|cffFF7D0A自动|r", tooltipText = "开启|cff00adf0自动横扫|r\n", saveVariable = "YD_ZDHS", defaultState = true },
+            -- ===== 爆发（截图默认两项都勾） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Druid_Berserk", text = "|cffFF7D0A狂暴|r", tooltipText = "自动使用狂暴（爆发）", saveVariable = "YD_KB", section = "爆发", defaultState = true },
+            { row = 1, column = 2, IconID = 135727, text = "|cffFF7D0A种族爆发|r", tooltipText = "自动使用种族爆发技能", saveVariable = "YD_ZDZZ", section = "爆发", defaultState = true },
 
-            -- 第3行
-            { row = 3, column = 1, IconID = 134296, text = "|cffFF7D0A屏蔽|r", tooltipText = "ICC老2附近有玩家自动屏蔽|cff00adf0横扫|r\n", saveVariable = "YD_WJPB", defaultState = true },
-            { row = 3, column = 2, IconID = 134296, text = "|cffFF7D0A强制|r", tooltipText = "开启|cff00adf0强制横扫|r\n", saveVariable = "YD_QZHS", defaultState = false },
-            { row = 3, column = 3, IconID = 136047, text = "|cffFF7D0A锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n,这个是TOC的双子自动锁对应目标和ICC议会", saveVariable = "YD_SUO", defaultState = false },
-            { row = 3, column = 4, IconID = 135964, text = "|cffFF7D0A取消|r", tooltipText = "自动取消|cff00adf0保护|r\n", saveVariable = "YD_QXBH", defaultState = true },
-            { row = 3, column = 5, IconID = 132135, text = "|cffFF7D0A正面|r", tooltipText = "正面|cff00adf0裂伤(猫)|r控制开关\n,基本无用不用开.只在完全无法打背面的boss有用,", saveVariable = "YD_ZMLS", defaultState = false },
-
-            -- 第4行
-            { row = 4, column = 1, IconID = 135952, text = "|cffFF7D0A自己|r", tooltipText = "对自己解|cff00adf0麻痹诅咒|r\n", saveVariable = "YD_JCWR_P", defaultState = true },
-            -- ★ 工程手套独立开关
-            { row = 4, column = 2, IconID = 132962, text = "|cffFF7D0A手套|r", tooltipText = "自动使用|cff00adf0工程手套附魔|r（爆发窗口触发，独立于其他开关）", saveVariable = "YD_GCST", section = "爆发", defaultState = true },
-            -- ★ ZZ 移植：猫变猫解定身（自动常驻开关）
-            { row = 4, column = 3, IconID = 132121, text = "|cffFF7D0A解定身|r", tooltipText = "ZZ 移植：自动检测| cff00adf0纠缠、包围之网和火焰之花|r，被控时重进猎豹形态解除（常驻开关）", saveVariable = "YD_CAT_CAT_AUTO", defaultState = true },
-            -- ★ ZZ 移植：猫变猫（一次性插入开关）
-            { row = 4, column = 4, IconID = 132121, text = "|cffFF7D0A插入猫|r", tooltipText = "ZZ 移植：一次性——已处于猎豹形态且技能可用时重进一次（解控/刷新），用完自动关", saveVariable = "YD_CAT_CAT_CR", defaultState = false },
-
-            -- 第5行（插入类技能）
-            { row = 5, column = 1, IconID = 236149, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0狂暴|r\n", saveVariable = "YD_CRKB", section = "爆发", defaultState = false },
-            { row = 5, column = 2, IconID = 132276, text = "|cffFF7D0A搭脉|r", tooltipText = "插入|cff00adf0教授搭脉|r\n,ICC教授用的.切熊模式减伤全开群嘲.", saveVariable = "YD_CRDM", defaultState = false },
-            { row = 5, column = 3, IconID = 236149, text = "|cffFF7D0A插入\n猛虎\n后|r", tooltipText = "下一个猛虎以后插入|cff00adf0狂暴|r\n", saveVariable = "YD_CRKB_MHH", section = "爆发", defaultState = false },
-
-            -- 第6行（插入类技能，熊德专用）
-            { row = 6, column = 1, IconID = 132114, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0猛击|r\n", saveVariable = "YD_MJ_CR", showSpell = "猛击", section = "插入", defaultState = false },
-            { row = 6, column = 2, IconID = 132117, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0挑战咆哮|r\n", saveVariable = "YD_TZPX_CR", showSpell = "挑战咆哮", section = "插入", defaultState = false },
-            { row = 6, column = 3, IconID = 132091, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0狂暴回复|r\n", saveVariable = "YD_KBHF_CR", showSpell = "狂暴回复", section = "插入", defaultState = false },
-            { row = 6, column = 4, IconID = 132121, text = "|cffFF7D0A插入|r", tooltipText = "插入|cff00adf0挫志咆哮|r\n", saveVariable = "YD_CZPX_CR", showSpell = "挫志咆哮", section = "插入", defaultState = false },
-            -- ★ 自动切目标开关
-            { row = 7, column = 1, IconID = 132293, text = "|cffFF7D0A切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "YD_TAB", defaultState = false },
+            -- ===== 插入（熊专属，一次性放完自关） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Ability_Druid_FeralCharge", text = "|cffFF7D0A冲锋|r", tooltipText = "插入 野性冲锋（一次性，施放后自关）", saveVariable = "YD_CF", section = "插入", defaultState = false },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Ability_Druid_ChallengingRoar", text = "|cffFF7D0A群嘲|r", tooltipText = "插入 挑战咆哮（一次性，施放后自关）", saveVariable = "YD_QC", section = "插入", defaultState = false },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Ability_Druid_Bash", text = "|cffFF7D0A重击|r", tooltipText = "插入 重击（一次性，施放后自关）", saveVariable = "YD_ZJ", section = "插入", defaultState = false },
         },
     },
-
     -- ==========================================================
-    -- 3. 恢复专精（奶德）
+    -- 3. 恢复专精（奶德）—— 2026-11-16 按「彼岸花-无限服 · 恢复页」重做（Forever 60级）
     -- ==========================================================
     ["恢复"] = {
+        -- ===== 下拉菜单（DM）：选择 / 拉条 / 爆发按钮 =====
         DM = {
-            -- 驱散模式选择
             {
-                text = "|cffFF7D0A驱散|r",
-                menuItems = {
-                    { text = "|cffFF7D0A常规|r" },
-                    { text = "|cffFF7D0A优先|r" },
-                    { text = "|cffFF7D0A目标|r" },
-                    { text = "|cffFF7D0A指向|r" },
-                    { text = "|cffFF7D0A禁用|r" },
-                },
-                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r",
-                saveVariable = "HF_QS",
+                text = "|cffFF7D0A防ADD|r",
+                menuItems = { { text = "|cffFF7D0A是|r" }, { text = "|cffFF7D0A否|r" } },
+                tooltipText = "是否开启防ADD：打开时，需要自己进入战斗才会主动治疗；关闭时队友战斗中也会治疗",
+                saveVariable = "FANG_ADD_HF",
                 defaultID = 1,
             },
-            -- 野性印记 / 野性赐福
             {
-                text = "|cffFF7D0A野性|r",
+                text = "|cffFF7D0A治疗模式|r",
                 menuItems = {
-                    { text = "|cffFF7D0A印记|r" },
-                    { text = "|cffFF7D0A赐福|r" },
-                    { text = "|cffFF7D0A禁用|r" },
-                },
-                tooltipText = "使用|cff00adf0野性印记|r或|cff00adf0野性赐福|r",
-                saveVariable = "HF_YX",
-                defaultID = 2,  -- 默认赐福
-            },
-            -- 愈合模式
-            {
-                text = "|cffFF7D0A愈合|r",
-                menuItems = {
-                    { text = "|cffFF7D0A自动|r" },
-                    { text = "|cffFF7D0A坦克|r" },
-                    { text = "|cffFF7D0A禁用|r" },
-                },
-                tooltipText = "|cff00adf0自动|r：对所有人使用|cff00adf0愈合|r\n|cff996b1f坦克|r：仅对|cff996b1f坦克|r使用|cff00adf0愈合|r|r",
-                saveVariable = "HF_YH",
-                defaultID = 2,  -- 默认仅坦克
-            },
-            -- ★ ZZ 移植：愈合坦克 HP% 阈值滑块（配合 HF_YH_TANK 开关）
-            {
-                text = "|cffFF7D0A愈合坦阈值|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 70,
-                tooltipText = "|cff00adf0愈合坦克 HP% 阈值|r：坦克/焦点 HP% ≤ 设定值时补愈合（默认 70）。\n|cffff5040值为0：只看目标优先级 debuff（血肉成灰等）才补。|r",
-                saveVariable = "HF_YH_HP",
-            },
-            -- ★ ZZ 移植：愈合坦克 HP% 模式总开关
-            {
-                text = "|cffFF7D0A愈合坦模式|r",
-                isCheckBox = true,
-                tooltipText = "ZZ 移植：开启后按| cff00adf0HF_YH_HP|r 阈值给坦克/焦点补愈合（HP%≤阈值）；关闭则走原失血量判定",
-                saveVariable = "HF_YH_TANK",
-            },
-            -- ★ ZZ 移植：荆棘术自动给坦克
-            {
-                text = "|cffFF7D0A荆棘术|r",
-                isCheckBox = true,
-                tooltipText = "战斗中自动给坦克补|cff00adf0荆棘术|r（TankUnit 列表第一个满足距离条件的）",
-                saveVariable = "HF_JJS",
-            },
-            -- 过量治疗容忍度（滑条）
-            {
-                text = "|cffFF7D0A过量治疗|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 30,
-                tooltipText = "设置的过量比例越高，越积极加血。\n|cffff5040值为0：不容忍过量，队友必须掉满技能血量才加血。|r",
-                saveVariable = "HF_YXGL",
-            },
-            -- 树皮术目标选择
-            {
-                text = "|cffFF7D0A树皮术|r",
-                menuItems = {
-                    { text = "|cffFF7D0A坦克1|r" },
-                    { text = "|cffFF7D0A坦克2|r" },
-                    { text = "|cffFF7D0A坦克3|r" },
-                    { text = "|cffFF7D0A坦克4|r" },
-                    { text = "|cffFF7D0A自己|r" },
                     { text = "|cffFF7D0A全团|r" },
-                    { text = "|cffFF7D0A禁用|r" },
+                    { text = "|cffFF7D0A目标|r" },
+                    { text = "|cffFF7D0A预读|r" },
+                    { text = "|cffFF7D0A坦克|r" },
+                    { text = "|cffFF7D0A脆皮|r" },
+                    { text = "|cffFF7D0A一队|r" },
+                    { text = "|cffFF7D0A二队|r" },
+                    { text = "|cffFF7D0A三队|r" },
+                    { text = "|cffFF7D0A四队|r" },
+                    { text = "|cffFF7D0A五队|r" },
                 },
-                tooltipText = "设置|cff00adf0树皮术|r的释放目标（魔改版）",
-                saveVariable = "HF_SPS",
-                defaultID = 5,  -- 默认自己
+                tooltipText = "|cff00adf0全团：自动治疗所有单位，切目标不影响治疗。|r\n|cffffd700目标：有目标时只治疗目标，无目标则治疗全团。|r\n|cffadff2f预读：有目标时只治疗目标，无目标则治疗全团。|r\n|cff996b1f坦克：仅治疗坦克职责。|r\n|cff9C3590脆皮：仅治疗非坦克单位。|r\n|cfffdffb6一队~五队：仅治疗对应小队（仅团队中生效）。|r",
+                saveVariable = "HF_TREAT_MODE",
+                defaultID = 1,
             },
-            -- 树皮术触发血量阈值（滑条）
-            {
-                text = "|cffFF7D0A树皮血量|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 35,
-                tooltipText = "设置触发|cff00adf0树皮术|r的血量百分比。",
-                saveVariable = "HF_SPS_HP",
-            },
-            -- 自然迅捷模式
-            {
-                text = "|cffFF7D0A自然迅捷|r",
-                menuItems = {
-                    { text = "|cffFF7D0A自动|r" },
-                    { text = "|cffFF7D0A重要|r" },
-                    { text = "|cffFF7D0A禁用|r" },
-                },
-                tooltipText = "当队友血量过低，对其使用|cff00adf0自然迅捷+治疗之触|r\n|cff00adf0自动|r：对所有人使用|cff00adf0自然迅捷|r\n|cffadff2f重要|r：仅对|cff996b1f坦克|r和|cffFF7D0A自己|r使用|cff00adf0自然迅捷|r|r",
-                saveVariable = "HF_ZRXJ",
-                defaultID = 1,  -- 默认自动
-            },
-            -- 自然迅捷触发血量阈值（滑条）
-            {
-                text = "|cffFF7D0A自然迅捷|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 35,
-                tooltipText = "设置触发|cff00adf0自然迅捷|r的血量百分比。",
-                saveVariable = "HF_ZRXJ_HP",
-            },
-            -- 迅捷治愈触发血量阈值（滑条）
-            {
-                text = "|cffFF7D0A迅捷治愈|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 50,
-                tooltipText = "当友方单位血量低于设定值的时候，使用|cff00adf0迅捷治愈|r。\n|cffff5040值为0：不使用|cff00adf0迅捷治愈|r。|r",
-                saveVariable = "HF_XJZY",
-            },
-            -- 回春术触发血量阈值（滑条）
-            {
-                text = "|cffFF7D0A回春术|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 90,
-                tooltipText = "当友方单位血量低于设定值的时候，使用|cff00adf0回春术|r。\n|cffff5040值为0：不使用|cff00adf0回春术|r。|r",
-                saveVariable = "HF_HCS",
-            },
-            -- 激活自身蓝量阈值（滑条）
-            {
-                text = "|cffFF7D0A激活|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 15,
-                tooltipText = "当自身蓝量低于设定值的时候，给自己使用|cff00adf0激活|r。\n|cffff5040值为0：不使用|cff00adf0激活|r。|r",
-                saveVariable = "HF_JH",
-            },
-            -- ★ 宁静全团血量阈值（滑条）- 增强说明
-            {
-                text = "|cffFF7D0A宁静|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 0,
-                tooltipText = "当全团/全队总血量百分比低于设定值时，自动使用|cff00adf0宁静|r。\n包含全团血量预测功能，避免过量治疗浪费。\n|cffff5040值为0：禁用自动宁静。|r",
-                saveVariable = "HF_NJ_HP",
-            },
-            -- ★ 过量停条窗口（0.1~0.5秒，默认0.5秒）
-            {
-                text = "|cffFF7D0A过量停条|r",
-                menuItems = {
-                    { text = "|cffFF7D0A0.1秒|r" },
-                    { text = "|cffFF7D0A0.2秒|r" },
-                    { text = "|cffFF7D0A0.3秒|r" },
-                    { text = "|cffFF7D0A0.4秒|r" },
-                    { text = "|cffFF7D0A0.5秒|r" },
-                },
-                tooltipText = "设置过量停条的检查窗口。施法剩余时间≤此值时检查目标血量，满血则停止施法避免过量。\n|cffff5040需配合下方「过量停条」开关使用，开关默认关闭。|r",
-                saveVariable = "HF_GLTCCK",
-                defaultID = 5
-            },
+            -- 拉条
+            { text = "|cffFF7D0A喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30,
+              tooltipText = "自己血量低于该百分比时自动喝治疗药水（0 = 关闭）", saveVariable = "HF_HXY" },
+            { text = "|cffFF7D0A迅捷治触|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30,
+              tooltipText = "目标血量低于该百分比时，用自然迅捷 + 治疗之触急救（0 = 关闭）", saveVariable = "HF_ZRXJ_HP" },
+            { text = "|cffFF7D0A迅捷治愈|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 50,
+              tooltipText = "目标血量低于该百分比且身上有回春/愈合时用迅捷治愈（0 = 关闭）", saveVariable = "HF_XJZY" },
+            { text = "|cffFF7D0A野性成长|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 80,
+              tooltipText = "群体 HOT：低血人数≥2 且目标血量低于该百分比时使用（0 = 关闭）", saveVariable = "HF_YZCZ" },
+            { text = "|cffFF7D0A回春术|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 95,
+              tooltipText = "目标血量低于该百分比且没有回春术时补 HOT（0 = 关闭）", saveVariable = "HF_HCS" },
+            { text = "|cffFF7D0A治疗之触|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 60,
+              tooltipText = "目标血量低于该百分比时用大治疗治疗之触（0 = 关闭）", saveVariable = "HF_ZLZC" },
+            { text = "|cffFF7D0A愈合|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 85,
+              tooltipText = "目标血量低于该百分比时用愈合（0 = 关闭）", saveVariable = "HF_YH_HP" },
+            -- 爆发快捷按钮
+            { text = "|cffFF7D0A爆发全开|r", isButton = true, buttonText = "全开", buttonWidth = 90, labelWidth = 95, tooltipText = "一键打开 种族爆发", onClick = "WR_DruidRestorationBurstAllOn" },
+            { text = "|cffFF7D0A爆发全关|r", isButton = true, buttonText = "全关", buttonWidth = 90, labelWidth = 95, tooltipText = "一键关闭 种族爆发", onClick = "WR_DruidRestorationBurstAllOff" },
+            { text = "|cffFF7D0A爆发切换|r", isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95, tooltipText = "种族爆发开着就全关，全关就全开", onClick = "WR_DruidRestorationBurstToggle" },
         },
+        -- ===== 复选框（CB） =====
         CB = {
-            -- 第1行
-            { row = 1, column = 1, IconID = 136080, text = "|cffFF7D0A复生|r", tooltipText = "战斗中选中死亡队友自动对其使用|cff00adf0复生|r", saveVariable = "HF_FS", defaultState = true },
-            { row = 1, column = 2, IconID = 134206, text = "|cffFF7D0A生命绽放|r", tooltipText = "使用|cff00adf0生命绽放|r(仅对当前|cff996b1f坦克|r)", saveVariable = "HF_SMZF", defaultState = true },
-            { row = 1, column = 3, IconID = 135230, text = "|cffFF7D0A治疗石|r", tooltipText = "血量过低使用|cff00adf0治疗石|r", saveVariable = "HF_ZLS", defaultState = true },
-            { row = 1, column = 4, IconID = 136018, text = "|cffFF7D0A旋风|r", tooltipText = "对被|cff00adf0统御心灵|r的队友使用|cff00adf0旋风|r(|cff00adf0亡语者女士|r)", saveVariable = "HF_XF", defaultState = true },
-            { row = 1, column = 5, IconID = 135737, text = "|cffFF7D0A狂咒|r", tooltipText = "中|cff00adf0狂咒|r后停手(|cff00adf0辛达苟萨|r)", saveVariable = "HF_KZ", defaultState = true },
+            -- ===== 功能（截图 6 个图标，默认全勾） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Nature_Regeneration", text = "|cffFF7D0A野性印记|r", tooltipText = "自己身上没有野性印记/野性赐福时自动补", saveVariable = "HF_YXYZ", section = "功能", defaultState = true },
+            { row = 1, column = 2, IconID = "Interface\\Icons\\Spell_Nature_Reincarnation", text = "|cffFF7D0A复生|r", tooltipText = "队友死亡时自动选中并复生（40 码内）", saveVariable = "HF_FS", section = "功能", defaultState = true },
+            { row = 1, column = 3, IconID = "Interface\\Icons\\Spell_Nature_Lightning", text = "|cffFF7D0A激活|r", tooltipText = "蓝量低于阈值时给自己激活；焦点队友蓝量低时给焦点激活。\n右键：开关 / 蓝量阈值", saveVariable = "HF_JH_ON", section = "功能", defaultState = true,
+              onRightClick = function() if WR_DruidRestorationUI then WR_DruidRestorationUI.ShowOptions("HF_JH_ON") end end },
+            { row = 1, column = 4, IconID = "Interface\\Icons\\Spell_Nature_Thorns", text = "|cffFF7D0A荆棘术|r", tooltipText = "自己身上没有荆棘术时自动补", saveVariable = "HF_JJS", section = "功能", defaultState = true },
+            { row = 2, column = 1, IconID = 132293, text = "|cffFF7D0A切换目标|r", tooltipText = "没有目标/目标死亡时，自动选择最近的可攻击目标", saveVariable = "HF_TAB", section = "功能", defaultState = true },
+            { row = 2, column = 2, IconID = "Interface\\Icons\\Spell_Nature_RemoveCurse", text = "|cffFF7D0A驱散|r", tooltipText = "自动解除自己/焦点/队友身上的诅咒", saveVariable = "HF_QS_ON", section = "功能", defaultState = true },
 
-            -- 第2行
-            { row = 2, column = 1, IconID = 136081, text = "|cffFF7D0A无脑回春|r", tooltipText = "开启|cff00adf0无脑回春模式|r，只要有队友不满血就会铺回春|r", saveVariable = "HF_HCS_WN", defaultState = false },
-            { row = 2, column = 2, IconID = 136012, text = "|cffFF7D0A爆发|r", tooltipText = "开启|cff00adf0爆发模式|r，使用|cff00adf0手套附魔|r、|cff00adf0速度药水|r及|cff00adf0饰品|r\n含DBM倒数提前开功能", saveVariable = "HF_BF", section = "爆发", defaultState = false },
-            -- ★ ★ 第2行第3列：新增99%无脑回春开关
-            { row = 2, column = 3, IconID = 136081, text = "|cffFF7D0A99%回春|r", tooltipText = "开启|cff00adf099%无脑回春模式|r，只要有队友血量低于99%就会铺回春\n适用于高压AOE环境，最大化HOT覆盖", saveVariable = "HF_HCS_WN_99", defaultState = false },
-            -- ★ ★ 第2行第4列：新增偷药开关
-            { row = 2, column = 4, IconID = 236871, text = "|cffFF7D0A偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "HF_TOUYAO", section = "爆发", defaultState = false },
-            -- ★ ★ 第2行第5列：新增血肉成灰处理开关
-            { row = 2, column = 5, IconID = 135737, text = "|cffFF7D0A血肉成灰|r", tooltipText = "开启后，当目标有|cff00adf0血肉成灰|rDebuff时自动停手，避免传染", saveVariable = "HF_XRCZ", defaultState = true },
+            -- ===== 爆发（截图默认勾选） =====
+            { row = 1, column = 1, IconID = 135727, text = "|cffFF7D0A种族爆发|r", tooltipText = "自动使用种族爆发技能", saveVariable = "HF_ZDZZ", section = "爆发", defaultState = true },
 
-            -- 第3行
-            { row = 3, column = 1, IconID = 136107, text = "|cffFF7D0A宁静插入|r", tooltipText = "插入宁静（用户强制开启）", saveVariable = "HF_NJ_CR", showSpell = "宁静", section = "插入", defaultState = false },
-            -- ★ 第3行第2列：过量停条开关（默认关闭）
-            { row = 3, column = 2, IconID = 135737, text = "|cffFF7D0A过量停条|r", tooltipText = "开启后，施法结束前(按停条窗口设定)目标已满血时自动停止施法，避免过量治疗。\n|cffff5040首领机制(狂咒/血肉成灰等)与特殊治疗模式不受此开关影响，始终生效。|r", saveVariable = "HF_GLTC", defaultState = false },
-            { row = 3, column = 3, IconID = 135894, text = "|cffFF7D0A总闸|r", tooltipText = "勾选后，关闭恢复德自动驱散（解诅咒/消毒术），优先级高于下拉选项。", saveVariable = "HF_QS_AUTO", defaultState = false },
+            -- ===== 插入（一次性，放完自关） =====
+            { row = 1, column = 1, IconID = 136107, text = "|cffFF7D0A宁静|r", tooltipText = "插入 宁静（团队≥4人 / 小队≥3人低于45%时施放，放完自关）", saveVariable = "HF_NJ_CR", showSpell = "宁静", section = "插入", defaultState = false },
         },
     },
 

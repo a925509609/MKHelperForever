@@ -118,7 +118,7 @@ local function CreateClassesMacro()
     WR_CreateMacro("CTRL-SHIFT-F6", "/cast [@focus] 强效庇护祝福") -- 76
     WR_CreateMacro("CTRL-SHIFT-F7", "/cast [target=mouseover] 牺牲之手") -- 77
     WR_CreateMacro("CTRL-SHIFT-F8", "/CAST 圣佑术") -- 78
-    WR_CreateMacro("CTRL-SHIFT-F12", "") -- 79
+    WR_CreateMacro("CTRL-SHIFT-F12", "/use 阿加治疗药水\n/use 焕生治疗药水") -- 79（2026-11-16：补治疗药水宏）
     WR_CreateMacro("CTRL-SHIFT-F10", "") -- 80
     WR_CreateMacro("ALT-CTRL-SHIFT-F1", "/cast 力量祝福") -- 81
     WR_CreateMacro("ALT-CTRL-SHIFT-F2", "/cast 智慧祝福") -- 82
@@ -338,7 +338,7 @@ WR_SkillColor["PALADIN"] = {
     ["圣光誓约"] = 112,          -- 神圣骑：圣光誓约（宏 CTRL-SHIFT--）
     ["圣光守望"] = 4,            -- 神圣骑：圣光守望（宏 NUMPAD4）
     ["切换目标"] = 90,           -- 无目标/目标死亡时 /targetenemy（宏 ALT-CTRL-SHIFT-F10）
-    ["治疗药水"] = 75,           -- 喝红药（AHK 通用治疗药水槽）
+    ["治疗药水"] = 79,           -- 喝红药（AHK 通用治疗药水槽）
     ["神圣震击"] = 113,
     ["圣光术"] = 110,
     ["圣光闪现"] = 10,
@@ -364,7 +364,7 @@ WR_SkillColor["PALADIN"] = {
     ["复仇之手"] = 44,
     ["审判"] = 2,
     ["驱邪"] = 20,
-    ["复仇之怒"] = 28,
+    ["复仇之怒"] = 32,
     ["殉难圣印"] = 29,
     ["十字军圣印"] = 30,
     ["十字军打击(回蓝)"] = 34,
@@ -434,5 +434,4 @@ WR_SkillColor["PALADIN"] = {
     ["清洁术(目标)"]   = 44,    -- 宏 SHIFT-F11
     ["清洁术(焦点)"]   = 63,    -- 宏 ALT-CTRL-F3
     ["清洁术(指向)"]   = 59,    -- 宏 CTRL-F12
-    ["圣光守望"]       = 4,     -- 宏 NUMPAD4（2026-11-15 由旧译光之守夜改为客户端正式名）
 }

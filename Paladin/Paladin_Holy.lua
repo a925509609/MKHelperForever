@@ -50,7 +50,7 @@ function WR_PaladinHoly()
 
     -- ===== 5. 洁净术（驱散友方 debuff）=====
     if WR_GetUnitDebuffTime("player", "中毒") > 0 or WR_GetUnitDebuffTime("player", "疾病") > 0
-       or WR_GetUnitDebuffTime("player", "魔法") > 0 or WR_GetUnitDebuffTime("player", "诅咒") > 0 then
+       or WR_GetUnitDebuffTime("player", "魔法") > 0 then
         if WR_SpellUsable("洁净术", true) then
             if WR_ColorFrame_ShowSkill("洁净术", 14) then return true end
         end

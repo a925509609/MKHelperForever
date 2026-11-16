@@ -273,6 +273,24 @@ local function WR_CreateColorFrameAnchor(side)
     local anchor = CreateFrame("Frame", "WR_ColorFrame_Anchor_" .. side, UIParent)
     anchor:SetSize(42, 42)
     anchor:SetFrameStrata("TOOLTIP")
+    if anchor.SetFrameLevel ~= nil then anchor:SetFrameLevel(0) end
+
+    -- ★ 2026-11-16：色块保护底色（用户口径：游戏中的背景颜色会导致脚本误识别，
+    --   需要在色块出现的位置添加黑色底色，防止误识别其他颜色）。
+    --   实现：每个定位锚点挂一张纯黑 BACKGROUND 纹理（左常驻；右上在该侧首次
+    --   出现色块时亮起并常驻），不随 WR_HideColorFrame 隐藏。色块未点亮时，
+    --   AHK 主采样点 (1,1) 与全部备用采样点
+    --   (8,8)/(21,21)/(34,34)/(8,34)/(34,8) 都落在黑色上，不会误匹配技能颜色。
+    --   纹理比 42×42 色块区向外扩 2px，形成黑色保护边，规避边缘抗锯齿/半像素偏色。
+    local guard = anchor:CreateTexture("WR_ColorFrame_Guard_" .. side, "BACKGROUND")
+    guard:SetPoint("TOPLEFT", anchor, "TOPLEFT", -2, 2)
+    guard:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 2, -2)
+    guard:SetColorTexture(0, 0, 0, 1)
+    -- 右上方块默认不显示：只有该侧首次真正出现色块时才亮起保护底，
+    -- 避免不用的右上角常驻一块黑色遮挡游戏 UI。
+    if side == "R" then guard:Hide() end
+    anchor.WR_GuardTexture = guard
+    anchor.guard = guard
 
     -- 恢复上次保存的位置（默认与游戏内一致：左上/右上锚点均为 0.0 坐标）
     local saved = PigSet["SkillIconPos" .. side]
@@ -307,17 +325,38 @@ local function WR_CreateSingleColorSlot(Name, side)
     arrayFrame[Name]:SetSize(42, 42)
     arrayFrame[Name]:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
     arrayFrame[Name]:SetFrameStrata("TOOLTIP")
+    -- ★ 2026-11-16：色块必须压在锚点常驻黑底之上（锚点 FrameLevel=0），
+    --   否则 5×5 小色块会被保护底色盖住，AHK 读不到任何颜色。
+    local anchorLevel = 0
+    if anchor.GetFrameLevel ~= nil then anchorLevel = anchor:GetFrameLevel() or 0 end
+    if arrayFrame[Name].SetFrameLevel ~= nil then
+        arrayFrame[Name]:SetFrameLevel(anchorLevel + 2)
+    end
 
     local texture = arrayFrame[Name]:CreateTexture(nil, "OVERLAY")
     texture:SetAllPoints(arrayFrame[Name])
     texture:SetColorTexture(PIG_BGRtoBGR(WR_Frame_Color[Name]))
 
     arrayText[Name] = arrayFrame[Name]:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    arrayText[Name]:SetPoint("BOTTOM", arrayFrame[Name], "BOTTOM")
-    arrayText[Name]:SetText(Name)
-    arrayText[Name]:SetFont(arrayText[Name]:GetFont(), 9)
-    arrayText[Name]:SetShadowOffset(0, 0)
-    arrayText[Name]:SetShadowColor(0, 0, 0, 0)
+    -- ★ 2026-11-17：技能名标签放在 42×42 色块区（含 2px 黑保护底）下方，绝不压住
+    --   AHK 主/备用采样点；锚到定位锚点而不是色块 Frame，紧凑模式 5×5 时同样在
+    --   黑底下方显示，不会污染取色。
+    if side == "Left" then
+        arrayText[Name]:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
+        arrayText[Name]:SetJustifyH("LEFT")
+    else
+        arrayText[Name]:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -3)
+        arrayText[Name]:SetJustifyH("RIGHT")
+    end
+    arrayText[Name]:SetText(tostring(Name))
+    arrayText[Name]:SetFont(arrayText[Name]:GetFont(), 10, "OUTLINE")
+    arrayText[Name]:SetTextColor(1, 1, 1, 1)
+    arrayText[Name]:SetShadowOffset(1, -1)
+    arrayText[Name]:SetShadowColor(0, 0, 0, 1)
+    -- ★ 2026-11-16：该侧首次出现色块时亮起保护底色；此后常驻，不随色块隐藏。
+    if anchor.WR_GuardTexture ~= nil then
+        anchor.WR_GuardTexture:Show()
+    end
     arrayFrame[Name]:Hide()
 end
 

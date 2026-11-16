@@ -66,16 +66,16 @@ function WR_RogueForeverSubtlety()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("幽魂击") and WR_SpellUsable("幽魂击", true) then
-        if WR_ColorFrame_ShowSkill("幽魂击", 306) then return true end
+        if WR_ColorFrame_ShowSkill("幽魂击", 64) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("预谋") and WR_SpellUsable("预谋", true) then
-        if WR_ColorFrame_ShowSkill("预谋", 307) then return true end
+        if WR_ColorFrame_ShowSkill("预谋", 40) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("伺机待发") and WR_SpellUsable("伺机待发", true) then
-        if WR_ColorFrame_ShowSkill("伺机待发", 308) then return true end
+        if WR_ColorFrame_ShowSkill("伺机待发", 47) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("出血") and WR_SpellUsable("出血", true) then
-        if WR_ColorFrame_ShowSkill("出血", 309) then return true end
+        if WR_ColorFrame_ShowSkill("出血", 33) then return true end
     end
     return false
 end

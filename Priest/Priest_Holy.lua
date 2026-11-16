@@ -28,7 +28,7 @@ function WR_PriestHoly()
 
     -- ===== 1. 紧急救场 =====
     if lowHP < 0.30 and WR_SpellUsable("守护之魂", true) then
-        if WR_ColorFrame_ShowSkill("守护之魂", 187) then return true end
+        if WR_ColorFrame_ShowSkill("守护之魂", 64) then return true end
     end
 
     -- ===== 2. 群体治疗 =====

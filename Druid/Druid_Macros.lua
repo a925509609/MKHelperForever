@@ -17,12 +17,12 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-NUMPAD4", "/cast 爪击") -- 14
   WR_CreateMacro("CTRL-NUMPAD5", "/cast 撕碎") -- 15
   WR_CreateMacro("CTRL-NUMPAD6", "/cast !枭兽形态") -- 16
-  WR_CreateMacro("CTRL-NUMPAD7", "/cast [@cursor] 自然之力") -- 17
-  WR_CreateMacro("CTRL-NUMPAD8", "/cast 星辰坠落") -- 18
+  WR_CreateMacro("CTRL-NUMPAD7", "") -- 17
+  WR_CreateMacro("CTRL-NUMPAD8", "") -- 18
   WR_CreateMacro("CTRL-NUMPAD9", "/cast 虫群") -- 19
   WR_CreateMacro("CTRL-NUMPAD0", "/cast 愤怒") -- 20
   WR_CreateMacro("ALT-NUMPAD1", "/cast 星火术") -- 21
-  WR_CreateMacro("ALT-NUMPAD2", "/cast 台风") -- 22
+  WR_CreateMacro("ALT-NUMPAD2", "") -- 22
   WR_CreateMacro("ALT-NUMPAD3", "/cast 树皮术") -- 23
   WR_CreateMacro("ALT-NUMPAD4", "/cast [@cursor] 飓风") -- 24
   WR_CreateMacro("ALT-NUMPAD5", "/CAST 激活") -- 25
@@ -86,7 +86,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-SHIFT-F3", "/cast 治疗之触") -- 83
   WR_CreateMacro("ALT-CTRL-SHIFT-F11", "") -- 84
   WR_CreateMacro("ALT-CTRL-SHIFT-F5", "/cast 重击") -- 85
-  WR_CreateMacro("ALT-CTRL-SHIFT-F6", "/use 10\n/use 13\n/use 14\n/stopcasting\n/cast 月神轨道炮") -- 86
+  WR_CreateMacro("ALT-CTRL-SHIFT-F6", "/cast 星涌术") -- 86
   WR_CreateMacro("ALT-CTRL-SHIFT-F7", "/cast [target=focus] 虫群") -- 87
   WR_CreateMacro("ALT-CTRL-SHIFT-F8", "/cast [target=focus] 月火术") -- 88
   WR_CreateMacro("ALT-CTRL-SHIFT-F12", "") -- 89
@@ -149,8 +149,8 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-SHIFT-,", "/focus player") -- 146
   WR_CreateMacro("CTRL-SHIFT-,", "/focus target") -- 147
   WR_CreateMacro("ALT-CTRL-,", "/focus mouseover") -- 148
-  WR_CreateMacro("ALT-SHIFT-,", "") -- 149
-  WR_CreateMacro("CTRL-,", "") -- 150
+  WR_CreateMacro("ALT-SHIFT-,", "/cast [target=player] 野性印记") -- 149
+  WR_CreateMacro("CTRL-,", "/cast [target=player] 荆棘术") -- 150
   WR_CreateMacro("SHIFT-,", "/focus raid1target") -- 151
   WR_CreateMacro("ALT-,", "/focus raid2target") -- 152
   WR_CreateMacro("ALT-CTRL-SHIFT-.", "/focus raid3target") -- 153
@@ -193,11 +193,11 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-NUMPADDIVIDE", "/startattack") -- 190
   WR_CreateMacro("ALT-NUMPADDIVIDE", "/cancelaura 保护之手\n/cancelaura 能量灌注\n/cancelaura 专注魔法") -- 191
   WR_CreateMacro("ALT-CTRL-NUMPADMULTIPLY", "/focus player") -- 192
-  WR_CreateMacro("CTRL-NUMPADMULTIPLY", "") -- 193
-  WR_CreateMacro("ALT-NUMPADMULTIPLY", "") -- 194
-  WR_CreateMacro("ALT-CTRL-NUMPADMINUS", "") -- 195
-  WR_CreateMacro("CTRL-NUMPADMINUS", "") -- 196
-  WR_CreateMacro("ALT-NUMPADMINUS", "") -- 197
+  WR_CreateMacro("CTRL-NUMPADMULTIPLY", "/use 阿加治疗药水\n/use 焕生治疗药水") -- 193
+  WR_CreateMacro("ALT-NUMPADMULTIPLY", "/cast 变形之力") -- 194
+  WR_CreateMacro("ALT-CTRL-NUMPADMINUS", "/cast 低吼") -- 195
+  WR_CreateMacro("CTRL-NUMPADMINUS", "/cast 野性冲锋") -- 196
+  WR_CreateMacro("ALT-NUMPADMINUS", "/cast 痛击") -- 197（2026-11-16：原空槽，补痛击）
   WR_CreateMacro("ALT-CTRL-NUMPADPLUS", "") -- 198
   WR_CreateMacro("CTRL-NUMPADPLUS", "") -- 199
   WR_CreateMacro("ALT-NUMPADPLUS", "") -- 200
@@ -220,9 +220,9 @@ end)
 --   未在此表的符文新技能已自动分配到空闲职业槽；如需 AHK 按键请在各 WR_CreateMacro 补绑定。
 -- ============================================================
 WR_SkillColor["DRUID"] = {
-    ["月神轨道炮"] = 86,
     ["宁静"] = 64,
     ["飓风"] = 24,
+    ["月火术"] = 26,
     ["愤怒"] = 20,
     ["星火术"] = 21,
     ["斜掠"] = 7,
@@ -242,15 +242,33 @@ WR_SkillColor["DRUID"] = {
     ["治疗之触"] = 83,
     ["愈合"] = 80,
     ["解除诅咒"] = 74,
-    ["星涌术"] = 132,
-    ["星落"] = 135,
-    ["横扫"] = 143,
-    ["裂伤"] = 137,
-    ["痛击"] = 144,
-    ["虫群"] = 301,
-    ["枭兽形态"] = 302,
-    ["野性冲锋"] = 305,
-    ["狂暴"] = 306,
-    ["迅捷治愈"] = 307,
-    ["自然迅捷"] = 308,
+    ["星涌术"] = 86,
+    ["横扫"] = 11,           -- 宏 CTRL-NUMPAD1 横扫（豹）（原 143=/focus raid23，按错键）
+    ["裂伤"] = 8,            -- 宏 NUMPAD8 裂伤（豹）（原 137=/focus raid17，按错键）
+    ["裂伤(熊)"] = 30,       -- 宏 ALT-NUMPAD0 裂伤（熊）
+    ["痛击"] = 197,         -- 宏 ALT-NUMPADMINUS（原 144=/focus raid24，按错键）
+    ["虫群"] = 19,
+    ["枭兽形态"] = 16,
+    ["野性印记"] = 149,
+    ["荆棘术"] = 150,
+    ["治疗药水"] = 193,
+    ["复生"] = 13,
+    ["激活"] = 93,
+    ["切目标"] = 46,
+    ["种族爆发"] = 181,
+    ["野性冲锋"] = 196,
+    ["狂暴"] = 3,
+    ["猛虎之怒"] = 2,
+    ["变形之力"] = 194,
+    ["低吼"] = 195,
+    ["挫志咆哮"] = 79,
+    ["割伤"] = 31,
+    ["重击"] = 51,
+    ["挥击"] = 53,
+    ["扫击"] = 57,
+    ["槌击"] = 52,
+    ["精灵之火（野性）"] = 10,
+    ["迅捷治愈"] = 111,
+    ["自然迅捷"] = 112,
+    ["迅捷治触"] = 112,
 }

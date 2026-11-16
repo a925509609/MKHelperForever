@@ -1,7 +1,7 @@
 -- ============================================================
 -- Warrior Forever · Fury 专精循环（60级 / 无限服）
 -- ------------------------------------------------------------
--- 2026-11-15 按「彼岸花-无限服 · 狂暴页」重做：
+-- 2026-11-16 按「猪猪 / 彼岸花-无限服 · 狂暴页」截图复核：
 --   核心：斩杀（目标血量低于拉条）> 嗜血 > 旋风斩 > 压制（触发）
 --         > 猛击 > 顺劈斩（2+ 目标、怒气拉条）> 英勇打击（怒气拉条）
 --   功能：撕裂 / 雷霆挫志 / 血性狂暴 / 破甲攻击 /
@@ -44,7 +44,7 @@ function WR_WarriorForeverFury()
     WF.InitDefaults()
 
     -- ===== 2. 自动切目标（先于目标有效性判断）=====
-    if WF.On("KN_TAB", false) then
+    if WF.On("KN_TAB", true) then
         local needTarget = (not UnitExists("target")) or (UnitIsDead("target"))
         if needTarget and WF.Show("切换目标", 90) then return true end
     end
@@ -55,8 +55,10 @@ function WR_WarriorForeverFury()
     -- ===== 4. 脱战：切战斗姿态（点了「先锋」就不切）=====
     if not UnitAffectingCombat("player") then
         local oocStance = WF.Stance()
+        -- 截图口径：防御姿态下点了天赋「先锋」时不切（先锋让防御姿态也能冲锋开怪）
         if WF.On("KN_QTZ", true) and WF.On("KN_QTZ_OOC", true)
-           and oocStance > 0 and oocStance ~= 1 and not WF.SpellKnown("先锋") then
+           and oocStance > 0 and oocStance ~= 1
+           and not (oocStance == 2 and WF.SpellKnown("先锋")) then
             if WF.Show("战斗姿态", 9) then return true end
         end
         return false

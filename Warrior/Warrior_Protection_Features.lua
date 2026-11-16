@@ -4,7 +4,7 @@
 -- ------------------------------------------------------------
 -- 只服务 WARRIOR「防护」专精，不写全局、不影响武器/狂怒与其他职业。
 --
--- 本文件按截图（彼岸花-无限服 · 防战页）逐项落地：
+-- 本文件按截图（猪猪 / 彼岸花-无限服 · 防战页，2026-11-16 同步）逐项落地：
 --   功能：撕裂 / 雷霆挫志 / 格挡 / 血性狂暴 / 破甲攻击 /
 --         切姿态 / 战斗怒吼 / 切换目标 / 嘲讽 / 鲁莽挥击
 --   插入：反击风暴 / 震荡猛击 / 挑战怒吼 / 盾墙 / 挫志怒吼 /
@@ -45,8 +45,7 @@ function WP.InitDefaults()
     setb("FZ_TAB", false)        -- 切换目标（默认关）
     setb("FZ_CT", false)         -- 嘲讽（默认关，避免抢其他坦克仇恨）
     setb("FZ_LMHJ", true)        -- 鲁莽挥击
-    setb("FZ_YYTZ", true)        -- 英勇投掷（沿用旧开关）
-    setb("FZ_JF", false)         -- 自动缴械（沿用旧开关）
+    setb("FZ_KG_ZDZZ", true)     -- 种族爆发
 
     -- 插入（一次性，默认关）
     setb("FZ_FJFB_CR", false)
@@ -57,8 +56,6 @@ function WP.InitDefaults()
     setb("FZ_JL_CR", false)
     setb("FZ_CJTJ_CR", false)
     setb("FZ_KBZN_CR", false)
-    setb("FZ_CRSLTZ", false)
-    setb("FZ_JF_CR", false)
 
     -- 拉条默认值
     setn("FZ_SPZ", 30)           -- 顺劈斩怒气
@@ -75,7 +72,7 @@ function WP.InitDefaults()
     setn("FZ_SILIE_LEAD", 6)
 
     -- 格挡额外条件（默认只勾卡CD，和截图一致）
-    setb("FZ_GB_MULTI", false)
+    setb("FZ_GB_MULTI", true)    -- 格挡多目标（截图默认勾选）
     setn("FZ_GB_MULTI_COUNT", 2)
     setb("FZ_GB_CD", true)
     setb("FZ_GB_HP", false)
@@ -83,12 +80,12 @@ function WP.InitDefaults()
 
     -- 破甲攻击额外条件
     setb("FZ_PJ_ONLY1", false)
-    setb("FZ_PJ_HIGH", true)
+    setb("FZ_PJ_HIGH", false)    -- 破甲高优先级（截图默认不勾）
     setb("FZ_PJ_LOW", false)
     setn("FZ_PJ_REFRESH", 3)
 
     -- 雷霆挫志额外条件（1=保持 / 2=卡CD / 3=不放）
-    setn("FZ_LT_AOE_MODE", 1)
+    setn("FZ_LT_AOE_MODE", 3)    -- 雷霆一击多目标默认「不放」（截图口径）
     setn("FZ_LT_AOE_COUNT", 2)
     setn("FZ_LT_MISS", 0)
     setn("FZ_LT_SINGLE_MODE", 1)
@@ -319,6 +316,9 @@ function WP.SunderMode()
     local remain = WP.DebuffRemain("破甲攻击")
     local refresh = WP.Val("FZ_PJ_REFRESH", 3)
     if WP.On("FZ_PJ_ONLY1", false) then
+        -- 截图口径：目标快死时不放
+        local ttd = WP.TargetTTD()
+        if ttd < 900 and ttd < 6 then return 0 end
         if stacks <= 0 then return 1 end
         return 0
     end
@@ -354,8 +354,8 @@ function WP.DemoShoutWanted()
     else
         mode = WP.Val("FZ_CZ_SINGLE_MODE", 3)
     end
-    if mode == 3 then return false end
-    if mode == 2 then return true end
+    -- 截图口径：挫志怒吼只有 保持(1) / 不放(3) 两档（旧档卡CD=2 一律按不放处理）
+    if mode ~= 1 then return false end
     local miss = WP.Val("FZ_CZ_MISS", 0)
     if miss > 0 and (UnitCount8 or 0) >= miss and WP.DebuffRemain("挫志怒吼") <= 0 then return true end
     return WP.DebuffRemain("挫志怒吼") <= 1.5
@@ -393,6 +393,18 @@ function WP.RecklessSwingWanted()
     if not WP.On("FZ_LMHJ", true) then return false end
     if WP.BuffRemain("鲁莽挥击") > 0 then return false end
     return (Rage or 0) < WP.Val("FZ_LMHJ_NQ", 70)
+end
+
+-- 种族爆发：读当前种族的爆发技能列表，任意一个可用就提示（宏 181）。
+function WP.RacialBurstWanted()
+    if not WP.On("FZ_KG_ZDZZ", true) then return false end
+    if type(WR_Forever_GetRacialBursts) ~= "function" then return false end
+    local ok, list = pcall(WR_Forever_GetRacialBursts)
+    if not ok or type(list) ~= "table" then return false end
+    for _, s in ipairs(list) do
+        if type(WR_SpellUsable) == "function" and WR_SpellUsable(s, true) then return true end
+    end
+    return false
 end
 
 -- ============================================================
@@ -443,26 +455,26 @@ WP.PopupDefs = {
     },
     FZ_LTYJ = {
         title = "雷霆挫志  功能",
-        desc = "雷霆一击：对身边敌人放；挫志怒吼：降低敌人攻击强度。\n两段各自按 多目标 / 单体 设置。",
+        desc = "开着时按右键里的设置放雷霆一击和挫志怒吼（各自满足任意一条就放）。\n雷霆一击：「多目标」身边敌人够「怪数」时，选 保持 = 目标身上没有自己的雷霆一击或 1.5 秒内结束就补、选 卡CD = 冷却好就放；「缺数」身边没挂自己雷霆一击的怪够这么多就放；「单体」不看人数，选保持/卡CD。\n挫志怒吼：「多目标」身边敌人够「怪数」、目标没挂或 1.5 秒内结束就补；「缺数」身边没挂自己挫志怒吼的怪够这么多就放；「单体」不看人数，目标没挂就补。\n怒气不够、冷却没好或目标在近战范围外时不会放。\n关掉后两个都不自动放。\n宏：/WARRIOR_THUNDER_DEMO 切换（后面加 on 开、off 关）",
         rows = {
             { type = "header", text = "雷霆一击" },
-            { type = "radio", var = "FZ_LT_AOE_MODE", label = "多目标", options = { { "保持", 1 }, { "卡CD", 2 }, { "不放", 3 } }, default = 1 },
-            { type = "slider", var = "FZ_LT_AOE_COUNT", label = "怪物数", min = 1, max = 10, step = 1, default = 2, suffix = "个" },
-            { type = "slider", var = "FZ_LT_MISS", label = "缺数", min = 0, max = 10, step = 1, default = 0, suffix = "个", hint = "0 = 关闭" },
+            { type = "radio", var = "FZ_LT_AOE_MODE", label = "多目标", options = { { "保持", 1 }, { "卡CD", 2 }, { "不放", 3 } }, default = 3 },
+            { type = "slider", var = "FZ_LT_AOE_COUNT", label = "怪数", min = 1, max = 10, step = 1, default = 2, suffix = "个" },
+            { type = "slider", var = "FZ_LT_MISS", label = "缺数", min = 0, max = 10, step = 1, default = 0, suffix = "个", hint = "关闭 = 0" },
             { type = "radio", var = "FZ_LT_SINGLE_MODE", label = "单体", options = { { "保持", 1 }, { "卡CD", 2 }, { "不放", 3 } }, default = 1 },
             { type = "header", text = "挫志怒吼" },
-            { type = "radio", var = "FZ_CZ_AOE_MODE", label = "多目标", options = { { "保持", 1 }, { "卡CD", 2 }, { "不放", 3 } }, default = 3 },
-            { type = "slider", var = "FZ_CZ_AOE_COUNT", label = "怪物数", min = 1, max = 10, step = 1, default = 3, suffix = "个" },
-            { type = "slider", var = "FZ_CZ_MISS", label = "缺数", min = 0, max = 10, step = 1, default = 0, suffix = "个", hint = "0 = 关闭" },
-            { type = "radio", var = "FZ_CZ_SINGLE_MODE", label = "单体", options = { { "保持", 1 }, { "卡CD", 2 }, { "不放", 3 } }, default = 3 },
+            { type = "radio", var = "FZ_CZ_AOE_MODE", label = "多目标", options = { { "保持", 1 }, { "不放", 3 } }, default = 3 },
+            { type = "slider", var = "FZ_CZ_AOE_COUNT", label = "怪数", min = 1, max = 10, step = 1, default = 3, suffix = "个" },
+            { type = "slider", var = "FZ_CZ_MISS", label = "缺数", min = 0, max = 10, step = 1, default = 0, suffix = "个", hint = "关闭 = 0" },
+            { type = "radio", var = "FZ_CZ_SINGLE_MODE", label = "单体", options = { { "保持", 1 }, { "不放", 3 } }, default = 3 },
         },
     },
     FZ_DPGD = {
         title = "格挡  功能",
-        desc = "开着时按额外条件放盾牌格挡（短时间内格挡几率大幅提高，减少近战伤害），满足任意一条就放。",
+        desc = "开着时按右键里的额外条件放盾牌格挡（短时间内格挡几率大幅提高，少挨近战伤害），满足任意一条就放。\n「多目标」身边 8 码内进战的敌人够后面拉条的个数。\n「卡CD」不看人数，冷却好就放。\n「血量」自己血量低于后面拉条的百分比。\n默认只勾「卡CD」= 冷却好就放。要在防御姿态下、手里拿着盾、贴着目标才放得出来。\n关掉后不再自动放盾牌格挡。\n宏：/WARRIOR_SHIELDBLOCK 切换（后面加 on 开、off 关）",
         rows = {
             { type = "header", text = "- 额外条件" },
-            { type = "check", var = "FZ_GB_MULTI", label = "多目标", default = false },
+            { type = "check", var = "FZ_GB_MULTI", label = "多目标", default = true },
             { type = "slider", var = "FZ_GB_MULTI_COUNT", label = "  怪物数", min = 1, max = 10, step = 1, default = 2, suffix = "个" },
             { type = "check", var = "FZ_GB_CD", label = "卡CD", default = true },
             { type = "check", var = "FZ_GB_HP", label = "血量", default = false },
@@ -480,11 +492,11 @@ WP.PopupDefs = {
     },
     FZ_BDPJ = {
         title = "破甲攻击  功能",
-        desc = "开着时按额外条件放破甲攻击（降低目标护甲、拉仇恨），只算自己叠的破甲。\n已经挂上的破甲剩不到「续破秒数」就续；目标身上有盗贼的破甲（和破甲攻击互斥）时不放。",
+        desc = "开着时按右键里的额外条件放破甲攻击（降低目标护甲、拉仇恨），只算自己叠的破甲。\n「只打1破」排在前面，目标身上没有就挂 1 层（目标快死时不放）。\n「高优先级」排在前面，叠到 5 层。\n「低优先级」排在最后，不到 5 层时没别的技能可放才拿破甲填空。\n已经挂上的破甲剩不到「续破秒数」就续。目标身上有盗贼的破甲（和破甲攻击互斥）时不放。\n关掉后不再自动放破甲攻击。\n宏：/WARRIOR_SUNDER 切换（后面加 on 开、off 关）",
         rows = {
             { type = "header", text = "- 额外条件" },
             { type = "check", var = "FZ_PJ_ONLY1", label = "只打1破", default = false },
-            { type = "check", var = "FZ_PJ_HIGH", label = "高优先级", default = true },
+            { type = "check", var = "FZ_PJ_HIGH", label = "高优先级", default = false },
             { type = "check", var = "FZ_PJ_LOW", label = "低优先级", default = false },
             { type = "slider", var = "FZ_PJ_REFRESH", label = "续破秒数", min = 0, max = 30, step = 1, default = 3, suffix = "秒" },
         },
@@ -755,3 +767,80 @@ end
 function WP.SpellReadySoon(spell, sec)
     return WP.CooldownLeft(spell) <= (sec or 2)
 end
+
+-- ============================================================
+-- 7. 爆发按钮（全开 / 全关 / 切换）
+-- ============================================================
+function WP.SetBurst(on)
+    if type(PigSet) ~= "table" then return end
+    PigSet.FZ_KG_ZDZZ = on and true or false
+    WP.SyncCheckbox("FZ_KG_ZDZZ")
+end
+
+function WR_WarriorProtBurstAllOn()
+    if WR_WarriorProt then WR_WarriorProt.SetBurst(true) end
+end
+
+function WR_WarriorProtBurstAllOff()
+    if WR_WarriorProt then WR_WarriorProt.SetBurst(false) end
+end
+
+function WR_WarriorProtBurstToggle()
+    if not WR_WarriorProt then return end
+    WR_WarriorProt.SetBurst(PigSet.FZ_KG_ZDZZ ~= true)
+end
+
+-- ============================================================
+-- 8. 斜杠命令（对齐截图宏 /WARRIOR_xxx）
+-- ------------------------------------------------------------
+-- 武器战 / 狂怒战先注册了同名命令：存入共享注册表，防护时走防护变量，
+-- 其他专精回落原处理函数，互不覆盖。
+-- ============================================================
+local function WP_SetVarByCommand(var, msg, label)
+    msg = string.lower(msg or "")
+    if msg == "on" then
+        PigSet[var] = true
+    elseif msg == "off" then
+        PigSet[var] = false
+    elseif msg == "" or msg == "toggle" then
+        PigSet[var] = not PigSet[var]
+    else
+        return
+    end
+    WP.SyncCheckbox(var)
+    local status = PigSet[var] and "|cff00ff00已开启|r" or "|cffff0000已关闭|r"
+    local text = status .. " [" .. label .. "]"
+    if type(WR_PrintToVisible) == "function" then
+        WR_PrintToVisible(text)
+    elseif type(print) == "function" then
+        print(text)
+    end
+end
+
+-- ★ 防护是最后加载的专精：直接捕获当前处理函数（武器→狂怒链）作为回落，
+-- 不写 WR_WarriorSharedCommandPrev（那是武器→狂怒链的存储；防护再写会把
+-- 狂怒处理函数挤掉，导致狂怒专精下命令回落到武器战变量）。
+local function WP_BindSharedCommand(cmd, var, label)
+    if type(SlashCmdList) ~= "table" then return end
+    local base = SlashCmdList[cmd]
+    _G["SLASH_" .. cmd .. "1"] = "/" .. cmd
+    SlashCmdList[cmd] = function(msg)
+        local spec = nil
+        if type(WR_GetMyTalent) == "function" then
+            local ok, v = pcall(WR_GetMyTalent)
+            if ok and type(v) == "string" then spec = v end
+        end
+        if spec == "防护" then
+            WP_SetVarByCommand(var, msg, label)
+        elseif type(base) == "function" then
+            base(msg)
+        end
+    end
+end
+
+WP_BindSharedCommand("WARRIOR_REND", "FZ_SILIE", "撕裂")
+WP_BindSharedCommand("WARRIOR_SUNDER", "FZ_BDPJ", "破甲攻击")
+WP_BindSharedCommand("WARRIOR_BLOODRAGE", "FZ_HXKJ", "血性狂暴")
+WP_BindSharedCommand("WARRIOR_THUNDER_DEMO", "FZ_LTYJ", "雷霆挫志")
+WP_BindSharedCommand("WARRIOR_STANCE", "FZ_QTZ", "切姿态")
+WP_BindSharedCommand("WARRIOR_SHIELDBLOCK", "FZ_DPGD", "格挡")

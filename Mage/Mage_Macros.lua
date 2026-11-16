@@ -112,14 +112,14 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-SHIFT-F3", "/cast 召唤水元素\n/petattack [combat]") -- 103
   WR_CreateMacro("ALT-SHIFT-F11", "") -- 104
   WR_CreateMacro("ALT-SHIFT-F5", "/cancelaura 能量灌注") -- 105
-  WR_CreateMacro("ALT-SHIFT-F6", "") -- 106
-  WR_CreateMacro("ALT-SHIFT-F7", "") -- 107
-  WR_CreateMacro("ALT-SHIFT-F8", "") -- 108
-  WR_CreateMacro("ALT-SHIFT-F12", "") -- 109
-  WR_CreateMacro("ALT-SHIFT-F10", "") -- 110
-  WR_CreateMacro("ALT-CTRL-SHIFT--", "") -- 111
-  WR_CreateMacro("CTRL-SHIFT--", "") -- 112
-  WR_CreateMacro("ALT-CTRL--", "") -- 113
+  WR_CreateMacro("ALT-SHIFT-F6", "/cast 冰甲术") -- 106 奥法：冰甲术
+  WR_CreateMacro("ALT-SHIFT-F7", "/cast 魔甲术") -- 107 奥法：魔甲术
+  WR_CreateMacro("ALT-SHIFT-F8", "/cast 奥术智慧") -- 108 奥法：奥术智慧（自己）
+  WR_CreateMacro("ALT-SHIFT-F12", "/cast [@focus] 奥术智慧") -- 109 奥法：奥术智慧（焦点队友）
+  WR_CreateMacro("ALT-SHIFT-F10", "/cast 奥术愤怒") -- 110 奥法：奥术愤怒
+  WR_CreateMacro("ALT-CTRL-SHIFT--", "/use 阿加治疗药水\n/use 焕生治疗药水") -- 111 奥法：治疗药水
+  WR_CreateMacro("CTRL-SHIFT--", "/cast 解除次级诅咒") -- 112 奥法：解除次级诅咒（自己）
+  WR_CreateMacro("ALT-CTRL--", "/cast [@focus] 解除次级诅咒") -- 113 奥法：解除次级诅咒（焦点队友）
   WR_CreateMacro("ALT-SHIFT--", "") -- 114
     WR_CreateMacro("CTRL--", "/follow target") -- 115
     WR_CreateMacro("SHIFT--", "/focus [@target,exists,nodead]") -- 116
@@ -273,4 +273,20 @@ WR_SkillColor["MAGE"] = {
     ["气定神闲"] = 15,
     ["奥术强化"] = 16,
     ["冲击波"] = 22,
+    -- ★ 2026-11-16 奥法页新增/补齐：只登记真实存在且有宏绑定的槽位。
+    ["奥术愤怒"] = 110,       -- ALT-SHIFT-F10 /cast 奥术愤怒
+    ["霜火之箭"] = 20,        -- CTRL-NUMPAD0   /cast 霜火之箭
+    ["烈焰风暴"] = 23,        -- ALT-NUMPAD3    /cast [target=cursor] 烈焰风暴
+    ["闪现术"] = 31,          -- ALT-CTRL-NUMPAD1 /cast 闪现术
+    ["闪现"] = 31,            -- 别名
+    ["法术反制"] = 46,        -- SHIFT-F6       /cast 法术反制
+    ["法术吸取"] = 43,        -- SHIFT-F3       /cast 法术吸取
+    ["切换目标"] = 40,        -- ALT-CTRL-NUMPAD0 /targetenemy
+    ["冰甲术"] = 106,         -- ALT-SHIFT-F6   /cast 冰甲术
+    ["魔甲术"] = 107,         -- ALT-SHIFT-F7   /cast 魔甲术
+    ["奥术智慧"] = 108,       -- ALT-SHIFT-F8   /cast 奥术智慧
+    ["奥术智慧(队友)"] = 109, -- ALT-SHIFT-F12  /cast [@focus] 奥术智慧
+    ["治疗药水"] = 111,       -- ALT-CTRL-SHIFT-- /use 阿加/焕生治疗药水
+    ["解除次级诅咒"] = 112,   -- CTRL-SHIFT--   /cast 解除次级诅咒
+    ["解除次级诅咒(队友)"] = 113, -- ALT-CTRL--  /cast [@focus] 解除次级诅咒
 }

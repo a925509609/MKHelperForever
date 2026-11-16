@@ -65,9 +65,9 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-F6", "/tar 强力火元素\n/focus\n/targetlasttarget") -- 56
   WR_CreateMacro("CTRL-F7", "/cast [target=focus] 驱毒术") -- 57
   WR_CreateMacro("CTRL-F8", "/tar 庞然火元素\n/focus\n/targetlasttarget") -- 58
-  WR_CreateMacro("CTRL-F12", "") -- 59
+  WR_CreateMacro("CTRL-F12", "/cast 火元素图腾") -- 59（2026-11-16：原空槽，补火元素图腾）
   WR_CreateMacro("CTRL-F10", "/use [@player] 萨隆邪铁炸弹") -- 60
-  WR_CreateMacro("ALT-CTRL-F1", "") -- 61
+  WR_CreateMacro("ALT-CTRL-F1", "/cast 先知之怒") -- 61（2026-11-16：原空槽，补先知之怒）
   WR_CreateMacro("ALT-CTRL-F2", "") -- 62
   WR_CreateMacro("ALT-CTRL-F3", "") -- 63
   WR_CreateMacro("ALT-CTRL-F11", "/cast [target=focus] 净化术") -- 64 对焦点敌方进攻驱散，保留当前目标作为治疗目标
@@ -91,31 +91,31 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-SHIFT-F2", "/cast [@focus] 治疗波") -- 82
   WR_CreateMacro("ALT-CTRL-SHIFT-F3", "/cast 法力之潮图腾") -- 83
   WR_CreateMacro("ALT-CTRL-SHIFT-F11", "") -- 84
-  WR_CreateMacro("ALT-CTRL-SHIFT-F5", "") -- 85
-  WR_CreateMacro("ALT-CTRL-SHIFT-F6", "") -- 86
-  WR_CreateMacro("ALT-CTRL-SHIFT-F7", "") -- 87
-  WR_CreateMacro("ALT-CTRL-SHIFT-F8", "") -- 88
+  WR_CreateMacro("ALT-CTRL-SHIFT-F5", "/cast 石肤图腾") -- 85（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-CTRL-SHIFT-F6", "/cast 地缚图腾") -- 86（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-CTRL-SHIFT-F7", "/cast 清毒图腾") -- 87（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-CTRL-SHIFT-F8", "/cast 祛病图腾") -- 88（2026-11-16 恢复萨满：自动图腾）
   WR_CreateMacro("ALT-CTRL-SHIFT-F12", "") -- 89
   WR_CreateMacro("ALT-CTRL-SHIFT-F10", "/targetenemy") -- 90
-  WR_CreateMacro("ALT-F1", "") -- 91
-  WR_CreateMacro("ALT-F2", "") -- 92
-  WR_CreateMacro("ALT-F3", "") -- 93
-  WR_CreateMacro("ALT-F11", "") -- 94
-  WR_CreateMacro("ALT-F5", "") -- 95
-  WR_CreateMacro("ALT-F6", "") -- 96
+  WR_CreateMacro("ALT-F1", "/cast 抗火图腾") -- 91（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-F2", "/cast 风怒图腾") -- 92（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-F3", "/cast 风之优雅图腾") -- 93（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-F11", "/cast 自然抗性图腾") -- 94（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-F5", "/cast 抗寒图腾") -- 95（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-F6", "/cast 火舌图腾") -- 96（2026-11-16 恢复萨满：自动图腾）
   WR_CreateMacro("ALT-F7", "/focus party1target") -- 97
   WR_CreateMacro("ALT-F8", "/focus party2target") -- 98
   WR_CreateMacro("ALT-F12", "/focus party3target") -- 99
   WR_CreateMacro("ALT-F10", "/focus party4target") -- 100
-  WR_CreateMacro("ALT-SHIFT-F1", "") -- 101
-  WR_CreateMacro("ALT-SHIFT-F2", "") -- 102
-  WR_CreateMacro("ALT-SHIFT-F3", "") -- 103
-  WR_CreateMacro("ALT-SHIFT-F11", "") -- 104
-  WR_CreateMacro("ALT-SHIFT-F5", "") -- 105
-  WR_CreateMacro("ALT-SHIFT-F6", "") -- 106
-  WR_CreateMacro("ALT-SHIFT-F7", "") -- 107
-  WR_CreateMacro("ALT-SHIFT-F8", "") -- 108
-  WR_CreateMacro("ALT-SHIFT-F12", "") -- 109
+  WR_CreateMacro("ALT-SHIFT-F1", "/cast 自然迅捷\n/cast [@focus] 治疗波") -- 101（2026-11-16 恢复萨满：迅捷波）
+  WR_CreateMacro("ALT-SHIFT-F2", "/cast [@focus] 治疗链(等级 1)") -- 102（2026-11-16 恢复萨满：治疗链等级）
+  WR_CreateMacro("ALT-SHIFT-F3", "/cast [@focus] 治疗链(等级 2)") -- 103（2026-11-16 恢复萨满：治疗链等级）
+  WR_CreateMacro("ALT-SHIFT-F11", "/cast [@focus] 治疗链(等级 3)") -- 104（2026-11-16 恢复萨满：治疗链等级）
+  WR_CreateMacro("ALT-SHIFT-F5", "/cast 法力之泉图腾") -- 105（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-SHIFT-F6", "/cast 治疗之泉图腾") -- 106（2026-11-16 恢复萨满：自动图腾）
+  WR_CreateMacro("ALT-SHIFT-F7", "/cast 水下呼吸") -- 107（2026-11-16 增强萨满：插入呼吸）
+  WR_CreateMacro("ALT-SHIFT-F8", "/cast 烈焰震击(等级 1)") -- 108（2026-11-16 增强萨满：震击等级1级）
+  WR_CreateMacro("ALT-SHIFT-F12", "/cast 地震术") -- 109（2026-11-16 增强萨满：震击小窗地震术）
   WR_CreateMacro("ALT-SHIFT-F10", "") -- 110
   WR_CreateMacro("ALT-CTRL-SHIFT--", "") -- 111
   WR_CreateMacro("CTRL-SHIFT--", "") -- 112
@@ -247,13 +247,47 @@ WR_SkillColor["SHAMAN"] = {
     ["净化术"] = 23,
     ["速度药水"] = 183,
     ["潮汐之力"] = 72,
-    ["火元素图腾"] = 116,
-    ["漩涡武器"] = 120,
+    ["火元素图腾"] = 59,     -- 宏 CTRL-F12（原 116=SHIFT-- 设置焦点宏，按错键；2026-11-16 补纯施放宏）
+    ["漩涡武器"] = 4,       -- 宏 NUMPAD4 闪电箭（原 120=/target 瓦拉纳王子，按错键）
     ["治疗之雨"] = 9,
     ["手套"] = 180,
     ["饰品"] = 14,
-    ["先知之怒"] = 301,
-    ["水之护盾"] = 302,
-    ["法力之潮图腾"] = 303,
-    ["自然迅捷"] = 304,
+    ["先知之怒"] = 61,       -- 宏 ALT-CTRL-F1（原 301 越界 → 崩 tick，宏原为空槽，2026-11-16 补）
+    ["水之护盾"] = 22,       -- 宏 ALT-NUMPAD2（原 302 越界）
+    ["法力之潮图腾"] = 83,   -- 宏 ALT-CTRL-SHIFT-F3（原 303 越界）
+    ["自然迅捷"] = 74,       -- 宏 CTRL-SHIFT-F11（原 304 越界）
+    -- ★ 2026-11-16 恢复萨满（按猪猪 / 彼岸花-无限服恢复页）新增
+    ["灼热图腾"] = 45,
+    ["熔岩图腾"] = 6,
+    ["火舌图腾"] = 96,
+    ["抗寒图腾"] = 95,
+    ["抗火图腾"] = 91,
+    ["大地之力图腾"] = 15,
+    ["石肤图腾"] = 85,
+    ["地缚图腾"] = 86,
+    ["战栗图腾"] = 33,
+    ["法力之泉图腾"] = 105,
+    ["治疗之泉图腾"] = 106,
+    ["清毒图腾"] = 87,
+    ["祛病图腾"] = 88,
+    ["风怒图腾"] = 92,
+    ["风之优雅图腾"] = 93,
+    ["自然抗性图腾"] = 94,
+    ["根基图腾"] = 55,
+    ["元素的召唤"] = 2,
+    ["土元素图腾"] = 25,
+    ["迅捷波"] = 101,
+    ["治疗链(等级1)"] = 102,
+    ["治疗链(等级2)"] = 103,
+    ["治疗链(等级3)"] = 104,
+    ["风剪"] = 17,
+    ["净化灵魂"] = 71,
+    -- ★ 2026-11-16 增强萨满（按猪猪 / 彼岸花-无限服增强页）新增
+    ["闪电之盾"] = 7,
+    ["火焰新星"] = 26,      -- 宏 ALT-NUMPAD6
+    ["水下呼吸"] = 107,     -- 宏 ALT-SHIFT-F7（原空槽，2026-11-16 补）
+    ["烈焰震击(等级1)"] = 108, -- 宏 ALT-SHIFT-F8（原空槽，2026-11-16 补）
+    ["地震术"] = 109,       -- 宏 ALT-SHIFT-F12（原空槽，2026-11-16 补）
+    ["灵魂的召唤"] = 39,    -- 宏 ALT-CTRL-NUMPAD9
+    ["切目标"] = 90,        -- 宏 ALT-SHIFT-F10 = /targetenemy
 }

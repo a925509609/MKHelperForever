@@ -91,9 +91,9 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-SHIFT-F8", "") -- 88
   WR_CreateMacro("ALT-CTRL-SHIFT-F12", "") -- 89
   WR_CreateMacro("ALT-CTRL-SHIFT-F10", "/targetexact 萨缪尔\n/targetexact 萨卡加尔\n/cast 恐惧") -- 90: TOC-恐惧奶萨
-  WR_CreateMacro("ALT-F1", "") -- 91
-  WR_CreateMacro("ALT-F2", "") -- 92
-  WR_CreateMacro("ALT-F3", "") -- 93
+  WR_CreateMacro("ALT-F1", "/cast 折磨") -- 91
+  WR_CreateMacro("ALT-F2", "/cast 灼热之痛") -- 92
+  WR_CreateMacro("ALT-F3", "/cast 恶魔皮肤") -- 93
   WR_CreateMacro("ALT-F11", "/cast 元素诅咒") -- 94  -- [恶魔术] 诅咒系
   WR_CreateMacro("ALT-F5", "/cast 虚弱诅咒") -- 95  -- [恶魔术] 诅咒系
   WR_CreateMacro("ALT-F6", "/cast 鲁莽诅咒") -- 96  -- [恶魔术] 诅咒系
@@ -201,10 +201,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-CTRL-NUMPADPLUS", "/cast 召唤地狱猎犬") -- 198  -- [BExt] 脱战自动召唤宠物
   WR_CreateMacro("CTRL-NUMPADPLUS", "") -- 199
   WR_CreateMacro("ALT-NUMPADPLUS", "") -- 200
-  -- ★ 2026-11-13 术士无限服循环新增槽位（键位经全表核对空闲）：
-  WR_CreateMacro("ALT-CTRL-SHIFT-NUMPAD2", "/cast 折磨") -- 91
-  WR_CreateMacro("ALT-CTRL-SHIFT-NUMPAD3", "/cast 灼热之痛") -- 92
-  WR_CreateMacro("ALT-CTRL-SHIFT-NUMPAD4", "/cast 恶魔皮肤") -- 93
+  -- ★ 2026-11-13 术士无限服循环新增槽位（2026-11-16：91-93 原先重复占用，已并入上方 ALT-F1~F3）
 end
 
 local WR_EventFrame = CreateFrame("Frame")

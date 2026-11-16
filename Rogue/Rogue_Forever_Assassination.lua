@@ -62,10 +62,10 @@ function WR_RogueForeverAssassination()
 
     -- ★ 无限天赋技能（原旋转未引用；已学会才提示，缺失自动跳过）
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("冷血") and WR_SpellUsable("冷血", true) then
-        if WR_ColorFrame_ShowSkill("冷血", 301) then return true end
+        if WR_ColorFrame_ShowSkill("冷血", 1) then return true end
     end
     if WR_Forever_IsSpellKnown and WR_Forever_IsSpellKnown("淬毒") and WR_SpellUsable("淬毒", true) then
-        if WR_ColorFrame_ShowSkill("淬毒", 302) then return true end
+        if WR_ColorFrame_ShowSkill("淬毒", 54) then return true end
     end
     return false
 end

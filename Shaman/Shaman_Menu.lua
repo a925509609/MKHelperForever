@@ -81,6 +81,9 @@ Shaman_Menu = {
         },
     },
     ["增强"] = {
+        -- 2026-11-16 按「猪猪 / 彼岸花-无限服 · 增强页」重做（Forever 60级技能）：
+        -- 旧 80 级体系（野性狼魂/萨满之怒/熔岩猛击/熔岩爆裂/寒霜刺骨/武器附魔/
+        -- 偷药/饰品/手套/治疗链五星）全部下线，旧档由 Shaman_Enhancement_Features.lua 迁移。
         DM = {
             {
                 text = "|cff0070DE防ADD|r",
@@ -88,262 +91,119 @@ Shaman_Menu = {
                     { text = "|cff0070DE是|r" },
                     { text = "|cff0070DE否|r" },
                 },
-                tooltipText = "是否开启防ADD,打开的情况下需要目标进入战斗才会攻击",
-                saveVariable = "FANG_ADD_ZQS",
+                tooltipText = "是否开启防ADD,打开的情况下需要自己和目标都进入战斗才输出（脱战不开怪）",
+                saveVariable = "SM_ZQ_FADD",
                 defaultID = 1
-            },
-            {
-                text = "|cff0070DE寒霜刺骨|r",
-                menuItems = {
-                    { text = "|cff0070DE5|r" },
-                    { text = "|cff0070DE6|r" },
-                    { text = "|cff0070DE7|r" },
-                    { text = "|cff0070DE8|r" },
-                    { text = "|cff0070DE9|r" },
-                    { text = "|cff0070DE10|r" },
-                    { text = "|cff0070DE禁用|r" },
-                },
-                tooltipText = "|cff00adf0寒霜刺骨|r层数大于等于设定值，自动停手(|cff00adf0冰龙|r技能)",
-                saveVariable = "SM_ZQ_HSCG",
-                section = "自动",
-                defaultID = 7
             },
             {
                 text = "|cff0070DE护盾|r",
                 menuItems = {
-                    { text = "|cff0070DE水盾|r" },
-                    { text = "|cff0070DE闪电盾|r" },
-                    { text = "|cff0070DE不补盾|r" },
+                    { text = "|cff0070DE水之护盾|r" },
+                    { text = "|cff0070DE闪电之盾|r" },
+                    { text = "|cff0070DE禁用|r" },
                 },
-                tooltipText = "|cff00adf0护盾|r选择",
+                tooltipText = "|cff00adf0水之护盾：自动补水之护盾|r\n|cff996b1f闪电之盾：自动补闪电之盾（增强常驻）|r\n|cffff5040禁用：不自动补盾|r",
                 saveVariable = "SM_ZQ_HD",
-                defaultID = 2
+                defaultID = 3
             },
-            {
-                text = "|cff0070DE漩涡层数|r",
-                menuItems = {
-                    { text = "|cff0070DE5层|r" },
-                    { text = "|cff0070DE4层|r" },
-                    { text = "|cff0070DE3层|r" },
-                    { text = "|cff0070DE2层|r" },
-                },
-                tooltipText = "漩涡舞的|cff00adf0漩涡武器层数|r选择,看几层开始判断",
-                saveVariable = "SM_ZQ_XWWQCS",
-                defaultID = 2
-            },
-            {
-                text = "|cff0070DE调试|r",
-                tooltipText = "开启|cff00adf0漩涡终结技调试|r\n每1秒输出当前漩涡层数/终结技档位到聊天框，用于调试循环",
-                saveVariable = "SM_ZQ_XWWQCS_DEBUG",
-                defaultState = false,
-                isCheckBox = true
-            },
-            {
-                text = "|cff0070DE火系图腾|r",
-                menuItems = {
-                    { text = "|cff0070DE熔岩图腾|r" },
-                    { text = "|cff0070DE灼热图腾%|r" },
-                    { text = "|cff0070DE不插|r" },
-                },
-                tooltipText = "一般常驻熔岩.练级可以用用灼热省蓝",
-                saveVariable = "SM_ZQ_HXTT",
-                defaultID = 1
-            },
-            {
-                text = "|cff0070DE武器附魔|r",
-                menuItems = {
-                    { text = "|cff0070DE主风|r" },
-                    { text = "|cff0070DE主火|r" },
-                    { text = "|cff0070DE不补|r" },
-                },
-                tooltipText = "主手选择,有副手都是火舌",
-                saveVariable = "SM_ZQ_WQFM",
-                defaultID = 2
-            },
-            {
-                text = "|cff0070DE治疗链|r",
-                menuItems = {
-                    { text = "|cff0070DE10%|r" },
-                    { text = "|cff0070DE20%|r" },
-                    { text = "|cff0070DE30%|r" },
-                    { text = "|cff0070DE40%|r" },
-                    { text = "|cff0070DE50%|r" },
-                    { text = "|cff0070DE60%|r" },
-                    { text = "|cff0070DE70%|r" },
-                    { text = "|cff0070DE80%|r" },
-                },
-                tooltipText = "|cff00adf0治疗链|r血量设置",
-                saveVariable = "SM_ZQ_ZLL_XL",
-                defaultID = 8
-            },
-            { text = "|cff0070DE打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 50, tooltipText = "施法进度达到该百分比时自动打断（0=关闭，默认50）", saveVariable = "SM_ZQ_ZDDD" },
+            { text = "|cff0070DE喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30, tooltipText = "血量低于设定值时喝|cff00adf0治疗药水|r。\n|cffff5040值为0：不使用。|r", saveVariable = "SM_ZQ_HXY" },
+            { text = "|cff0070DE漩涡武器|r", isSlider = true, minValue = 0, maxValue = 5, valueStep = 1, defaultVal = 3, tooltipText = "漩涡武器层数达到设定值后，用|cff00adf0闪电箭|r消耗层数。\n|cffff5040值为0：不使用闪电箭消耗层数。|r", saveVariable = "SM_ZQ_XWWQ" },
+            { text = "|cff0070DE打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 60, tooltipText = "施法进度达到该百分比时自动打断|cff00adf0风剪|r（0=关闭）", saveVariable = "SM_ZQ_ZDDD" },
+            -- ===== 爆发按钮 =====
+            { text = "|cff0070DE爆发全开|r", isButton = true, buttonText = "全部打开", buttonWidth = 90, labelWidth = 95, tooltipText = "一键打开 种族爆发", onClick = "WR_ShamanEnhancementBurstAllOn" },
+            { text = "|cff0070DE爆发全关|r", isButton = true, buttonText = "全部关闭", buttonWidth = 90, labelWidth = 95, tooltipText = "一键关闭 种族爆发", onClick = "WR_ShamanEnhancementBurstAllOff" },
+            { text = "|cff0070DE爆发切换|r", isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95, tooltipText = "种族爆发开着就全关，全关就全开", onClick = "WR_ShamanEnhancementBurstToggle" },
         },
         CB = {
-            -- ★ ★ 新增偷药开关（控制自动速度药水和狂野魔法药水的使用）
-            { row = 1, column = 1, IconID = 236871, text = "|cff0070DE偷药|r", tooltipText = "开启后，自动药水才会在爆发期使用", saveVariable = "SM_ZQ_TOUYAO", section = "爆发", defaultState = false },
-            { row = 1, column = 2, IconID = 236871, text = "|cff0070DE自动|r", tooltipText = "使用|cff00adf0速度药水|r", saveVariable = "SM_ZQ_ZDSDYS", section = "爆发", defaultState = false },
-            { row = 1, column = 3, IconID = 236868, text = "|cff0070DE自动|r", tooltipText = "自动使用|cff00adf0狂野魔法|r", saveVariable = "SM_ZQ_ZDKYMF", defaultState = false },
-            { row = 1, column = 4, IconID = 135727, text = "|cff0070DE自动|r", tooltipText = "自动使用|cff00adf0种族|r", saveVariable = "SM_ZQ_ZDZZ", section = "爆发", defaultState = true },
-            { row = 1, column = 5, IconID = 338666, text = "|cff0070DE自动|r", tooltipText = "自动|cff00adf0饰品|r", saveVariable = "SM_ZQ_ZDSP", section = "爆发", defaultState = true },
-            { row = 2, column = 1, IconID = 132962, text = "|cff0070DE自动|r", tooltipText = "自动使用|cff00adf0手套|r", saveVariable = "SM_ZQ_ZDST", section = "爆发", defaultState = true },
-            { row = 2, column = 2, IconID = 136047, text = "|cff0070DE锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n", saveVariable = "SM_ZQ_SUO", defaultState = true },
-            { row = 2, column = 3, IconID = 133712, text = "|cff0070DE自动|r", tooltipText = "使用|cff00adf0通用热力工程炸药|r或|cff00adf0萨隆邪铁炸弹|r", saveVariable = "SM_ZQ_ZDZD", defaultState = true },            { row = 2, column = 5, IconID = 135790, text = "|cff0070DE自动|r", tooltipText = "自动|cff00adf0火元素|r", saveVariable = "SM_ZQ_ZDHYS", defaultState = true },
-            { row = 3, column = 1, IconID = 237577, text = "|cff0070DE自动|r", tooltipText = "自动|cff00adf0野性狼魂|r", saveVariable = "SM_ZQ_YXLH_ZD", defaultState = true },
-            { row = 3, column = 2, IconID = 136042, text = "|cff0070DE指向|r", tooltipText = "自动5星|cff00adf0治疗链|r,根据你拉条设置的生命值", saveVariable = "SM_ZQ_ZLL_ZX", defaultState = false },
-            { row = 3, column = 3, IconID = 136042, text = "|cff0070DE自己|r", tooltipText = "自动5星|cff00adf0治疗链|r,根据你拉条设置的生命值", saveVariable = "SM_ZQ_ZLL_ZJ", defaultState = false },
-            { row = 3, column = 4, IconID = 136015, text = "|cff0070DE自动|r", tooltipText = "自动|cff00adf0闪电链|r,根据你拉条设置的层数", saveVariable = "SM_ZQ_ZDSDL", defaultState = true },
-            { row = 3, column = 5, IconID = 136088, text = "|cff0070DE自动|r", tooltipText = "自动|cff00adf0萨满之怒|r", saveVariable = "SM_ZQ_ZDSMZN", defaultState = true },
-            { row = 4, column = 1, IconID = 310730, text = "|cff0070DE开局|r", tooltipText = "自动开局插一次|cff00adf0元素的召唤|r,只有你没有插任何图腾的情况下BOSS生效.", saveVariable = "SM_ZQ_ZDYSDZH", defaultState = true },
-            { row = 4, column = 2, IconID = 135824, text = "|cff0070DE自动|r", tooltipText = "自动|cff00adf0火焰新星|r", saveVariable = "SM_ZQ_ZDHYXX", defaultState = true },
-            { row = 4, column = 3, IconID = 136075, text = "|cff0070DE自动|r", tooltipText = "可以驱散任何魔法", saveVariable = "SM_ZQ_ZDQS", defaultState = false },
-            { row = 4, column = 4, IconID = 136039, text = "|cff0070DE自动|r", tooltipText = "自动一直释放根基图腾", saveVariable = "SM_ZQ_GJTT", defaultState = false },
-            { row = 5, column = 1, IconID = 136012, text = "|cff0070DE插入|r", tooltipText = "插入|cff00adf0嗜血|ror|cff00adf0英勇|r", saveVariable = "SM_ZQ_CRSSYY", section = "爆发", defaultState = false },
-            { row = 5, column = 2, IconID = 135790, text = "|cff0070DE插入|r", tooltipText = "插入|cff00adf0火元素图腾|r", saveVariable = "SM_ZQ_CRHYSTT", section = "插入", defaultState = false },
-            { row = 5, column = 3, IconID = 136024, text = "|cff0070DE插入|r", tooltipText = "插入|cff00adf0土元素图腾|r", saveVariable = "SM_ZQ_CRTYSTT", section = "插入", defaultState = false },
-            { row = 5, column = 4, IconID = 136088, text = "|cff0070DE插入|r", tooltipText = "插入|cff00adf0萨满之怒|r", saveVariable = "SM_ZQ_CRSMZN", section = "插入", defaultState = false },
-            { row = 5, column = 5, IconID = 310730, text = "|cff0070DE插入|r", tooltipText = "|cffFF69B4当没有火元素土元素存在的时候是插入元素的召唤(红色图腾组),\n当火元素存在的时候是插入先祖的召唤(蓝色图腾组),请把蓝色图腾组的火系留空防止盖掉火元素,\n当土元素存在的时候是插入灵魂的召唤(紫色图腾组),请把紫色图腾组的土系留空防止盖掉土元素|r,", saveVariable = "SM_ZQ_CRYSDZH", section = "插入", defaultState = false },
-            -- ★ 自动切目标开关
-            { row = 6, column = 1, IconID = 132293, text = "|cff0070DE切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "SM_ZQ_TAB", defaultState = false },
+            -- ===== 功能（右键图标打开额外条件） =====
+            { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Nature_Earthshock", text = "|cff0070DE震击|r", tooltipText = "开着时用震击输出：烈焰震击保持（预判秒数）+ 地震术（右键勾选）。\n右键：烈焰震击 / 预判 / 地震术 / 震击留打断 / 等级（满级 / 1级）\n宏：/SHAMAN_SHOCK 切换（后面加 on 开、off 关）", saveVariable = "SM_ZQ_ZJ_ON", section = "自动", defaultState = true,
+                onRightClick = function() if WR_ShamanEnhancementUI then WR_ShamanEnhancementUI.ShowOptions("SM_ZQ_ZJ_ON") end end },
+            { row = 1, column = 2, IconID = 136115, text = "|cff0070DE自动图腾|r", tooltipText = "开着时按右键里的设置自动补图腾：火/土/水/风每系身边没有自己的图腾就插该系选中的图腾。\n右键：每系总开关 + 图腾勾选（每系只能选一个）\n宏：/SHAMAN_TOTEM 切换（后面加 on 开、off 关）", saveVariable = "SM_ZQ_TT_ON", section = "自动", defaultState = true,
+                onRightClick = function() if WR_ShamanEnhancementUI then WR_ShamanEnhancementUI.ShowOptions("SM_ZQ_TT_ON") end end },
+            { row = 1, column = 3, IconID = 132293, text = "|cff0070DE切换目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "SM_ZQ_TAB", section = "自动", defaultState = true },
+            { row = 1, column = 4, IconID = 135824, text = "|cff0070DE火焰新星|r", tooltipText = "开启后按冷却使用|cff00adf0火焰新星|r", saveVariable = "SM_ZQ_HXX", section = "自动", defaultState = true },
+            { row = 1, column = 5, IconID = 136075, text = "|cff0070DE驱散|r", tooltipText = "开启后目标身上有可驱散的|cff00adf0魔法增益|r时，自动用|cff00adf0净化术|r驱散", saveVariable = "SM_ZQ_QS", section = "自动", defaultState = true },
+            -- ===== 爆发 =====
+            { row = 2, column = 1, IconID = 135727, text = "|cff0070DE种族爆发|r", tooltipText = "自动使用|cff00adf0种族爆发|r技能", saveVariable = "SM_ZQ_ZDZZ", section = "爆发", defaultState = true },
+            -- ===== 插入（一次性，放完自关） =====
+            { row = 3, column = 1, IconID = "Interface\\Icons\\Spell_Shadow_Demonbreath", text = "|cff0070DE呼吸|r", tooltipText = "插入|cff00adf0水下呼吸|r（一次性，放完自关）", saveVariable = "SM_ZQ_CRHX", section = "插入", defaultState = false },
+            { row = 3, column = 2, IconID = 310730, text = "|cff0070DE元素|r", tooltipText = "插入|cff00adf0元素的召唤|r（一次性，放完自关）", saveVariable = "SM_ZQ_CRYS", section = "插入", defaultState = false },
+            { row = 3, column = 3, IconID = "Interface\\Icons\\Spell_Shaman_Dropall_03", text = "|cff0070DE灵魂|r", tooltipText = "插入|cff00adf0灵魂的召唤|r（一次性，放完自关）", saveVariable = "SM_ZQ_CRLH", section = "插入", defaultState = false },
+            { row = 3, column = 4, IconID = "Interface\\Icons\\Spell_Nature_Bloodlust", text = "|cff0070DE先知|r", tooltipText = "插入|cff00adf0先知之怒|r（一次性，放完自关）", saveVariable = "SM_ZQ_CRXZ", section = "插入", defaultState = false },
+            { row = 4, column = 1, IconID = "Interface\\Icons\\Spell_Fire_Searingtotem", text = "|cff0070DE灼热|r", tooltipText = "插入|cff00adf0灼热图腾|r（一次性，放完自关）", saveVariable = "SM_ZQ_CRZR", section = "插入", defaultState = false },
+            { row = 4, column = 2, IconID = "Interface\\Icons\\Spell_Fire_Selfdestruct", text = "|cff0070DE熔岩|r", tooltipText = "插入|cff00adf0熔岩图腾|r（一次性，放完自关）", saveVariable = "SM_ZQ_CRRY", section = "插入", defaultState = false },
         },
     },
     ["恢复"] = {
+        -- 2026-11-16 按「猪猪 / 彼岸花-无限服 · 恢复萨满页」重做（Forever 60级技能）：
+        -- 旧 80 级体系（狂咒/辛达苟萨、过量停条、潮汐之力、进攻驱散、手套/饰品/偷药、
+        -- 萨隆邪铁炸弹类开关）全部下线，旧档由 Shaman_Restoration_Features.lua 迁移。
         DM = {
             {
-                text = "|cff0070DE驱散|r",
+                text = "|cff0070DE防ADD|r",
                 menuItems = {
-                    { text = "|cff0070DE常规|r" },
-                    { text = "|cff0070DE优先|r" },
-                    { text = "|cff0070DE目标|r" },
-                    { text = "|cff0070DE指向|r" },
-                    { text = "|cff0070DE禁用|r" },
+                    { text = "|cff0070DE是|r" },
+                    { text = "|cff0070DE否|r" },
                 },
-                tooltipText = "|cff00adf0常规：驱散所有Debuff。|r\n|cffffdf00优先：驱散所有Debuff(高优先级)。\n|cffadff2f目标：仅驱散当前目标的Debuff。|r\n|cff9bf6ff指向：仅驱散指向队友的Debuff。|r",
-                saveVariable = "HF_QS",
-                defaultID = 1
-            },
-            {
-                text = "|cff0070DE大地之盾|r",
-                menuItems = {
-                    { text = "", },
-                    { text = "", },
-                    { text = "", },
-                    { text = "", },
-                    { text = "|cff0070DE禁用|r", },
-                },
-                tooltipText = "选择|cff00adf0大地之盾|r的|cff996b1f坦克|r。\n注：当队伍中有|cff996b1f坦克|r的时候，选项才会显示(|cff00ADF0请让团长设置职责|r)。\n注：当队伍|cff996b1f坦克|r变动，选项也会变动，请注意及时调整。",
-                saveVariable = "HF_DDZD",
+                tooltipText = "是否开启防ADD,打开的情况下需要自己进入战斗才开始治疗",
+                saveVariable = "SM_HF_FADD",
                 defaultID = 1
             },
             {
                 text = "|cff0070DE治疗模式|r",
                 menuItems = {
-                    { text = "|cff0070DE自动|r" },
+                    { text = "|cff0070DE全团|r" },
+                    { text = "|cff0070DE目标|r" },
+                    { text = "|cff0070DE预读|r" },
                     { text = "|cff0070DE坦克|r" },
                     { text = "|cff0070DE脆皮|r" },
-                    { text = "|cff0070DE目标|r" },
+                    { text = "|cff0070DE一队|r" },
+                    { text = "|cff0070DE二队|r" },
+                    { text = "|cff0070DE三队|r" },
+                    { text = "|cff0070DE四队|r" },
+                    { text = "|cff0070DE五队|r" },
                 },
-                tooltipText = "|cff00adf0自动：治疗所有单位(可应对大部分情况)|r\n|cff996b1f坦克：仅治疗坦克，需要团长设置\"坦克\"职责|r\n|cff9C3590脆皮：排除坦克，治疗其他职业，需要团长设置\"坦克\"职责|r\n|cffffd700目标：仅治疗当前目标，无目标则|cff00adf0 自动 |r|cffffd700",
-                saveVariable = "HF_ZLMS",
+                tooltipText = "|cff00adf0全团：治疗所有单位(可应对大部分情况)|r\n|cff996b1f坦克：仅治疗坦克，需要团长设置\"坦克\"职责|r\n|cff9C3590脆皮：排除坦克，治疗其他职业|r\n|cffffd700目标：仅治疗当前目标，无目标则全团|r",
+                saveVariable = "SM_HF_ZLMS",
                 defaultID = 1
             },
-            -- ★ 过量停条窗口（0.1~0.5秒，默认0.5秒）
             {
-                text = "|cff0070DE过量停条|r",
+                text = "|cff0070DE护盾|r",
                 menuItems = {
-                    { text = "|cff0070DE0.1秒|r" },
-                    { text = "|cff0070DE0.2秒|r" },
-                    { text = "|cff0070DE0.3秒|r" },
-                    { text = "|cff0070DE0.4秒|r" },
-                    { text = "|cff0070DE0.5秒|r" },
+                    { text = "|cff0070DE水之护盾|r" },
+                    { text = "|cff0070DE大地之盾|r" },
+                    { text = "|cff0070DE禁用|r" },
                 },
-                tooltipText = "设置过量停条的检查窗口。施法剩余时间≤此值时检查目标血量，满血则停止施法避免过量。\n|cffff5040需配合下方「过量停条」开关使用，开关默认关闭。|r",
-                saveVariable = "HF_GLTCCK",
-                defaultID = 5
+                tooltipText = "|cff00adf0水之护盾：自动给自己补水之护盾|r\n|cff996b1f大地之盾：自动给坦克维持大地之盾|r\n|cffff5040禁用：不自动补盾|r",
+                saveVariable = "SM_HF_HD",
+                defaultID = 3
             },
-            {
-                text = "|cff0070DE自然迅捷|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 35,
-                tooltipText = "当目标血量低于设定值的时候，使用|cff00adf0自然迅捷|r。\n|cffff5040值为0：不使用。|r",
-                saveVariable = "HF_ZRXJ",
-            },
-            {
-                text = "|cff0070DE激流|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 80,
-                tooltipText = "当目标血量低于设定值的时候，使用|cff00adf0激流|r。\n|cffff5040值为0：不使用。|r",
-                saveVariable = "HF_JL",
-            },
-            {
-                text = "|cff0070DE治疗链|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 100,
-                tooltipText = "当目标血量低于设定值的时候，使用|cff00adf0治疗链|r。\n|cffff5040值为0：不使用。|r",
-                saveVariable = "HF_ZLL",
-            },
-            {
-                text = "|cff0070DE潮汐之力|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 50,
-                tooltipText = "当目标血量低于设定值的时候，使用|cff00adf0潮汐之力|r。\n|cffff5040值为0：不使用。开到100是无脑治疗链|r",
-                saveVariable = "HF_CXZL",
-            },
-            {
-                text = "|cff0070DE次级治疗波|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 0,
-                tooltipText = "当目标血量低于设定值的时候，使用|cff00adf0次级治疗波|r。\n|cffff5040值为0：不使用。|r",
-                saveVariable = "HF_CJZLB",
-            },
-            {
-                text = "|cff0070DE治疗波|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 60,
-                tooltipText = "当目标血量低于设定值的时候，使用|cff00adf0治疗波|r。\n|cffff5040值为0：不使用。|r",
-                saveVariable = "HF_ZLB",
-            },
-            {
-                text = "|cff0070DE法力之潮|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 5,
-                defaultVal = 40,
-                tooltipText = "当自身蓝量低于设定值的时候，使用|cff00adf0法力之潮图腾|r。\n|cffff5040值为0：不使用。|r",
-                saveVariable = "HF_FLZCTT",
-            },
-            { text = "|cff0070DE打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 50, tooltipText = "施法进度达到该百分比时自动打断（0=关闭，默认50）", saveVariable = "HF_ZDDD" },
+            { text = "|cff0070DE喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30, tooltipText = "血量低于设定值时喝|cff00adf0治疗药水|r。\n|cffff5040值为0：不使用。|r", saveVariable = "SM_HF_HXY" },
+            { text = "|cff0070DE迅捷波|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30, tooltipText = "有人血量低于设定值时用|cff00adf0自然迅捷|r+|cff00adf0治疗波|r瞬发急救。\n|cffff5040值为0：不使用。|r", saveVariable = "SM_HF_XJB" },
+            { text = "|cff0070DE激流|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 80, tooltipText = "有人血量低于设定值且没有|cff00adf0激流|r时，使用|cff00adf0激流|r。\n|cffff5040值为0：不使用。|r", saveVariable = "SM_HF_JL" },
+            { text = "|cff0070DE治疗链|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 54, tooltipText = "人数为1：有人血量低于设定值时放|cff00adf0治疗链|r（先治疗焦点，再跳到附近受伤的队友）。\n人数为2以上：至少这么多人掉血，且最低几人平均血量低于设定值才放。\n治疗里排第3：激流后、治疗波前。\n|cff00adf0右键图标|r设置 等级/人数。\n|cffff5040拉到0=关闭。宏 /SHAMAN_CHAINHEAL 空格<数值> 快速设置|r", saveVariable = "SM_HF_ZLL" },
+            { text = "|cff0070DE治疗波|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 60, tooltipText = "有人血量低于设定值时，使用|cff00adf0治疗波|r。\n|cffff5040值为0：不使用。|r", saveVariable = "SM_HF_ZLB" },
+            { text = "|cff0070DE次级治疗波|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 85, tooltipText = "有人血量低于设定值时，使用|cff00adf0次级治疗波|r。\n|cffff5040值为0：不使用。|r", saveVariable = "SM_HF_CJZLB" },
+            { text = "|cff0070DE打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 60, tooltipText = "施法进度达到该百分比时自动打断|cff00adf0风剪|r（0=关闭）", saveVariable = "SM_HF_ZDDD" },
+            -- ===== 爆发按钮 =====
+            { text = "|cff0070DE爆发全开|r", isButton = true, buttonText = "全部打开", buttonWidth = 90, labelWidth = 95, tooltipText = "一键打开 种族爆发", onClick = "WR_ShamanRestorationBurstAllOn" },
+            { text = "|cff0070DE爆发全关|r", isButton = true, buttonText = "全部关闭", buttonWidth = 90, labelWidth = 95, tooltipText = "一键关闭 种族爆发", onClick = "WR_ShamanRestorationBurstAllOff" },
+            { text = "|cff0070DE爆发切换|r", isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95, tooltipText = "种族爆发开着就全关，全关就全开", onClick = "WR_ShamanRestorationBurstToggle" },
         },
         CB = {
-            -- ★ ★ 新增偷药开关（恢复萨爆发期药水控制）
-            { row = 1, column = 1, IconID = 236871, text = "|cff0070DE偷药|r", tooltipText = "开启后，自动药水才会在爆发期使用", saveVariable = "SM_HF_TOUYAO", section = "爆发", defaultState = false },
-            { row = 1, column = 2, IconID = 310730, text = "", tooltipText = "当图腾消失，使用|cff00adf0元素的召唤|r\n请将需要的图腾预设在|cff00adf0元素的召唤|r", saveVariable = "HF_TT", defaultState = true },
-            { row = 1, column = 3, IconID = 135230, text = "", tooltipText = "血量危险时，使用|cff00adf0治疗石|r", saveVariable = "HF_ZLS", defaultState = true },
-            { row = 1, column = 4, IconID = 135737, text = "|cff0070DE狂咒|r", tooltipText = "中|cff00adf0狂咒|r后停手(|cff00adf0辛达苟萨|r)", saveVariable = "HF_KZ", defaultState = true },
-            { row = 1, column = 5, IconID = 135727, text = "|cff0070DE爆发|r", tooltipText = "开启|cff00adf0爆发模式|r，使用|cff00adf0手套附魔|r、|cff00adf0速度药水|r、|cff00adf0饰品|r及|cff00adf0潮汐之力|r", saveVariable = "HF_BF", section = "爆发", defaultState = false },
-            { row = 2, column = 1, IconID = 136012, text = "|cff0070DE插入|r", tooltipText = "插入|cff00adf0嗜血|ror|cff00adf0英勇|r", saveVariable = "SM_HF_CRSXYY", section = "爆发", defaultState = false },
-            { row = 2, column = 2, IconID = 136040, text = "|cff0070DE进攻驱散|r", tooltipText = "开启后，优先对|cff00adf0焦点|r、其次对当前敌方目标自动使用|cff00adf0净化术|r驱散其魔法增益（仅射程内，保留当前目标作为治疗目标）。", saveVariable = "HF_JHQS", defaultState = false },
-            -- ★ 第2行第3列：过量停条开关（默认关闭）
-            { row = 2, column = 3, IconID = 135737, text = "|cff0070DE过量停条|r", tooltipText = "开启后，施法结束前(按停条窗口设定)目标已满血时自动停止施法，避免过量治疗。\n|cffff5040首领机制(狂咒/血肉成灰等)与特殊治疗模式不受此开关影响，始终生效。|r", saveVariable = "HF_GLTC", defaultState = false },
-            { row = 2, column = 4, IconID = 135894, text = "|cff0070DE总闸|r", tooltipText = "勾选后，关闭恢复萨自动|cff00adf0净化灵魂|r（常规驱散），优先级高于下拉选项。", saveVariable = "HF_QS_AUTO", defaultState = false },
-            { row = 2, column = 5, IconID = 136040, text = "|cff0070DE进攻总闸|r", tooltipText = "勾选后，关闭恢复萨自动|cff00adf0净化术|r（进攻驱散），优先级高于分项开关。", saveVariable = "HF_JHQS_AUTO", defaultState = false },        },
+            -- ===== 功能（右键图标打开额外条件） =====
+            { row = 1, column = 1, IconID = 136115, text = "|cff0070DE自动图腾|r", tooltipText = "开着时按右键里的设置自动补图腾：火/土/水/风每系身边没有自己的图腾就插该系选中的图腾。\n右键：每系总开关 + 图腾勾选（每系只能选一个）\n宏：/SHAMAN_TOTEM 切换（后面加 on 开、off 关）", saveVariable = "SM_HF_TT_ON", section = "自动", defaultState = true,
+                onRightClick = function() if WR_ShamanRestorationUI then WR_ShamanRestorationUI.ShowOptions("SM_HF_TT_ON") end end },
+            { row = 1, column = 2, IconID = 132293, text = "|cff0070DE切换目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标", saveVariable = "SM_HF_TAB", section = "自动", defaultState = true },
+            { row = 1, column = 3, IconID = 136075, text = "|cff0070DE驱散|r", tooltipText = "自动用|cff00adf0净化灵魂|r驱散魔法/诅咒。\n右键：自己 / 小队(全团) 分开控制", saveVariable = "SM_HF_QS_ON", section = "自动", defaultState = true,
+                onRightClick = function() if WR_ShamanRestorationUI then WR_ShamanRestorationUI.ShowOptions("SM_HF_QS") end end },
+            -- ===== 爆发 =====
+            { row = 2, column = 1, IconID = 135727, text = "|cff0070DE种族爆发|r", tooltipText = "自动使用|cff00adf0种族爆发|r技能", saveVariable = "SM_HF_ZDZZ", section = "爆发", defaultState = true },
+            -- ===== 插入（一次性，放完自关） =====
+            { row = 3, column = 1, IconID = 310730, text = "|cff0070DE呼唤|r", tooltipText = "插入|cff00adf0元素的召唤|r（一次性，放完自关）", saveVariable = "SM_HF_CRHH", section = "插入", defaultState = false },
+            { row = 3, column = 2, IconID = 135790, text = "|cff0070DE元素|r", tooltipText = "插入|cff00adf0火元素图腾|r（一次性，放完自关）", saveVariable = "SM_HF_CRYS", section = "插入", defaultState = false },
+            { row = 3, column = 3, IconID = 136024, text = "|cff0070DE灵魂|r", tooltipText = "插入|cff00adf0土元素图腾|r（一次性，放完自关）", saveVariable = "SM_HF_CRLH", section = "插入", defaultState = false },
+            { row = 3, column = 4, IconID = 237589, text = "|cff0070DE法力潮|r", tooltipText = "插入|cff00adf0法力之潮图腾|r（一次性，放完自关）", saveVariable = "SM_HF_CRFLC", section = "插入", defaultState = false },
+        },
     },
 }

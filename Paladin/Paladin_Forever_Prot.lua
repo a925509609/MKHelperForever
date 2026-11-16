@@ -29,8 +29,10 @@
 --   ★ 2026-11-10 用户口径（方案 2）覆盖攻略：目标 ≤1 的链路实际按
 --     「神圣打击 CD 好了 > 审判」执行，其余技能仍按原优先级。
 --   ★★ 2026-11-11 用户口径：目标 ≤1 的链路里「神圣之盾」后移到「奉献」之后
---     （实际顺序：驱邪术 → 奉献（单体链不可达）→ 神圣之盾）；自动循环删除
---     「制裁之锤」提示，仅保留面板「插入 制裁之锤」一次性手动开关。
+--     （实际顺序：驱邪术 → 奉献（单体链不可达）→ 神圣之盾）。
+--   ★★ 2026-11-16 用户口径：自动「制裁之锤」打断恢复，由面板「打断」滑块 FH_DD
+--     控制（0=关闭，5~100=目标施法进度百分比，默认 50）；「插入 制裁之锤」
+--     一次性手动开关仍保留。
 --   ★★ 2026-11-13 用户口径：单体链新增「愤怒之锤」分支——目标生命 <20% 且
 --     审判/神圣打击都不可用时优先斩杀收尾（在驱邪术之前），受面板 FH_FNZC 控制。
 -- 说明：未学会/本服不存在的技能由 WR_SpellUsable / WR_Forever_IsSpellKnown
@@ -1628,6 +1630,178 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
     return false
 end
 
+-- ============================================================
+-- ★ 2026-11-16：神圣之盾「目标为我」判定（面板 FH_SZS_TARGETME）
+--   当前目标（怪）的目标是否正是玩家本人。
+--   UnitIsUnit 在战斗 / secret 状态下仍可安全比较；任何 API 缺失、
+--   目标不是可攻击活体、没有目标或抛错都按「不满足」处理（绝不误放）。
+-- ============================================================
+function WR_PaladinForever_TargetTargetIsPlayer()
+    local okCast, castable = pcall(WR_PaladinForever_TargetCastable, "target")
+    if not okCast or castable ~= true then return false end
+    local okTT, hasTT = pcall(UnitExists, "targettarget")
+    if not okTT or hasTT ~= true then return false end
+    local ok, same = pcall(UnitIsUnit, "targettarget", "player")
+    return ok and same == true
+end
+
+-- ============================================================
+-- ★ 2026-11-16：防骑「打断」滑块（面板 FH_DD）→ 制裁之锤
+--   用户口径：防骑打断滑条目前无效，需要修复；滑条控制制裁之锤用作施法打断。
+--   0 = 关闭；5~100 = 目标施法/引导进度达到该百分比时提示制裁之锤（默认 50）。
+--   兼容旧布尔存档：true → 50（开启），false → 关闭。
+-- ============================================================
+function WR_PaladinForever_InterruptThreshold()
+    local raw = PigSet and PigSet.FH_DD
+    if raw == false then return 0 end
+    local thr = tonumber(raw)
+    if thr == nil then thr = 50 end
+    if thr <= 0 then return 0 end
+    if thr > 100 then thr = 100 end
+    return thr
+end
+
+-- ★ 2026-11-16：Forever 12.x 的 UnitCastingInfo/UnitChannelInfo 时间戳是 secret number，
+-- 不能做算术。优先走 DurationObject：UnitCastingDuration / UnitChannelDuration 返回
+-- secret-safe 对象，EvaluateElapsedPercent(CurveConstants.ScaleTo100) 在 C 侧算出 0~100
+-- 的施法进度；该通道不可用时再退回原始时间戳（经典客户端 / 离线夹具）。
+function WR_PaladinForever_DurationCastPercent(unit)
+    unit = unit or "target"
+    local curve = nil
+    if type(CurveConstants) == "table" then curve = CurveConstants.ScaleTo100 end
+    if curve == nil and type(C_CurveUtil) == "table" and type(C_CurveUtil.CreateCurve) == "function" then
+        local okC, c = pcall(C_CurveUtil.CreateCurve)
+        if okC and c ~= nil then
+            if type(c.SetType) == "function" and type(Enum) == "table" and Enum.LuaCurveType ~= nil then
+                pcall(c.SetType, c, Enum.LuaCurveType.Linear)
+            end
+            pcall(c.AddPoint, c, 0.0, 0)
+            pcall(c.AddPoint, c, 1.0, 100)
+            curve = c
+        end
+    end
+    if curve == nil then return nil end
+    local function eval(fn)
+        if type(fn) ~= "function" then return nil end
+        local okD, duration = pcall(fn, unit)
+        if not okD or duration == nil then return nil end
+        local okE, pct = pcall(function()
+            return duration:EvaluateElapsedPercent(curve)
+        end)
+        if not okE or type(pct) ~= "number" then return nil end
+        if WR_IsSecretValue ~= nil then
+            local okS, isSecret = pcall(WR_IsSecretValue, pct)
+            if okS and isSecret == true then return nil end
+        end
+        return pct
+    end
+    local pct = eval(UnitCastingDuration)
+    if pct ~= nil then return pct end
+    return eval(UnitChannelDuration)
+end
+
+-- 目标当前施法 / 引导进度（0~100）；读不到或不可打断返回 nil。
+-- 仅作为 WR_ShouldInterrupt 不可用 / 抛错时的兜底；所有 secret 比较都包在 pcall 内。
+function WR_PaladinForever_TargetCastProgress()
+    -- ① 首选 DurationObject（Forever 12.x 战斗内唯一安全的进度来源）
+    local durationPct = WR_PaladinForever_DurationCastPercent("target")
+    if type(durationPct) == "number" then return durationPct end
+    -- ② 退回原始时间戳（经典客户端 / 离线夹具）
+    local now = GetTime()
+    local function secret(v)
+        if WR_IsSecretValue ~= nil then
+            local ok, s = pcall(WR_IsSecretValue, v)
+            if ok and s == true then return true end
+        end
+        return false
+    end
+    local function calc(startMS, endMS)
+        local ok, pct = pcall(function()
+            local s = tonumber(startMS)
+            local e = tonumber(endMS)
+            if type(s) ~= "number" or type(e) ~= "number" or e <= s then return nil end
+            local p = (now - s / 1000) / ((e - s) / 1000) * 100
+            if p < 0 then p = 0 elseif p > 100 then p = 100 end
+            return p
+        end)
+        if ok then return pct end
+        return nil
+    end
+    if type(UnitCastingInfo) == "function" then
+        local ok, name, text, texture, startMS, endMS, isTradeSkill, castID, notInterruptible = pcall(UnitCastingInfo, "target")
+        if ok then
+            local usable, pct = pcall(function()
+                if name == nil then return nil end
+                if secret(name) or secret(notInterruptible) then return nil end
+                if notInterruptible == true then return nil end
+                return calc(startMS, endMS)
+            end)
+            if usable and type(pct) == "number" then return pct end
+        end
+    end
+    if type(UnitChannelInfo) == "function" then
+        local ok, name, text, texture, startMS, endMS, isTradeSkill, notInterruptible = pcall(UnitChannelInfo, "target")
+        if ok then
+            local usable, pct = pcall(function()
+                if name == nil then return nil end
+                if secret(name) or secret(notInterruptible) then return nil end
+                if notInterruptible == true then return nil end
+                return calc(startMS, endMS)
+            end)
+            if usable and type(pct) == "number" then return pct end
+        end
+    end
+    return nil
+end
+
+-- 制裁之锤实际冷却：基础 60 秒，防护天赋「强化制裁之锤」每级 -5 秒（最多 3 级）。
+-- GetTalentRank 由 Core/ZZ_Features_Migration.lua 在职业文件之前加载；查不到按基础 60 秒。
+function WR_PaladinForever_HammerCooldown()
+    local cd = 60
+    if type(GetTalentRank) == "function" then
+        local ok, rank = pcall(GetTalentRank, 20487)
+        if ok and type(rank) == "number" and rank > 0 then
+            if rank > 3 then rank = 3 end
+            cd = cd - rank * 5
+        end
+    end
+    return cd
+end
+
+function WR_PaladinForever_InterruptStep()
+    local threshold = WR_PaladinForever_InterruptThreshold()
+    if threshold <= 0 then return false end
+    if not WR_PaladinForever_SpellKnown("制裁之锤") then return false end
+    -- 技能可用性（蓝量 / 沉默 / 真冷却等）；战斗内 CD 读不到时 WR_SpellUsable 会放行，
+    -- 再由 WR_PaladinForever_ShowSkillCD 的本地冷却记账兜底。
+    if type(WR_SpellUsable) == "function" then
+        local okU, usable = pcall(WR_SpellUsable, "制裁之锤", true)
+        if not okU or usable ~= true then return false end
+    end
+    if not WR_PaladinForever_CanHitTarget("制裁之锤", "target") then return false end
+
+    -- ① 统一打断引擎（Core/InterruptController.lua）：与战士/法师同一口径
+    local should = false
+    if type(WR_ShouldInterrupt) == "function" then
+        local ok, v = pcall(WR_ShouldInterrupt, "target", "FH_DD")
+        if ok and v == true then should = true end
+    end
+    -- ② 引擎不可用 / 抛错时，用本地 UnitCastingInfo / UnitChannelInfo 进度兜底
+    if not should then
+        local okP, progress = pcall(WR_PaladinForever_TargetCastProgress)
+        if okP and type(progress) == "number" then
+            local okCmp, passed = pcall(function() return progress >= threshold end)
+            if okCmp and passed == true then should = true end
+        end
+    end
+    if not should then return false end
+
+    if type(WR_PaladinForever_ShowSkillCD) == "function" then
+        return WR_PaladinForever_ShowSkillCD("制裁之锤", 22, WR_PaladinForever_HammerCooldown())
+    end
+    return WR_ColorFrame_ShowSkill("制裁之锤", 22) == true
+end
+
 function WR_PaladinForeverProt()
     WR_PaladinForever_ClearStalePrompts(1.0)
     -- ★★ 2026-11-09 第十一次修正：圣印提示保护窗口。
@@ -1914,6 +2088,11 @@ function WR_PaladinForeverProt()
         if WR_PaladinForever_ShowSkillCD("圣佑术", 78, 300) then return true end
     end
 
+    -- ★★ 2026-11-16：面板「打断」滑块（FH_DD）→ 制裁之锤
+    --   0=关闭；5~100=目标施法进度达到该百分比时提示制裁之锤（默认 50）。
+    --   放在生存自保之后、清洁术之前：读条打断优先于常规仇恨循环。
+    if WR_PaladinForever_InterruptStep() then return true end
+
     -- ★★ 2026-11-14：清洁术「常规 / 目标 / 指向」模式（生存之后，不抢圣疗/圣盾）
     if WR_PaladinForever_CleanseStep("FH_QJS", "normal", "FH_QJS_Player", "FH_QJS_Target") then return true end
 
@@ -1928,6 +2107,9 @@ function WR_PaladinForeverProt()
     end
     -- （此段原 PigAlert 提示已按用户要求关闭）
     -- 正义之怒：30 分钟 Buff，缺失时补。
+    --   ★ 2026-11-16 用户口径：战斗/脱战，只要 Buff 消失了就要立马补——
+    --     可读光环缺失 / 观测投影到期都会立刻判缺失，30 分钟施放成功记录
+    --     只在完全读不到任何证据时兜底（判定见 Paladin_Forever.lua FuryUp）。
     --   ★ 修复「反复使用正义之怒」：
     --     · 判定改由 FuryUp() 负责（顺序：光环扫描 → 缓存 → 施放成功记录 30 分钟）；
     --     · 提示时间不写进 FuryCastAt —— 提示不代表真的打出去了。
@@ -2189,8 +2371,13 @@ function WR_PaladinForeverProt()
         and PlayerMP >= WR_PaladinForever_PROT_HOW_MANA_MIN
     -- 神圣之盾（防护核心减伤；受面板 FH_SZS 开关控制，默认开）
     --   ★ 自身 Buff 类技能，不判射程、也不要求敌方目标（防骑要能给自己套盾）。
+    --   ★★ 2026-11-16 用户新增「目标为我」开关 FH_SZS_TARGETME：
+    --     勾选后只有当前目标（怪）的目标是玩家本人时才提示；
+    --     目标不是自己 / 无目标 / 目标的目标读不到 → 一律不提示。
     local holyShieldEligible = (PigSet == nil or PigSet.FH_SZS ~= false)
         and WR_PaladinForever_SpellKnown("神圣之盾")
+        and (PigSet == nil or PigSet.FH_SZS_TARGETME ~= true
+             or WR_PaladinForever_TargetTargetIsPlayer())
     -- 奉献（受面板「自动 奉献」FH_FX 控制；蓝量 ≥30%、近战 5 码内）
     --   ★ 目标数量门单独由 tryConsecrate(minCount) 传入：
     --     ★★ 2026-11-10 用户口径：奉献仅在 8 码内目标 ≥3 个时使用；

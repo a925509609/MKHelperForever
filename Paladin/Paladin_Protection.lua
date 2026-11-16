@@ -47,7 +47,7 @@ end
 function WR_PaladinProtection_QJ()
     if WR_SpellUsable("清洁术", true)
        and (WR_GetUnitDebuffTime("player", "中毒") > 0 or WR_GetUnitDebuffTime("player", "疾病") > 0
-            or WR_GetUnitDebuffTime("player", "魔法") > 0 or WR_GetUnitDebuffTime("player", "诅咒") > 0) then
+            or WR_GetUnitDebuffTime("player", "魔法") > 0) then
         if WR_ColorFrame_ShowSkill("清洁术", 27) then return true end
     end
     return false
@@ -111,7 +111,7 @@ end
 
 function WR_PaladinProtection_FX()
     if WR_SpellUsable("复仇之怒", true) then
-        if WR_ColorFrame_ShowSkill("复仇之怒", 28) then return true end
+        if WR_ColorFrame_ShowSkill("复仇之怒", 32) then return true end
     end
     return false
 end

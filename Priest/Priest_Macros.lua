@@ -49,7 +49,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("SHIFT-F6", "/cast [@player]群体驱散") -- 46
   WR_CreateMacro("SHIFT-F7", "/cast [target=cursor] 群体驱散") -- 47
   WR_CreateMacro("SHIFT-F8", "/use [@player,nochanneling:精神鞭笞] 萨隆邪铁炸弹") -- 48
-  WR_CreateMacro("SHIFT-F12", "") -- 49
+  WR_CreateMacro("SHIFT-F12", "/cast 神圣新星") -- 49（2026-11-16：原空槽，补神圣新星）
   WR_CreateMacro("SHIFT-F10", "/cast [@focus] 真言术：盾(等级 11)") -- 50
   WR_CreateMacro("CTRL-F1", "/cast [@focus] 坚韧祷言") -- 51
   WR_CreateMacro("CTRL-F2", "/cast [@focus] 真言术：韧") -- 52
@@ -80,7 +80,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-SHIFT-F7", "/cast [@focus] 强效治疗术") -- 77
   WR_CreateMacro("CTRL-SHIFT-F8", "/cast 驱散魔法") -- 78
   WR_CreateMacro("CTRL-SHIFT-F12", "/cast [target=player] 驱散魔法") -- 79
-  WR_CreateMacro("CTRL-SHIFT-F10", "") -- 80
+  WR_CreateMacro("CTRL-SHIFT-F10", "/cast 沉默") -- 80（2026-11-16：原空槽，补沉默）
   WR_CreateMacro("ALT-CTRL-SHIFT-F1", "") -- 81
   WR_CreateMacro("ALT-CTRL-SHIFT-F2", "/cast [@focus] 痛苦压制") -- 82 (指向痛苦压制专用)
   WR_CreateMacro("ALT-CTRL-SHIFT-F3", "") -- 83
@@ -237,13 +237,13 @@ WR_SkillColor["PRIEST"] = {
     ["精神鞭笞"] = 5,
     ["暗影魔"] = 7,
     ["消散"] = 11,
-    ["守护之魂"] = 187,
-    ["暗言术：死"] = 176,
-    ["心灵专注"] = 301,
-    ["能量灌注"] = 302,
-    ["神圣新星"] = 303,
-    ["联结治疗"] = 304,
-    ["吸血鬼的拥抱"] = 305,
-    ["沉默"] = 306,
-    ["暗影形态"] = 307,
+    ["守护之魂"] = 64,       -- 宏 ALT-CTRL-F11（原 187=萨隆邪铁炸弹，按错键）
+    ["暗言术：死"] = 6,        -- 宏 NUMPAD6（原 176=/focus party1，按错键）
+    ["心灵专注"] = 23,       -- 宏 ALT-NUMPAD3（原 301 越界，ColorTable 不存在 → 崩 tick）
+    ["能量灌注"] = 149,      -- 宏 ALT-SHIFT-,（原 302 越界）
+    ["神圣新星"] = 49,       -- 宏 SHIFT-F12（原 303 越界，宏原为空槽，2026-11-16 补）
+    ["联结治疗"] = 56,       -- 宏 CTRL-F6（原 304 越界）
+    ["吸血鬼的拥抱"] = 10,   -- 宏 NUMPAD0（原 305 越界）
+    ["沉默"] = 80,           -- 宏 CTRL-SHIFT-F10（原 306 越界，宏原为空槽，2026-11-16 补）
+    ["暗影形态"] = 8,        -- 宏 NUMPAD8（原 307 越界）
 }

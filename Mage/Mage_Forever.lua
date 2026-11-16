@@ -29,12 +29,17 @@ end
 
 -- ★ 法师防ADD 判定（2026-11-05 修复：原 Forever 路径读 FANG_ADD_MAGE，但菜单从未赋值该变量，
 --   且 `val~=0` 在菜单存 1/2 时恒为 true，导致防ADD 开关对法师完全失效）。
---   菜单 1=是(开), 2=否(关)；三个专精菜单变量名不同：奥术=AF_FADD, 火焰=FANG_ADD_HUOFA, 冰霜=FADD_BF。
+--   菜单 1=是(开), 2=否(关)；三个专精菜单变量名不同：奥术=AF_FADD, 火焰=HY_FADD（旧档 FANG_ADD_HUOFA 兼容）, 冰霜=BF_FADD（旧档 FADD_BF 兼容）。
 --   返回 true 表示「防ADD关 / 允许 ADD / 允许起手」，false 表示防ADD开。
 function WR_MageForever_AllowAdd(spec)
     local var = "AF_FADD"
-    if spec == "火焰" then var = "FANG_ADD_HUOFA"
-    elseif spec == "冰霜" then var = "FADD_BF" end
+    if spec == "火焰" then
+        if PigSet.HY_FADD ~= nil then return (PigSet.HY_FADD == 2) end
+        var = "FANG_ADD_HUOFA"
+    elseif spec == "冰霜" then
+        if PigSet.BF_FADD ~= nil then return (PigSet.BF_FADD == 2) end
+        var = "FADD_BF"
+    end
     return (PigSet[var] == 2)
 end
 
@@ -155,7 +160,7 @@ SlashCmdList["MKMAGEDBG"] = function()
     local mana = (type(UnitPower) == "function") and UnitPower("player", 0) or nil
     print("  IsUsableSpell(133): usable=" .. fmt(u) .. "  noMana=" .. fmt(nm) .. "  mana=" .. fmt(mana))
     -- 防ADD 状态（2026-11-05 修复后）：菜单 1=是(开) 2=否(关)；按专精变量不同
-    local faddVar = (spec == "火焰") and "FANG_ADD_HUOFA" or (spec == "冰霜") and "FADD_BF" or "AF_FADD"
+    local faddVar = (spec == "火焰") and ((PigSet.HY_FADD ~= nil) and "HY_FADD" or "FANG_ADD_HUOFA") or (spec == "冰霜") and ((PigSet.BF_FADD ~= nil) and "BF_FADD" or "FADD_BF") or "AF_FADD"
     local allowAddNow = (PigSet[faddVar] == 2)
     print("  防ADD: var=" .. faddVar .. "  val=" .. fmt(PigSet[faddVar]) .. "  allowAdd(关才true)=" .. fmt(allowAddNow))
     -- 直接跑一次保底，看它进到哪一步、能否点亮

@@ -4383,7 +4383,7 @@ SlashCmdList["MKFEAR"] = function(msg)
         end
     end
     -- 3. 直接测试 WR_FZ_KBZN 返回值
-    local r = WR_FZ_KBZN()
+    local r = type(WR_FZ_KBZN) == "function" and WR_FZ_KBZN() or "（WR_FZ_KBZN 未定义）"
     print("[3] 直接调用 WR_FZ_KBZN() 返回 = " .. tostring(r))
     -- 4. 测试原 7 个名各自匹配情况
     for _, n in ipairs({"心灵尖啸","煽动惊恐","恐吓","破胆怒吼","恐惧","低沉咆哮","恐慌"}) do

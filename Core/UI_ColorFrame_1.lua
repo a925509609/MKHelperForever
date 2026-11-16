@@ -14,6 +14,14 @@ local function WR_ColorTextVisible()
     return WR_ScreenTextNoticeEnabled() == true
 end
 
+-- ★ 2026-11-17：色块技能名标签（用户口径：色块都写上对应技能）。
+--   与「屏幕文字提示」总闸解耦：总闸只管技能图标框上的文字，
+--   色块下方的技能名默认常显（可用全局「色块技能名」复选框关闭）。
+local function WR_ColorBlockNameVisible()
+    if type(PigSet) ~= "table" then return true end
+    return PigSet["ColorBlockNameShow"] ~= false
+end
+
 -- ★ 2026-08-30：技能提示图标框兜底映射（描述/拼接型 text → 真实技能名）
 --   WotLK(3.3.5) 下 GetSpellInfo 只认技能名；WR_ColorFrame_Show 传入的 text 多为技能名，
 --   但「指向保护」「填充奉献」等描述/拼接型需此处映射成真实技能名才能取到图标。
@@ -75,17 +83,19 @@ end
 
 -- 缩小所有框架（用于紧凑显示模式）
 function WR_MinColorFrame()
+    -- ★ 2026-11-16：色块本身缩到 5×5，但定位锚点的黑色保护底色保持 42×42
+    --   （AHK 备用采样点最远到 (34,34)，缩小黑底会重新暴露游戏背景色 → 误识别）。
     for _, frame in pairs(ColorFrameArrayTopLeft) do
         frame:SetSize(5, 5)
     end
     for _, text in pairs(ColorTextArrayTopLeft) do
-        text:Hide()
+        if WR_ColorBlockNameVisible() then text:Show() else text:Hide() end
     end
     for _, frame in pairs(ColorFrameArrayTopRight) do
         frame:SetSize(5, 5)
     end
     for _, text in pairs(ColorTextArrayTopRight) do
-        text:Hide()
+        if WR_ColorBlockNameVisible() then text:Show() else text:Hide() end
     end
 end
 
@@ -94,8 +104,8 @@ function WR_MaxColorFrame()
     for _, frame in pairs(ColorFrameArrayTopLeft) do
         frame:SetSize(42, 42)
     end
-    -- 总闸关闭时不要把技能名文字重新 Show 出来
-    if WR_ColorTextVisible() then
+    -- 色块技能名标签独立于屏幕文字总闸，默认恢复显示
+    if WR_ColorBlockNameVisible() then
         for _, text in pairs(ColorTextArrayTopLeft) do
             text:Show()
         end
@@ -103,7 +113,7 @@ function WR_MaxColorFrame()
     for _, frame in pairs(ColorFrameArrayTopRight) do
         frame:SetSize(42, 42)
     end
-    if WR_ColorTextVisible() then
+    if WR_ColorBlockNameVisible() then
         for _, text in pairs(ColorTextArrayTopRight) do
             text:Show()
         end
@@ -152,8 +162,11 @@ function WR_ShowColorFrame(name, text, Point)
         if ColorFrameArrayTopLeft[name] then
             ColorFrameArrayTopLeft[name]:Show()
             local fs = ColorTextArrayTopLeft[name]
-            fs:SetText("|cffffffff" .. text .. "\n" .. name)
-            if WR_ColorTextVisible() then fs:Show() else fs:Hide() end
+            local label = text
+            if type(label) ~= "string" or label == "" then label = tostring(name or "") end
+            if type(WR_SkillIcon_TextMap) == "table" and WR_SkillIcon_TextMap[label] then label = WR_SkillIcon_TextMap[label] end
+            fs:SetText(label)
+            if WR_ColorBlockNameVisible() then fs:Show() else fs:Hide() end
         else
             print("错误：[" .. name .. "]" .. text)
         end
@@ -162,8 +175,11 @@ function WR_ShowColorFrame(name, text, Point)
         if ColorFrameArrayTopRight[name] then
             ColorFrameArrayTopRight[name]:Show()
             local fs = ColorTextArrayTopRight[name]
-            fs:SetText("|cffffffff" .. text .. "\n" .. name)
-            if WR_ColorTextVisible() then fs:Show() else fs:Hide() end
+            local label = text
+            if type(label) ~= "string" or label == "" then label = tostring(name or "") end
+            if type(WR_SkillIcon_TextMap) == "table" and WR_SkillIcon_TextMap[label] then label = WR_SkillIcon_TextMap[label] end
+            fs:SetText(label)
+            if WR_ColorBlockNameVisible() then fs:Show() else fs:Hide() end
         else
             print("错误：[" .. name .. "]" .. text)
         end
@@ -172,6 +188,12 @@ end
 
 -- 对外接口：先隐藏所有框架，再显示指定框架（用于循环中返回 true）
 function WR_ColorFrame_Show(Name, Text)
+    -- ★ 2026-11-16：ColorTable 只有 1-240。越界数值一律不显示，避免
+    --   PIG_BGRtoBGR(nil) 在 WR_CreateSingleColorSlot 里把整个循环 tick 打崩。
+    if type(Name) == "number" and (Name < 1 or Name > 240) then
+        WR_HideColorFrame(zhandoumoshi)
+        return false
+    end
     WR_HideColorFrame(zhandoumoshi)
     WR_ShowColorFrame(Name, Text, zhandoumoshi)
     return true

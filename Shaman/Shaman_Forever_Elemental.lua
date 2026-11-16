@@ -59,7 +59,7 @@ function WR_ShamanForeverElemental()
 
     -- ===== 5. 火元素图腾（长 CD 爆发）=====
     if WR_SpellUsable("火元素图腾", true) then
-        if WR_ColorFrame_ShowSkill("火元素图腾", 116) then return true end
+        if WR_ColorFrame_ShowSkill("火元素图腾", 59) then return true end
     end
 
     return false

@@ -54,26 +54,26 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-F1", "/cast 暗影步") -- 51
   WR_CreateMacro("CTRL-F2", "/cast 毒刃") -- 52
   WR_CreateMacro("CTRL-F3", "/cast [target=focus]嫁祸诀窍") -- 53
-  WR_CreateMacro("CTRL-F11", "") -- 54
+  WR_CreateMacro("CTRL-F11", "/cast 淬毒") -- 54（2026-11-16：原空槽，补淬毒）
   WR_CreateMacro("CTRL-F5", "/cast 伏击") -- 55
   WR_CreateMacro("CTRL-F6", "/cast 转嫁") -- 56
   WR_CreateMacro("CTRL-F7", "/cast 暗影步") -- 57
   WR_CreateMacro("CTRL-F8", "/cast 切割\n/stopcasting") -- 58
-  WR_CreateMacro("CTRL-F12", "") -- 59
-  WR_CreateMacro("CTRL-F10", "") -- 60
+  WR_CreateMacro("CTRL-F12", "/cast 还击") -- 59（2026-11-16：原空槽，补还击）
+  WR_CreateMacro("CTRL-F10", "/cast 剑刃乱舞") -- 60（2026-11-16：原空槽，补剑刃乱舞）
   WR_CreateMacro("ALT-CTRL-F1", "/use [@none] 速效药膏 IX\n/use 16\n/click StaticPopup1Button1") -- 61
   WR_CreateMacro("ALT-CTRL-F2", "/use [@none] 致命药膏 IX\n/use 16\n/click StaticPopup1Button1") -- 62
   WR_CreateMacro("ALT-CTRL-F3", "/use [@none] 速效药膏 IX\n/use 17\n/click StaticPopup1Button1") -- 63
-  WR_CreateMacro("ALT-CTRL-F11", "") -- 64
+  WR_CreateMacro("ALT-CTRL-F11", "/cast 幽魂击") -- 64（2026-11-16：原空槽，补幽魂击）
   WR_CreateMacro("ALT-CTRL-F5", "/use 8") -- 65
   WR_CreateMacro("ALT-CTRL-F6", "/use [@none] 致命药膏 IX\n/use 17\n/click StaticPopup1Button1") -- 66
   WR_CreateMacro("ALT-CTRL-F7", "") -- 67
   WR_CreateMacro("ALT-CTRL-F8", "/use 速度药水") -- 68
   WR_CreateMacro("ALT-CTRL-F12", "/target 黑暗邪使艾蒂丝") -- 69
   WR_CreateMacro("ALT-CTRL-F10", "/target 光明邪使菲奥拉") -- 70
-  WR_CreateMacro("CTRL-SHIFT-F1", "") -- 71
-  WR_CreateMacro("CTRL-SHIFT-F2", "") -- 72
-  WR_CreateMacro("CTRL-SHIFT-F3", "") -- 73
+  WR_CreateMacro("CTRL-SHIFT-F1", "/cast 要害打击") -- 71（2026-11-16：原空槽，补要害打击）
+  WR_CreateMacro("CTRL-SHIFT-F2", "/cast 军刀猛刺") -- 72（2026-11-16：原空槽，补军刀猛刺）
+  WR_CreateMacro("CTRL-SHIFT-F3", "/cast 剔骨") -- 73（2026-11-16：原空槽，补剔骨）
   WR_CreateMacro("CTRL-SHIFT-F11", "") -- 74
   WR_CreateMacro("CTRL-SHIFT-F5", "") -- 75
   WR_CreateMacro("CTRL-SHIFT-F6", "") -- 76
@@ -229,16 +229,16 @@ WR_SkillColor["ROGUE"] = {
     ["邪恶攻击"] = 31,
     ["暗影步"] = 51,
     ["背刺"] = 34,
-    ["要害打击"] = 156,
-    ["军刀猛刺"] = 154,
-    ["剔骨"] = 160,
-    ["冷血"] = 301,
-    ["淬毒"] = 302,
-    ["还击"] = 303,
-    ["剑刃乱舞"] = 304,
-    ["冲动"] = 305,
-    ["幽魂击"] = 306,
-    ["预谋"] = 307,
-    ["伺机待发"] = 308,
-    ["出血"] = 309,
+    ["要害打击"] = 71,       -- 宏 CTRL-SHIFT-F1（原 156=/focus raid6target，按错键）
+    ["军刀猛刺"] = 72,       -- 宏 CTRL-SHIFT-F2（原 154=/focus raid4target，按错键）
+    ["剔骨"] = 73,           -- 宏 CTRL-SHIFT-F3（原 160=/focus raid10target，按错键）
+    ["冷血"] = 1,            -- 宏 NUMPAD1（原 301 越界 → 崩 tick）
+    ["淬毒"] = 54,           -- 宏 CTRL-F11（原 302 越界，宏原为空槽，2026-11-16 补）
+    ["还击"] = 59,           -- 宏 CTRL-F12（原 303 越界，宏原为空槽，2026-11-16 补）
+    ["剑刃乱舞"] = 60,       -- 宏 CTRL-F10（原 304 越界，宏原为空槽，2026-11-16 补）
+    ["冲动"] = 37,           -- 宏 ALT-CTRL-NUMPAD7（原 305 越界）
+    ["幽魂击"] = 64,         -- 宏 ALT-CTRL-F11（原 306 越界，宏原为空槽，2026-11-16 补）
+    ["预谋"] = 40,           -- 宏 ALT-CTRL-NUMPAD0（原 307 越界）
+    ["伺机待发"] = 47,       -- 宏 SHIFT-F7（原 308 越界）
+    ["出血"] = 33,           -- 宏 ALT-CTRL-NUMPAD3（原 309 越界）
 }

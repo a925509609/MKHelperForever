@@ -92,10 +92,18 @@ function WR_PaladinForeverHoly_HasDispel(unit)
             local aura = auras[i]
             local dt = type(aura) == "table" and aura.dispelType or nil
             if type(dt) == "string" then
-                local s = string.lower(dt)
-                if s == "poison" or s == "disease" or s == "magic"
-                    or dt == "中毒" or dt == "疾病" or dt == "魔法" then
-                    return true
+                local secret = false
+                if WR_IsSecretValue ~= nil then
+                    local okS, isSecret = pcall(WR_IsSecretValue, dt)
+                    secret = okS and isSecret == true
+                end
+                if not secret then
+                    local okL, s = pcall(string.lower, dt)
+                    if not okL then s = nil end
+                    if s == "poison" or s == "disease" or s == "magic"
+                        or dt == "中毒" or dt == "疾病" or dt == "魔法" then
+                        return true
+                    end
                 end
             end
         end

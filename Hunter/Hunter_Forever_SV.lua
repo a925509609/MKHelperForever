@@ -1,86 +1,67 @@
 -- ============================================================
 -- Hunter_Forever_SV.lua  《魔兽世界：无限》(Forever) 生存专精循环
--- 改动日期：2026-11-13（Forever 适配重建）
--- 本次重建内容：
---   1. 按 Forever 骨架重建优先级：自保/近战天赋技能（威慑·反击·长足踢击，
---      按已学触发）→ DOT 双保持（爆炸射击 / 黑箭，均为无限真实存在技能）
---      → 毒蛇钉刺保持 → 多重射击(AoE) → 瞄准射击 → 填充（自动射击已在 base）。
---   2. 删除 SoD 符文存在性门控调用——它在 Forever 恒 false，会把真实存在的
---      爆炸射击/黑箭整条屏蔽（原主要 bug 之一）；改用 WR_SpellUsable 直接
---      门控（"已学即可用"，无限不存在的技能自动跳过）。
---   3. 原 SoD 版引用的多个无限不存在技能（Kill 斩杀系 / Steady 读条系 /
---      Chimera 系 / 近战连击系）连同调用整体移除。
---   4. 接入无限新增生存天赋主动技能（Data/Forever_Abilities.lua）：
---      威慑(Deterrence) / 反击(Counterattack) / 长足踢击(Strider Kick)，
---      以 WR_Forever_IsSpellKnown(中文名) 且 WR_SpellUsable(中文名, true) 双重
---      门控：威慑低血自保；反击/长足踢击近战位(≤8码)倾泻。未学自动跳过——
---      天然支持练级。
---   5. 雄鹰射击 buff 窗口联动：窗口将断(<6s)先瞄准刷续窗口；窗口充裕时
---      爆炸射击/黑箭高伤 DOT 优先铺满（贴合 buff 窗口）。
---   6. 防ADD战斗门按专精传"生存"（公共件读 FANG_ADD_SCLR）。
---   7. 任务#6 BUG-1 修复：AutoShot 前置于 gate 的调用传入 specName，由公共件按
---      「防ADD关闭 或 目标已进战斗」约束点亮，脱战防ADD开启时不再平射拉怪；
---      回退槽与宏层终值对齐（雄鹰守护=1 蝰蛇守护=34 自动射击=40，守护/平射走公共件）。
--- 依赖：Hunter_Forever.lua 公共件全部 helper（WR_SpellUsable/光环时间/色块
---   槽位口径见公共件头注释；回退槽与宏层 WR_SkillColor["HUNTER"] 终值对齐：
---   威慑=95 长足踢击=96 反击=101 黑箭=8，钉刺/多重/瞄准/急速/爆炸走公共件槽位）。
+-- 改动日期：2026-11-16（按猪猪 / 彼岸花-无限服生存页重做）
+-- ------------------------------------------------------------
+-- 本次重做：
+--   1. 面板按截图重建：选择（防ADD / 共享冷却：瞄准射击or多重射击）、
+--      拉条（喝红药30%）、爆发（急速射击 / 种族爆发 + 全开/全关/切换）、
+--      功能（远程技能 / 近战技能 / 宠物 / 印记 / 切换目标）、
+--      插入（献祭陷阱/冰冻陷阱/冰霜陷阱/震荡射击/扰乱射击/治疗宠物/
+--            急速射击/照明弹/乱射/爆炸陷阱/假死）。
+--   2. 功能层全部在 Hunter_Survival_Features.lua（WR_HunterSV）：
+--      远程技能与近战技能各自右键小窗逐项勾选；宠物右键选召唤/复活模式/
+--      脱战治疗阈值；印记右键可只打首领；急速右键可只打首领。
+--   3. 删除 80 级 / 无限不存在的旧技能引用：杀戮射击 / 杀戮命令 /
+--      眼镜蛇射击 / 奇美拉射击 / 稳固射击 / 爆炸射击（读条填充） /
+--      黑箭 / 削砍 / 准备就绪 / 沉默射击 / 饰品 / 手套 / 炸弹 / 速度药水等；
+--      保留 60 级真实技能：毒蛇钉刺 / 奥术射击 / 瞄准射击 / 多重射击 /
+--      狙击 / 震荡射击 / 猫鼬撕咬 / 摔绊 / 猛禽一击 / 反击 / 陆行鸟踢击。
+--   4. 循环顺序：
+--      宠物维护（脱战召唤/复活/治疗）→ 切换目标 → 自动射击 →
+--      防ADD门 → 守护 → 插入 → 喝红药 → 猎人印记 → 爆发 →
+--      远程技能 → 近战技能。
+--   5. 「共享冷却」：瞄准射击与多重射击共享 6 秒冷却，面板下拉选择优先项
+--      （1=瞄准射击 / 2=多重射击）。
 -- ============================================================
 
 if WR_PlayerClass ~= "HUNTER" then return end
 
 function WR_HunterForeverSV()
     local specName = "生存"
+    local HS = WR_HunterSV
+    if type(HS) ~= "table" then return false end
+
+    -- 宠物维护：不需要目标，脱战也要能召唤/复活/治疗
+    if HS.PetStep() then return true end
+
+    -- 目标失效时先切目标（无目标也能工作）
+    if HS.TargetSwitchStep() then return true end
+
     local inRange = WR_HunterForever_Base()
     if not inRange then return false end
+
+    -- 自动射击保持：防ADD开启且脱战时由公共件自动约束
     if WR_HunterForever_AutoShot(inRange, specName) then return true end
     if not WR_HunterForever_InCombatGate(specName) then return false end
     if WR_HunterForever_Aspect() then return true end
 
-    -- ===== 生存天赋主动技能：自保 + 近战位（按已学触发，未学自动跳过） =====
-    -- 威慑：25% 招架/闪避 10 秒，低血（<35%）时优先自保
-    local hp = tonumber(PlayerHP) or 1
-    if hp < 0.35 and WR_Forever_IsSpellKnown("威慑")
-       and WR_GetUnitBuffTime("player", "威慑") == 0
-       and WR_SpellUsable("威慑", true) then
-        if WR_ColorFrame_ShowSkill("威慑", 95) then return true end
-    end
-    -- 反击 / 长足踢击：近战武器伤害技能，贴身(≤8码)时优先倾泻
-    if inRange and type(TargetRange) == "number" and TargetRange <= 8 then
-        if WR_Forever_IsSpellKnown("反击") and WR_SpellUsable("反击", true) then
-            if WR_ColorFrame_ShowSkill("反击", 101) then return true end
-        end
-        if WR_Forever_IsSpellKnown("长足踢击") and WR_SpellUsable("长足踢击", true) then
-            if WR_ColorFrame_ShowSkill("长足踢击", 96) then return true end
-        end
-    end
+    -- 插入（一次性，放完自关）：不受远程/近战总开关影响
+    if HS.InsertStep() then return true end
 
-    -- ===== 雄鹰射击窗口联动：将断(<6s)先瞄准刷续窗口 =====
-    if WR_HunterForever_EagleFading() then
-        if WR_HunterForever_Aimed() then return true end
-    end
+    -- 喝红药（拉条 30%）
+    if HS.PotionStep() then return true end
 
-    -- ===== DOT 双保持：爆炸射击 / 黑箭（无限真实存在，WR_SpellUsable 门控） =====
-    -- 窗口充裕时优先铺满高伤 DOT；空窗也照常保持（不等待触发）。
-    if inRange and WR_GetUnitDebuffTime("target", "爆炸射击") == 0
-       and WR_SpellUsable("爆炸射击", true) then
-        if WR_ColorFrame_ShowSkill("爆炸射击", 7) then return true end
-    end
-    if inRange and WR_GetUnitDebuffTime("target", "黑箭") == 0
-       and WR_SpellUsable("黑箭", true) then
-        if WR_ColorFrame_ShowSkill("黑箭", 8) then return true end
-    end
+    -- 猎人印记（独立开关）
+    if HS.MarkStep() then return true end
 
-    -- ===== DOT 保持：毒蛇钉刺 =====
-    if WR_HunterForever_Serpent(inRange) then return true end
+    -- 爆发（急速射击 / 种族爆发）
+    if HS.BurstStep() then return true end
 
-    -- ===== AoE：多重射击（宏表槽位 20；低等级由公共件自动放宽到 2+ 敌） =====
-    if WR_HunterForever_MultiShot(inRange) then return true end
+    -- 远程技能（右键小窗逐项勾选）
+    if HS.RemoteStep(inRange) then return true end
 
-    -- ===== 单体核心：瞄准射击（未学自动跳过，低等级降级为钉刺+平射） =====
-    if WR_HunterForever_Aimed() then return true end
-
-    -- ===== 爆发填充：急速射击（CD 好且 buff 不在期） =====
-    if WR_HunterForever_RapidShot() then return true end
+    -- 近战技能（贴身 8 码内）
+    if HS.MeleeStep(inRange) then return true end
 
     return false
 end

@@ -148,6 +148,9 @@ Paladin\Paladin_Retribution_Check.lua
 
 Druid\Druid_Menu.lua
 Druid\Druid_Macros.lua
+Druid\Druid_Balance_Features.lua
+Druid\Druid_Feral_Features.lua
+Druid\Druid_Restoration_Features.lua
 Druid\DRUID_EssenceOptimization.lua
 Druid\DRUID_RestorationHealing.lua
 Druid\DRUID_AOE_Optimization.lua
@@ -169,8 +172,11 @@ Mage\Mage_Arcane.lua
 Mage\Mage_Fire.lua
 Mage\Mage_Frost.lua
 Mage\Mage_Forever.lua
+Mage\Mage_Arcane_Features.lua
+Mage\Mage_Fire_Features.lua
 Mage\Mage_Forever_Arcane.lua
 Mage\Mage_Forever_Fire.lua
+Mage\Mage_Frost_Features.lua
 Mage\Mage_Forever_Frost.lua
 
 Warrior\Warrior_Menu.lua
@@ -193,6 +199,7 @@ Priest\Priest_Holy.lua
 Priest\Priest_Shadow.lua
 Priest\Priest_Forever.lua
 Priest\Priest_Forever_Discipline.lua
+Priest\Priest_Forever_Discipline_Features.lua
 Priest\Priest_Forever_Holy.lua
 Priest\Priest_Forever_Shadow.lua
 
@@ -202,6 +209,9 @@ Hunter\Hunter_BeastMastery.lua
 Hunter\Hunter_Marksmanship.lua
 Hunter\Hunter_Survival.lua
 Hunter\Hunter_Forever.lua
+Hunter\Hunter_BeastMastery_Features.lua
+Hunter\Hunter_Marksmanship_Features.lua
+Hunter\Hunter_Survival_Features.lua
 Hunter\Hunter_Forever_BM.lua
 Hunter\Hunter_Forever_MM.lua
 Hunter\Hunter_Forever_SV.lua
@@ -224,6 +234,8 @@ Shaman\Shaman_Elemental.lua
 Shaman\Shaman_Enhancement.lua
 Shaman\Shaman_Restoration.lua
 Shaman\Shaman_Restoration_Extra.lua
+Shaman\Shaman_Restoration_Features.lua
+Shaman\Shaman_Enhancement_Features.lua
 Shaman\Shaman_Forever.lua
 Shaman\Shaman_Forever_Elemental.lua
 Shaman\Shaman_Forever_Enhancement.lua

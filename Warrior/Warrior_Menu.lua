@@ -76,7 +76,7 @@ Warrior_Menu = {
     },
 
     -- ==========================================================
-    -- 2. 狂怒专精 (Fury) —— 2026-11-15 按「彼岸花-无限服 · 狂暴页」重做
+    -- 2. 狂怒专精 (Fury) —— 2026-11-16 按「猪猪 / 彼岸花-无限服 · 狂暴页」重做
     -- ==========================================================
     ["狂怒"] = {
         -- ===== 下拉菜单（DM） =====
@@ -106,11 +106,11 @@ Warrior_Menu = {
             -- 自动：狂怒功能（右键图标打开额外条件）
             { row = 1, column = 1, IconID = 132155, text = "|cffC79C6E撕裂|r", tooltipText = "开着时，目标身上没有自己施加的撕裂就自动补一次；撕裂还在时不重复补。\n右键：不打元素 / 不打机械 / 不打亡灵 / 预判秒数", saveVariable = "KN_SILIE", section = "自动", defaultState = true,
                 onRightClick = function() if WR_WarriorFuryUI then WR_WarriorFuryUI.ShowOptions("KN_SILIE") end end },
-            { row = 1, column = 2, IconID = 136105, text = "|cffC79C6E雷霆挫志|r", tooltipText = "雷霆一击 + 挫志怒吼。\n右键：雷霆/挫志各自设置 多目标（保持/卡CD/不放）、怪物数、缺数、单体（保持/卡CD/不放）", saveVariable = "KN_LTYJ", section = "自动", defaultState = true,
+            { row = 1, column = 2, IconID = 136105, text = "|cffC79C6E雷霆挫志|r", tooltipText = "雷霆一击 + 挫志怒吼。\n右键：雷霆（多目标 保持/卡CD/不放、单体 保持/卡CD/不放）；挫志（多目标/单体 保持/不放）", saveVariable = "KN_LTYJ", section = "自动", defaultState = true,
                 onRightClick = function() if WR_WarriorFuryUI then WR_WarriorFuryUI.ShowOptions("KN_LTYJ") end end },
             { row = 1, column = 3, IconID = 136009, text = "|cffC79C6E血性狂暴|r", tooltipText = "开着时自动放血性狂暴（掉血换怒气）。\n右键：怒气低于多少 / 血量高于多少才放", saveVariable = "KN_HXKJ", section = "自动", defaultState = true,
                 onRightClick = function() if WR_WarriorFuryUI then WR_WarriorFuryUI.ShowOptions("KN_HXKJ") end end },
-            { row = 1, column = 4, IconID = 132363, text = "|cffC79C6E破甲攻击|r", tooltipText = "开着时按额外条件放破甲攻击（降低护甲、拉仇恨）。\n右键：只打1破 / 高优先级 / 低优先级 / 续破秒数", saveVariable = "KN_BDPJ", section = "自动", defaultState = true,
+            { row = 1, column = 4, IconID = 132363, text = "|cffC79C6E破甲攻击|r", tooltipText = "开着时按额外条件放破甲攻击（降低护甲、拉仇恨）。\n右键：只打1破 / 高优先级 / 低优先级 / 续破秒数", saveVariable = "KN_BDPJ", section = "自动", defaultState = false,
                 onRightClick = function() if WR_WarriorFuryUI then WR_WarriorFuryUI.ShowOptions("KN_BDPJ") end end },
 
             { row = 2, column = 1, IconID = 132090, text = "|cffC79C6E切姿态|r", tooltipText = "开着时自动切姿态。\n右键：脱战切战斗 / 进战切狂暴（插入反击、反击风暴快好时先不切）", saveVariable = "KN_QTZ", section = "自动", defaultState = true,
@@ -120,14 +120,10 @@ Warrior_Menu = {
             { row = 2, column = 4, IconID = 132342, text = "|cffC79C6E鲁莽挥击|r", tooltipText = "狂怒天赋新技能：接下来 4 次近战攻击每次额外产生 5 点怒气，持续 8 秒。\n右键：怒气低于多少才用", saveVariable = "KN_LMHJ", section = "自动", defaultState = true,
                 onRightClick = function() if WR_WarriorFuryUI then WR_WarriorFuryUI.ShowOptions("KN_LMHJ") end end },
 
-            -- 爆发（默认和截图一致：鲁莽/死愿/种族爆发都开）
+            -- 爆发（截图口径：鲁莽/死愿/种族爆发）
             { row = 1, column = 1, IconID = 132109, text = "|cffC79C6E鲁莽|r", tooltipText = "自动使用鲁莽（狂暴姿态，爆发 CD 好了就开）", saveVariable = "KN_LM", section = "爆发", defaultState = true },
             { row = 1, column = 2, IconID = 136146, text = "|cffC79C6E死愿|r", tooltipText = "自动使用死亡之愿（+20% 物理伤害，30 秒）", saveVariable = "KN_SWZY", section = "爆发", defaultState = true },
             { row = 1, column = 3, IconID = 135727, text = "|cffC79C6E种族爆发|r", tooltipText = "自动使用种族爆发技能", saveVariable = "KN_ZDZZ", section = "爆发", defaultState = true },
-            { row = 1, column = 4, IconID = 236871, text = "|cffC79C6E速度药水|r", tooltipText = "使用速度药水", saveVariable = "KN_ZDSDYS", section = "爆发", defaultState = false },
-            { row = 1, column = 5, IconID = 236871, text = "|cffC79C6E偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "KN_TOUYAO", section = "爆发", defaultState = false },
-            { row = 2, column = 1, IconID = 132962, text = "|cffC79C6E手套|r", tooltipText = "自动使用工程手套", saveVariable = "KN_ZDST", section = "爆发", defaultState = true },
-            { row = 2, column = 2, IconID = 338666, text = "|cffC79C6E饰品|r", tooltipText = "自动使用饰品", saveVariable = "KN_ZDSP", section = "爆发", defaultState = true },
 
             -- 插入（一次性，放完自关）
             { row = 1, column = 1, IconID = 132336, text = "|cffC79C6E反击|r", tooltipText = "插入 反击风暴（一次性，施放后自关）", saveVariable = "KN_FJFB_CR", section = "插入", defaultState = false },
@@ -137,7 +133,7 @@ Warrior_Menu = {
     },
 
     -- ==========================================================
-    -- 3. 防护专精 (Protection)
+    -- 3. 防护专精 (Protection) —— 2026-11-16 按「猪猪 / 彼岸花-无限服 · 防战页」同步
     -- ==========================================================
     ["防护"] = {
         -- ===== 下拉菜单（DM） =====
@@ -150,14 +146,6 @@ Warrior_Menu = {
                 saveVariable = "FANG_ADD_FZ",
                 defaultID = 1
             },
-            -- 怒吼选择
-            {
-                text = "|cffC79C6E怒吼|r",
-                menuItems = { { text = "|cffC79C6E命令|r" }, { text = "|cffC79C6E战斗|r" }, { text = "|cffC79C6E禁用|r" } },
-                tooltipText = "使用(|cff00adf0怒吼|r技能)",
-                saveVariable = "FZ_KG_NH",
-                defaultID = 1
-            },
             -- 破釜沉舟阈值
             {
                 text = "|cffC79C6E破釜沉舟|r",
@@ -168,31 +156,6 @@ Warrior_Menu = {
                 defaultVal = 20,
                 tooltipText = "血量低于该百分比时使用|cff00adf0破釜沉舟|r\n",
                 saveVariable = "FZ_KG_PFCZ"
-            },
-            -- 狂怒回复阈值
-            {
-                text = "|cffC79C6E狂怒回复|r",
-                isSlider = true,
-                minValue = 0,
-                maxValue = 100,
-                valueStep = 10,
-                defaultVal = 50,
-                tooltipText = "多少血量以下使用",
-                saveVariable = "FZ_KNHF"
-            },
-            -- 自动盾墙阈值
-            {
-                text = "|cffC79C6E自动盾墙|r",
-                menuItems = {
-                    { text = "|cffC79C6E10%|r" }, { text = "|cffC79C6E20%|r" },
-                    { text = "|cffC79C6E30%|r" }, { text = "|cffC79C6E40%|r" },
-                    { text = "|cffC79C6E50%|r" }, { text = "|cffC79C6E60%|r" },
-                    { text = "|cffC79C6E70%|r" }, { text = "|cffC79C6E80%|r" },
-                    { text = "|cffC79C6E90%|r" }, { text = "|cffC79C6E禁用|r" }
-                },
-                tooltipText = "自动盾墙血量阈值",
-                saveVariable = "FZ_KG_SHIELDWALL",
-                defaultID = 3
             },
             -- 顺劈斩阈值
             {
@@ -238,17 +201,6 @@ Warrior_Menu = {
                 tooltipText = "血量低于该百分比时自动喝治疗药水（0 = 关闭）",
                 saveVariable = "FZ_HXY"
             },
-            -- 输出循环模式（保留旧存档项，不参与新循环）
-            {
-                text = "|cffC79C6E输出循环|r",
-                menuItems = {
-                    { text = "|cffC79C6E常规循环|r" },
-                    { text = "|cffC79C6E复仇循环|r" }
-                },
-                tooltipText = "选择输出循环模式\n|cffff0000常规循环|r：标准仇恨+伤害，适合大多数场合\n|cffff0000复仇循环|r：优先复仇，适合多目标或高仇恨需求",
-                saveVariable = "FZ_OUTPUT_MODE",
-                defaultID = 1
-            },
             { text = "|cffC79C6E打断|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 60, tooltipText = "施法进度达到该百分比时自动打断（0=关闭，默认60）", saveVariable = "FZ_KG_QJ" },
         },
         -- ===== 复选框（CB） =====
@@ -273,18 +225,11 @@ Warrior_Menu = {
             { row = 2, column = 5, IconID = 132342, text = "|cffC79C6E鲁莽挥击|r", tooltipText = "防护天赋新技能：接下来 4 次近战攻击每次额外产生 5 点怒气，持续 8 秒。\n右键：怒气低于多少才用", saveVariable = "FZ_LMHJ", section = "自动", defaultState = true,
                 onRightClick = function() if WR_WarriorProt then WR_WarriorProt.ShowOptions("FZ_LMHJ") end end },
 
-            { row = 3, column = 1, IconID = 132453, text = "|cffC79C6E英勇投掷|r", tooltipText = "自动使用英勇投掷功能，5码以上或者目标不是你", saveVariable = "FZ_YYTZ", section = "自动", defaultState = true },
-            { row = 3, column = 2, IconID = 132320, text = "|cffC79C6E自动|r", tooltipText = "自动缴械（仅人型/野兽，爆发或斩杀期释放）", saveVariable = "FZ_JF", section = "自动", defaultState = false },
-
-            -- 爆发
-            { row = 1, column = 1, IconID = 236871, text = "|cffC79C6E自动|r", tooltipText = "使用|cff00adf0速度药水|r\n", saveVariable = "FZ_KG_ZDSDYS", section = "爆发", defaultState = false },
-            { row = 1, column = 2, IconID = 236871, text = "|cffC79C6E偷药|r", tooltipText = "开启后，爆发期间自动使用速度药水（含DBM倒数提前开）", saveVariable = "FZ_TOUYAO", section = "爆发", defaultState = false },
-            { row = 1, column = 3, IconID = 135727, text = "|cffC79C6E自动|r", tooltipText = "自动使用|cff00adf0种族|r\n", saveVariable = "FZ_KG_ZDZZ", section = "爆发", defaultState = true },
-            { row = 1, column = 4, IconID = 132962, text = "|cffC79C6E自动|r", tooltipText = "自动使用|cff00adf0手套|r\n", saveVariable = "FZ_KG_ZDST", section = "爆发", defaultState = true },
-            { row = 1, column = 5, IconID = 136047, text = "|cffC79C6E锁BOSS|r", tooltipText = "自动锁定可以攻击的BOSS\n", saveVariable = "FZ_KG_SUO", section = "爆发", defaultState = true },
-            { row = 2, column = 1, IconID = 133712, text = "|cffC79C6E自动|r", tooltipText = "使用|cff00adf0通用热力工程炸药|r或|cff00adf0萨隆邪铁炸弹|r\n", saveVariable = "FZ_KG_ZDZD", section = "爆发", defaultState = false },
-            { row = 2, column = 3, IconID = 132338, text = "|cffC79C6E强制|r", tooltipText = "强制使用|cff00adf0顺劈|r\n", saveVariable = "FZ_KG_QZSP", section = "爆发", defaultState = false },
-            { row = 2, column = 4, IconID = 132338, text = "|cffC79C6E智能|r", tooltipText = "智能使用|cff00adf0顺劈|r\n", saveVariable = "FZ_KG_ZNSP", section = "爆发", defaultState = true },
+            -- 爆发（截图口径：全开 / 全关 / 切换 + 种族爆发）
+            { text = "|cffC79C6E爆发全开|r", isButton = true, buttonText = "全部打开", buttonWidth = 90, labelWidth = 95, tooltipText = "一键打开 种族爆发", onClick = "WR_WarriorProtBurstAllOn" },
+            { text = "|cffC79C6E爆发全关|r", isButton = true, buttonText = "全部关闭", buttonWidth = 90, labelWidth = 95, tooltipText = "一键关闭 种族爆发", onClick = "WR_WarriorProtBurstAllOff" },
+            { text = "|cffC79C6E爆发切换|r", isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95, tooltipText = "种族爆发开着就全关，关着就全开", onClick = "WR_WarriorProtBurstToggle" },
+            { row = 1, column = 1, IconID = 135727, text = "|cffC79C6E种族爆发|r", tooltipText = "自动使用种族爆发技能（宏 181）", saveVariable = "FZ_KG_ZDZZ", section = "爆发", defaultState = true },
 
             -- 插入（一次性，放完自关）
             { row = 1, column = 1, IconID = 132336, text = "|cffC79C6E反击|r", tooltipText = "插入 反击风暴（一次性，施放后自关）", saveVariable = "FZ_FJFB_CR", section = "插入", defaultState = false },
@@ -295,8 +240,6 @@ Warrior_Menu = {
             { row = 2, column = 2, IconID = 132183, text = "|cffC79C6E拦截|r", tooltipText = "插入 拦截（8~25码，一次性；自动切战斗姿态，放完自关）", saveVariable = "FZ_JL_CR", section = "插入", defaultState = false },
             { row = 2, column = 3, IconID = 132350, text = "|cffC79C6E惩戒痛击|r", tooltipText = "插入 惩戒痛击（一次性，施放后自关）", saveVariable = "FZ_CJTJ_CR", section = "插入", defaultState = false },
             { row = 2, column = 4, IconID = 132275, text = "|cffC79C6E狂暴之怒|r", tooltipText = "插入 狂暴之怒（一次性，施放后自关）", saveVariable = "FZ_KBZN_CR", section = "插入", defaultState = false },
-            { row = 2, column = 5, IconID = 311430, text = "|cffC79C6E碎裂投掷|r", tooltipText = "插入 碎裂投掷（一次性，施放后自关）", saveVariable = "FZ_CRSLTZ", section = "插入", defaultState = false },
-            { row = 3, column = 1, IconID = 132343, text = "|cffC79C6E缴械|r", tooltipText = "插入 缴械（一次性，仅人型/野兽，施放后自关）", saveVariable = "FZ_JF_CR", section = "插入", defaultState = false },
         },
     },
 }

@@ -4,7 +4,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("NUMPAD1", "/cast 破甲攻击") -- 1
   WR_CreateMacro("NUMPAD2", "/CAST 嗜血") -- 2
   WR_CreateMacro("NUMPAD3", "/CAST 旋风斩") -- 3
-  WR_CreateMacro("NUMPAD4", "/stopattack") -- 4
+  WR_CreateMacro("NUMPAD4", "/startattack") -- 4（2026-11-16：原 /stopattack，与「攻击」提示语义相反）
   WR_CreateMacro("NUMPAD5", "/CAST 英勇打击") -- 5
   WR_CreateMacro("NUMPAD6", "/CAST 英勇投掷") -- 6
   WR_CreateMacro("NUMPAD7", "/cast 顺劈斩") -- 7
@@ -59,7 +59,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-F6", "/cast 惩戒痛击") -- 56
   WR_CreateMacro("CTRL-F7", "/cast 冲锋") -- 57
   WR_CreateMacro("CTRL-F8", "") -- 58
-  WR_CreateMacro("CTRL-F12", "") -- 59
+  WR_CreateMacro("CTRL-F12", "/cast 鞭笞") -- 59（2026-11-16：原空槽，补鞭笞）
   WR_CreateMacro("CTRL-F10", "/cast 死亡之愿") -- 60
   WR_CreateMacro("ALT-CTRL-F1", "/cast 穿刺打击") -- 61
   WR_CreateMacro("ALT-CTRL-F2", "") -- 62
@@ -77,7 +77,7 @@ local function CreateClassesMacro()
   WR_CreateMacro("CTRL-SHIFT-F11", "/cast 缴械") -- 74
   WR_CreateMacro("CTRL-SHIFT-F5", "/use 阿加治疗药水\n/use 焕生治疗药水") -- 75
   WR_CreateMacro("CTRL-SHIFT-F6", "/cast 嘲讽") -- 76
-  WR_CreateMacro("CTRL-SHIFT-F7", "") -- 77
+  WR_CreateMacro("CTRL-SHIFT-F7", "/cast 迅捷打击") -- 77（2026-11-16：原空槽，补迅捷打击）
   WR_CreateMacro("CTRL-SHIFT-F8", "/cast 鲁莽挥击") -- 78
   WR_CreateMacro("CTRL-SHIFT-F12", "") -- 79
   WR_CreateMacro("CTRL-SHIFT-F10", "") -- 80
@@ -239,11 +239,11 @@ WR_SkillColor["WARRIOR"] = {
     ["盾牌格挡"] = 31,
     ["挑战怒吼"] = 32,
     ["血性狂暴"] = 12,
-    ["狂暴之怒(解控)"] = 58,
+    ["狂暴之怒(解控)"] = 11,     -- 宏 CTRL-NUMPAD1（原 58 为空槽）
     ["攻击"] = 4,
     ["鞭笞"] = 59,
     ["狂暴打击"] = 69,
-    ["迅捷打击"] = 70,
+    ["迅捷打击"] = 77,       -- 宏 CTRL-SHIFT-F7（原 70=/focus 双子，按错键）
     ["贯刺打击"] = 64,
     ["横扫攻击"] = 42,
     ["刺耳怒吼"] = 53,
@@ -256,6 +256,7 @@ WR_SkillColor["WARRIOR"] = {
     ["战斗怒吼"] = 10,
     ["防御姿态"] = 28,
     ["战斗姿态"] = 9,
+    ["狂暴姿态"] = 33,
     ["嘲讽"] = 76,
     ["鲁莽挥击"] = 78,
     ["盾墙"] = 47,
