@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "WARRIOR" then return end
 -- ============================================================
 -- Warrior_Fury.lua  (★ SoD 探索赛季改编版)
 -- 狂暴战自动循环 —— 符文自适应（P1-P4）
@@ -105,7 +107,7 @@ end
 -- ★ 迅捷打击（手符文）：副手攻击，触发可用即放
 function WR_WarriorFury_XJ()
     if WR_SoD_HasRune("WARRIOR", "QuickStrike") and WR_SpellUsable("迅捷打击", true) then
-        if WR_ColorFrame_ShowSkill("迅捷打击", 70) then return true end
+        if WR_ColorFrame_ShowSkill("迅捷打击", 77) then return true end
     end
     return false
 end

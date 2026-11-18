@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PALADIN" then return end
 -- ============================================================
 -- Paladin Forever · Prot 专精循环（坦克：多目标固定优先级 / 目标 ≤1 的 Ready-first 调度）
 -- ------------------------------------------------------------
@@ -57,7 +59,7 @@
 --   · 勾选后是常驻开关（不是一次性插入，不会自动取消勾选）；
 --   · 优先维持自己身上的「光明圣印」（30 秒 Buff，掉了照常补）；
 --   · 目标身上没有「光明审判」debuff 时，用光明圣印打审判挂 debuff；
---   · 目标已有「光明审判」debuff 时，自动切回常驻圣印（面板「圣印」专区所选）；
+--   · 目标已有「光明审判」debuff 时，自动切回「上一次圣印」（点火前正在用的圣印）；
 --   · 本服「光明审判」持续 40 秒（ForeverDB build 1.60.1.70862，Classic 10 秒），
 --     到期后自动重复上述循环。
 -- ★★ 2026-11-12 用户口径（切印时机）：
@@ -165,6 +167,24 @@ local function WR_PaladinForever_IsSecret(v)
     return ok and r == true
 end
 
+-- ★★ 2026-11-18：secret 安全的布尔收敛（true / false / nil=读不到）。
+-- 背景：Forever 12.x 在战斗/副本受限上下文里，UnitIsPlayer / UnitIsDeadOrGhost /
+--   UnitIsUnit / UnitIsFriend 的返回值可能是 secret boolean。裸真值判断拿不到
+--   「确认的 true」，裸 == 比较直接抛 "attempt to compare a secret boolean value"，
+--   整条防骑 tick 被看门狗吞掉（表现就是循环失效）。
+-- 口径（与 Paladin_Forever.lua:1987 UnitIsDeadOrGhost 一致）：比较本身包 pcall，
+--   只有【确认 true】才算 true；secret / 抛错一律返回 nil，由调用方决定放行还是跳过。
+local function WR_PaladinForever_SafeBool(v)
+    if type(v) == "boolean" then return v end
+    if v == nil then return nil end
+    if WR_PaladinForever_IsSecret(v) then return nil end
+    local okT, isTrue = pcall(function() return v == true end)
+    if okT and isTrue == true then return true end
+    local okF, isFalse = pcall(function() return v == false end)
+    if okF and isFalse == true then return false end
+    return nil
+end
+
 function WR_PaladinForever_HammerRankIDs()
     local ids = { 24275, 24274, 24239 }   -- 愤怒之锤 Rank1/2/3（Forever DB：44/52/60 级）
     if WR_ResolveSpellID ~= nil then
@@ -265,17 +285,24 @@ end
 --     ① UnitClassification：elite / rareelite / worldboss / boss；
 --     ② WR_UnitIsBoss（boss1~5 单位帧、骷髅级、UnitIsBoss、副本战斗兜底）；
 --     ③ UnitLevel < 0（骷髅级）。
---   说明：分类读不到 / 是 secret 时按「不是精英」处理——宁可不打，也不把斩杀
---   读条浪费在小怪身上；玩家随时可关掉开关恢复全目标行为。
+--   说明：分类读不到 / 是 secret 时，野外按「不是精英」处理（宁可不打，也不把
+--   斩杀读条浪费在小怪身上）；5 人本/团本按副本精英放行；玩家随时可关掉开关恢复全目标行为。
 function WR_PaladinForever_HammerTargetIsEliteOrBoss(unit)
     if type(unit) ~= "string" or unit == "" then unit = "target" end
+
+    -- ★ 2026-11-17 修复：Forever 12.x 在战斗/副本里会把 UnitClassification、UnitLevel
+    --   变成 secret 值；旧代码直接比较 / 直接 if 判断会抛
+    --   "attempt to compare a secret string/number"，整条防骑循环当场中断。
+    --   所有读取先 pcall + secret 过滤，读不到就继续看下一个信号。
     if WR_UnitIsBoss ~= nil then
         local okB, isBoss = pcall(WR_UnitIsBoss, unit)
-        if okB and isBoss == true then return true end
+        if okB and not WR_PaladinForever_IsSecret(isBoss) and isBoss == true then
+            return true
+        end
     end
     if UnitClassification ~= nil then
         local okC, cls = pcall(UnitClassification, unit)
-        if okC and type(cls) == "string" then
+        if okC and not WR_PaladinForever_IsSecret(cls) and type(cls) == "string" then
             if cls == "elite" or cls == "rareelite" or cls == "worldboss" or cls == "boss" then
                 return true
             end
@@ -283,8 +310,29 @@ function WR_PaladinForever_HammerTargetIsEliteOrBoss(unit)
     end
     if UnitLevel ~= nil then
         local okL, lvl = pcall(UnitLevel, unit)
-        if okL and type(lvl) == "number" and lvl < 0 then return true end
+        if okL and not WR_PaladinForever_IsSecret(lvl) and type(lvl) == "number" and lvl < 0 then
+            return true
+        end
     end
+    if UnitIsBoss ~= nil then
+        local okB, isBoss = pcall(UnitIsBoss, unit)
+        if okB and not WR_PaladinForever_IsSecret(isBoss) and isBoss == true then
+            return true
+        end
+    end
+
+    -- ★ 2026-11-17：副本兜底。Forever 在 5 人本/团本里把 UnitClassification / UnitLevel
+    --   也设为 secret，但副本里的敌对目标按设计全部是精英（普通小怪只存在于野外）。
+    --   分类读不到时按「在队伍副本/团本里」放行，保证精英开关在副本内仍然有效。
+    if IsInInstance ~= nil then
+        local okI, inInstance, instanceType = pcall(IsInInstance)
+        if okI and not WR_PaladinForever_IsSecret(inInstance) and inInstance == true
+            and not WR_PaladinForever_IsSecret(instanceType) and type(instanceType) == "string"
+            and (instanceType == "party" or instanceType == "raid") then
+            return true
+        end
+    end
+
     return false
 end
 
@@ -459,11 +507,20 @@ function WR_PaladinForever_NoteSingleSlotJudgement(kind, untilAt)
         rec = {}
         mem[key] = rec
     end
-    -- 光明 / 智慧审判同属一个「审判」槽位：打上其中一条时另一条已被顶掉。
+    -- ★★★ 2026-11-18：光明 / 智慧 / 十字军审判三条审判同属目标身上的一个
+    --   「审判」槽位：打上其中一条时另外两条都已被顶掉，本地账同步互清。
+    --   旧账只在光明↔智慧之间互清，十字军审判被智慧/光明审判顶掉后
+    --   rec.crusader 还挂着旧账 → 十字军状态机误以为 buff 还在，
+    --   40 秒内不再续挂（用户实测「审判buff被顶掉」的放大器）。
     if kind == "light" then
         rec.wisdom = nil
+        rec.crusader = nil
     elseif kind == "wisdom" then
         rec.light = nil
+        rec.crusader = nil
+    elseif kind == "crusader" then
+        rec.light = nil
+        rec.wisdom = nil
     end
     rec[kind] = t
     WR_PaladinForever_PruneJudgementMemory(GetTime())
@@ -717,6 +774,9 @@ function WR_PaladinForever_ResetLightSealState()
     WR_PaladinForever_LightSealDebuffUntil = nil
     WR_PaladinForever_LightSealTarget = nil
     WR_PaladinForever_LightSealMaintainPromptAt = nil
+    WR_PaladinForever_LightSealBackSeal = nil
+    WR_PaladinForever_LightSealBackSlot = nil
+    WR_PaladinForever_LightSealJudgeRetries = 0
 end
 
 function WR_PaladinForever_ResetCrusaderSealState()
@@ -730,6 +790,9 @@ function WR_PaladinForever_ResetCrusaderSealState()
     WR_PaladinForever_CrusaderSealDebuffUntil = nil
     WR_PaladinForever_CrusaderSealTarget = nil
     WR_PaladinForever_CrusaderSealMaintainPromptAt = nil
+    WR_PaladinForever_CrusaderSealBackSeal = nil
+    WR_PaladinForever_CrusaderSealBackSlot = nil
+    WR_PaladinForever_CrusaderSealJudgeRetries = 0
 end
 
 function WR_PaladinForever_ResetWisdomJudgementState()
@@ -744,6 +807,9 @@ function WR_PaladinForever_ResetWisdomJudgementState()
     WR_PaladinForever_WisdomJudgementTarget = nil
     WR_PaladinForever_WisdomJudgementTargetEpoch = nil
     WR_PaladinForever_WisdomJudgementMaintainPromptAt = nil
+    WR_PaladinForever_WisdomJudgementBackSeal = nil
+    WR_PaladinForever_WisdomJudgementBackSlot = nil
+    WR_PaladinForever_WisdomJudgementJudgeRetries = 0
 end
 
 -- 某个 buff 维持状态机此刻是否「应该占着 buff 圣印」（切印/维持阶段）
@@ -757,6 +823,29 @@ function WR_PaladinForever_BuffSealHolds(phase, judgeCD)
         return WR_PaladinForever_JudgementSwitchDue(judgeCD)
     end
     return false
+end
+
+-- ★★★ 2026-11-18 用户口径「切回上一次圣印」：
+--   三个 buff 维持状态机的「切回」目标 = 点火（切到 buff 圣印）之前玩家
+--   正在用的那条圣印（点火时记录为 BackSeal/BackSlot），而不是实时读取
+--   面板「圣印」专区所选（FH_SEAL）。这样即使战斗中玩家改了面板选择，
+--   收尾仍然切回切换前的那条圣印，与「之前版本」行为一致。
+--   记录为空（旧存档/异常）时由调用方回退常驻圣印。
+--   返回值：nil = 没有状态机处于收尾阶段；否则返回 backSeal, backSlot。
+function WR_PaladinForever_BuffSealBackTarget()
+    local checks = {
+        { phase = WR_PaladinForever_LightSealPhase,       seal = WR_PaladinForever_LightSealBackSeal,       slot = WR_PaladinForever_LightSealBackSlot },
+        { phase = WR_PaladinForever_CrusaderSealPhase,    seal = WR_PaladinForever_CrusaderSealBackSeal,    slot = WR_PaladinForever_CrusaderSealBackSlot },
+        { phase = WR_PaladinForever_WisdomJudgementPhase, seal = WR_PaladinForever_WisdomJudgementBackSeal, slot = WR_PaladinForever_WisdomJudgementBackSlot },
+    }
+    for i = 1, #checks do
+        local ph = tonumber(checks[i].phase) or 0
+        if (ph == 3 or ph == 4)
+           and type(checks[i].seal) == "string" and checks[i].seal ~= "" then
+            return checks[i].seal, checks[i].slot
+        end
+    end
+    return nil
 end
 
 -- 当前循环应该维持哪个圣印：
@@ -787,6 +876,11 @@ function WR_PaladinForever_ProtSealGoal(mainSeal, mainSealSlot)
             return WR_PaladinForever_WISDOM_SEAL_NAME, WR_PaladinForever_WISDOM_SEAL_SLOT
         end
     end
+    -- ★★★ 2026-11-18：收尾（phase 3/4）的补印/切回目标改为「上一次圣印」
+    --   （点火时记录），不再实时读面板「圣印」专区所选；记录为空时
+    --   保持回退常驻圣印的原行为。
+    local backSeal, backSlot = WR_PaladinForever_BuffSealBackTarget()
+    if backSeal then return backSeal, backSlot or mainSealSlot end
     return mainSeal, mainSealSlot
 end
 
@@ -841,6 +935,10 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
     end
     local lightName = WR_PaladinForever_LIGHT_SEAL_NAME
     local lightSlot = WR_PaladinForever_LIGHT_SEAL_SLOT
+    -- ★★★ 2026-11-18 用户口径「切回上一次圣印」：切回目标 = 点火前正在用的圣印，
+    --   不是实时读面板「圣印」专区所选；记录为空时回退常驻圣印。
+    local backSeal = WR_PaladinForever_LightSealBackSeal or mainSeal
+    local backSlot = WR_PaladinForever_LightSealBackSlot or mainSealSlot
 
     -- 0 → 首次判定：目标可能已经有光明审判（例如开关刚打开 / 重载插件）
     if phase == 0 then
@@ -852,6 +950,9 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             if kind == "light" then remain = localRemain end
         end
         if type(remain) == "number" and remain > 0 then
+            -- ★ 2026-11-18：点火即记录「上一次圣印」（收尾切回用它）
+            WR_PaladinForever_LightSealBackSeal = WR_PaladinForever_LightSealBackSeal or mainSeal
+            WR_PaladinForever_LightSealBackSlot = WR_PaladinForever_LightSealBackSlot or mainSealSlot
             WR_PaladinForever_LightSealPhase = 4
             WR_PaladinForever_LightSealDebuffUntil = now
                 + ((remain >= 900) and WR_PaladinForever_LIGHT_JUDGEMENT_SECONDS
@@ -867,13 +968,13 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
         --   窗口（含已就绪）且目标没有光明审判时，才切光明圣印去打审判。
         if not WR_PaladinForever_JudgementSwitchDue(WR_PaladinForever_GetJudgeCooldown()) then
             -- 兜底：身上若还挂着光明圣印（窗口外被手动切/上一轮残留），提示切回常驻圣印
-            if mainSeal ~= lightName and WR_PaladinForever_LightSealOnPlayer() then
+            if backSeal ~= lightName and WR_PaladinForever_LightSealOnPlayer() then
                 local promptAt = WR_PaladinForever_LightSealMaintainPromptAt or 0
                 if (now - promptAt) >= 3.0 then
                     WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-                    if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                        WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                        WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                    if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                        WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                        WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                         WR_PaladinForever_LightSealMaintainPromptAt = now
                         return true
                     end
@@ -889,6 +990,9 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
                 if WR_PaladinForever_ShowSealBlock(lightName, lightSlot) then
                     WR_PaladinForever_MarkPrompt(lightName, lightSlot)
                     WR_PaladinForever_HideSkillLater(lightName, lightSlot, 1.5)
+                    -- ★ 2026-11-18：点火即记录「上一次圣印」（收尾切回用它）
+                    WR_PaladinForever_LightSealBackSeal = WR_PaladinForever_LightSealBackSeal or mainSeal
+                    WR_PaladinForever_LightSealBackSlot = WR_PaladinForever_LightSealBackSlot or mainSealSlot
                     WR_PaladinForever_LightSealPhase = 1
                     WR_PaladinForever_LightSealAt = now
                     return true
@@ -896,6 +1000,9 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             end
         else
             -- 光明圣印已在身上 → 直接进入「等待审判」
+            -- ★ 2026-11-18：同样记录「上一次圣印」（身上已是光明时收尾无需切回）
+            WR_PaladinForever_LightSealBackSeal = WR_PaladinForever_LightSealBackSeal or mainSeal
+            WR_PaladinForever_LightSealBackSlot = WR_PaladinForever_LightSealBackSlot or mainSealSlot
             WR_PaladinForever_LightSealPhase = 1
             WR_PaladinForever_LightSealAt = WR_PaladinForever_LightSealAt or (now - 2)
             phase = 1
@@ -912,8 +1019,10 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             end
         elseif (now - lightAt) >= 1.0 then
             -- ② 给切印留一个 GCD，再提示审判
-            local judgeCD = WR_PaladinForever_GetJudgeCooldown()
-            if WR_PaladinForever_Ready("审判", judgeCD)
+            -- ★★★ 2026-11-17：审判「真就绪」双通道判定（JudgeTrulyReady）。
+            --   本地 cdv（天赋探测 8/10 秒）有偏差时，旧版会在审判实际还在 CD 中时
+            --   反复点亮色块 → AHK 空按 → phase 2 确认不了 → 表现为「维持不灵敏」。
+            if WR_PaladinForever_JudgeTrulyReady()
                and WR_PaladinForever_CanHitTarget("审判", "target")
                and WR_PaladinForever_JudgementAllowed(WR_PaladinForever_LIGHT_SEAL_NAME, "light") then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
@@ -936,7 +1045,8 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
         local castConfirmed = type(castAt) == "number" and castAt > judgeBase + 0.001
         local debuffRemain = WR_PaladinForever_LightSealDebuffRemain()
         local debuffConfirmed = type(debuffRemain) == "number" and debuffRemain > 0
-        if castConfirmed or debuffConfirmed or (now - judgeAt) >= 2.0 then
+        if castConfirmed or debuffConfirmed then
+            WR_PaladinForever_LightSealJudgeRetries = 0
             local untilAt
             if castConfirmed and castAt >= judgeAt - 0.2 then
                 -- 真实审判施放事件：光明审判从施放时刻起 40 秒
@@ -964,20 +1074,50 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             WR_PaladinForever_LightSealSwitchBase = WR_PaladinForever_LastSealAppliedAt() or 0
             WR_PaladinForever_LightSealDeadline = now + 15
             phase = 3
-        elseif (now - judgeAt) > 10 then
-            -- 审判一直没打出去：回 phase 0 重新来（开关保持勾选）
-            WR_PaladinForever_LightSealPhase = 0
-            WR_PaladinForever_LightSealAt = nil
-            WR_PaladinForever_LightSealJudgeAt = nil
-            WR_PaladinForever_LightSealJudgeBase = nil
-            WR_PaladinForever_LightSealDeadline = nil
-            phase = 0
+        elseif (now - judgeAt) >= 2.0 then
+            -- ★★★ 2026-11-17 用户口径「防骑审判buff维持不灵敏」修复：
+            --   2 秒内施放事件与目标光环都没确认 = 审判多半没打出去
+            --   （提示时审判实际还在 CD / 被 GCD 吞 / AHK 漏按）。
+            --   旧版在这里直接按「提示时刻 + 40 秒」进维持期——审判没打出去时
+            --   目标 buff 空窗近 40 秒没人管，正是「维持不灵敏」的主因。
+            --   现改为：立即回 phase 1 重试（审判一就绪马上重新提示，1 个 tick 内反应）；
+            --   连续 3 次仍无任何确认才按旧兜底记 40 秒并切回常驻，防止全程 secret
+            --   读不到施放事件的极端场景死循环。
+            local retries = (tonumber(WR_PaladinForever_LightSealJudgeRetries) or 0) + 1
+            WR_PaladinForever_LightSealJudgeRetries = retries
+            if retries >= 3 then
+                WR_PaladinForever_LightSealJudgeRetries = 0
+                local untilAt = judgeAt + WR_PaladinForever_LIGHT_JUDGEMENT_SECONDS
+                WR_PaladinForever_LightSealDebuffUntil = untilAt
+                WR_PaladinForever_LightSealTarget = WR_PaladinForever_LightSealTargetKey()
+                WR_PaladinForever_NoteSingleSlotJudgement("light", untilAt)
+                if mainSeal == WR_PaladinForever_LIGHT_SEAL_NAME then
+                    WR_PaladinForever_LightSealPhase = 4
+                    WR_PaladinForever_LightSealSwitchAt = nil
+                    WR_PaladinForever_LightSealSwitchBase = nil
+                    WR_PaladinForever_LightSealDeadline = nil
+                    return false
+                end
+                WR_PaladinForever_LightSealPhase = 3
+                WR_PaladinForever_LightSealSwitchAt = 0
+                WR_PaladinForever_LightSealSwitchBase = WR_PaladinForever_LastSealAppliedAt() or 0
+                WR_PaladinForever_LightSealDeadline = now + 15
+                phase = 3
+            else
+                -- 回 phase 1 重试：buff 圣印保持在身上，审判一就绪马上重新提示
+                WR_PaladinForever_LightSealPhase = 1
+                WR_PaladinForever_LightSealAt = now - 1.0  -- 跳过「等切印生效」的 1 秒
+                WR_PaladinForever_LightSealJudgeAt = nil
+                WR_PaladinForever_LightSealJudgeBase = nil
+                WR_PaladinForever_LightSealDeadline = nil
+                phase = 1
+            end
         end
     end
 
     if phase == 3 then
-        if mainSeal == WR_PaladinForever_LIGHT_SEAL_NAME then
-            -- 切回目标与当前常驻相同：直接进入维持期，不重复提示上印
+        if backSeal == WR_PaladinForever_LIGHT_SEAL_NAME then
+            -- 切回目标就是光明圣印（上一次圣印本身）：直接进入维持期，不重复提示上印
             WR_PaladinForever_LightSealPhase = 4
             WR_PaladinForever_LightSealSwitchAt = nil
             WR_PaladinForever_LightSealSwitchBase = nil
@@ -1007,11 +1147,11 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
         -- ★ 2026-11-14 用户口径：能平砍的时候才挂自身圣印（切回也是挂印），
         --   不能平砍就不切，避免目标跑远 / 死亡时空放圣印；能平砍后下一 tick 会自动切回。
         if (now - switchAt) >= 2.0 then
-            -- 显式切回常驻圣印（面板「圣印」专区所选）
+            -- ★ 2026-11-18：显式切回「上一次圣印」（点火前正在用的圣印），不再实时读面板
             WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-            if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+            if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                 WR_PaladinForever_LightSealSwitchAt = now
                 return true
             end
@@ -1019,7 +1159,7 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
     end
 
     if phase == 4 then
-        if not UnitExists("target") or UnitIsDead("target") then
+        if not UnitExists("target") or WR_PaladinForever_UnitIsDeadOrGhost("target") then
             WR_PaladinForever_ResetLightSealState()
             return false
         end
@@ -1038,19 +1178,20 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             WR_PaladinForever_ResetLightSealState()
             return false
         end
-        -- 目标有 debuff 时应保持常驻圣印（圣印专区所选）；若尚未确认切回，继续提示切回
-        -- ★★ 2026-11-11：常驻就是光明圣印时无需切回（两者共存），跳过着色提示
-        -- ★★★ 2026-11-14：旧条件要求「能读到自己在光明圣印」才提示切回；战斗中
-        --   光环 name 是 secret / 施放事件丢失时会误判「不在光明」→ 永远不切回。
-        --   改为反向确认：只要还不能确认常驻圣印已在身上，就继续提示切回（3 秒防抖）。
-        if mainSeal ~= WR_PaladinForever_LIGHT_SEAL_NAME
-           and not WR_PaladinForever_MainSealOnPlayer() then
+        -- 目标有 debuff 时应保持「上一次圣印」（点火前正在用的圣印）；尚未确认切回则继续提示
+        -- ★★ 2026-11-11：上一次圣印就是光明圣印时无需切回（两者共存），跳过着色提示
+        -- ★★★ 2026-11-14：反向确认「切回目标圣印是否已在身上」，读不到不误判（3 秒防抖）。
+        -- ★★★ 2026-11-18 用户口径「切回上一次圣印」：切回目标 = 点火时记录的
+        --   上一次圣印（BackSeal），不再实时读面板「圣印」专区所选。
+        if backSeal ~= WR_PaladinForever_LIGHT_SEAL_NAME
+           and not WR_PaladinForever_JudgementSealOnPlayer(
+               backSeal, WR_PaladinForever_LastSealAppliedAt()) then
             local promptAt = WR_PaladinForever_LightSealMaintainPromptAt or 0
             if (now - promptAt) >= 3.0 then
                 WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-                if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                    WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                    WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                    WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                    WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                     WR_PaladinForever_LightSealMaintainPromptAt = now
                     return true
                 end
@@ -1069,7 +1210,7 @@ end
 --   · 勾选后是常驻开关（不是一次性插入，不会自动取消勾选）；
 --   · 优先维持自己身上的「十字军圣印」（30 秒 Buff，掉了照常补）；
 --   · 目标身上没有「十字军审判」debuff 时，用十字军圣印打审判挂 debuff；
---   · 目标已有「十字军审判」debuff 时，自动切回常驻圣印（面板「圣印」专区所选）；
+--   · 目标已有「十字军审判」debuff 时，自动切回「上一次圣印」（点火前正在用的圣印）；
 --   · 本服「十字军审判」持续 40 秒，到期后自动重复上述循环。
 -- 状态机（WR_PaladinForever_CrusaderSealPhase）：
 --   0 = 需要挂十字军圣印：不在身上就提示十字军圣印，已在身上且审判就绪就提示审判
@@ -1127,11 +1268,17 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
     end
     local crusaderName = WR_PaladinForever_CRUSADER_SEAL_NAME
     local crusaderSlot = WR_PaladinForever_CRUSADER_SEAL_SLOT
+    -- ★★★ 2026-11-18 用户口径「切回上一次圣印」：同光明状态机。
+    local backSeal = WR_PaladinForever_CrusaderSealBackSeal or mainSeal
+    local backSlot = WR_PaladinForever_CrusaderSealBackSlot or mainSealSlot
 
     -- 0 → 首次判定：目标可能已经有十字军审判（例如开关刚打开 / 重载插件）
     if phase == 0 then
         local remain = WR_PaladinForever_CrusaderSealDebuffRemain()
         if type(remain) == "number" and remain > 0 then
+            -- ★ 2026-11-18：点火即记录「上一次圣印」（收尾切回用它）
+            WR_PaladinForever_CrusaderSealBackSeal = WR_PaladinForever_CrusaderSealBackSeal or mainSeal
+            WR_PaladinForever_CrusaderSealBackSlot = WR_PaladinForever_CrusaderSealBackSlot or mainSealSlot
             WR_PaladinForever_CrusaderSealPhase = 4
             WR_PaladinForever_CrusaderSealDebuffUntil = now
                 + ((remain >= 900) and WR_PaladinForever_CRUSADER_JUDGEMENT_SECONDS
@@ -1146,13 +1293,13 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
         --   继续维持面板「圣印」专区所选常驻圣印；只有进入「审判剩余 ≤ 2 秒」
         --   窗口（含已就绪）且目标没有十字军审判时，才切十字军圣印去打审判。
         if not WR_PaladinForever_JudgementSwitchDue(WR_PaladinForever_GetJudgeCooldown()) then
-            if mainSeal ~= crusaderName and WR_PaladinForever_CrusaderSealOnPlayer() then
+            if backSeal ~= crusaderName and WR_PaladinForever_CrusaderSealOnPlayer() then
                 local promptAt = WR_PaladinForever_CrusaderSealMaintainPromptAt or 0
                 if (now - promptAt) >= 3.0 then
                     WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-                    if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                        WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                        WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                    if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                        WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                        WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                         WR_PaladinForever_CrusaderSealMaintainPromptAt = now
                         return true
                     end
@@ -1168,6 +1315,9 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
                 if WR_PaladinForever_ShowSealBlock(crusaderName, crusaderSlot) then
                     WR_PaladinForever_MarkPrompt(crusaderName, crusaderSlot)
                     WR_PaladinForever_HideSkillLater(crusaderName, crusaderSlot, 1.5)
+                    -- ★ 2026-11-18：点火即记录「上一次圣印」（收尾切回用它）
+                    WR_PaladinForever_CrusaderSealBackSeal = WR_PaladinForever_CrusaderSealBackSeal or mainSeal
+                    WR_PaladinForever_CrusaderSealBackSlot = WR_PaladinForever_CrusaderSealBackSlot or mainSealSlot
                     WR_PaladinForever_CrusaderSealPhase = 1
                     WR_PaladinForever_CrusaderSealAt = now
                     return true
@@ -1175,6 +1325,9 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             end
         else
             -- 十字军圣印已在身上 → 直接进入「等待审判」
+            -- ★ 2026-11-18：同样记录「上一次圣印」
+            WR_PaladinForever_CrusaderSealBackSeal = WR_PaladinForever_CrusaderSealBackSeal or mainSeal
+            WR_PaladinForever_CrusaderSealBackSlot = WR_PaladinForever_CrusaderSealBackSlot or mainSealSlot
             WR_PaladinForever_CrusaderSealPhase = 1
             WR_PaladinForever_CrusaderSealAt = WR_PaladinForever_CrusaderSealAt or (now - 2)
             phase = 1
@@ -1191,8 +1344,8 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             end
         elseif (now - crusaderAt) >= 1.0 then
             -- ② 给切印留一个 GCD，再提示审判
-            local judgeCD = WR_PaladinForever_GetJudgeCooldown()
-            if WR_PaladinForever_Ready("审判", judgeCD)
+            -- ★★★ 2026-11-17：审判「真就绪」双通道判定（JudgeTrulyReady），同光明状态机。
+            if WR_PaladinForever_JudgeTrulyReady()
                and WR_PaladinForever_CanHitTarget("审判", "target")
                and WR_PaladinForever_JudgementAllowed(mainSeal) then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
@@ -1215,7 +1368,8 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
         local castConfirmed = type(castAt) == "number" and castAt > judgeBase + 0.001
         local debuffRemain = WR_PaladinForever_CrusaderSealDebuffRemain()
         local debuffConfirmed = type(debuffRemain) == "number" and debuffRemain > 0
-        if castConfirmed or debuffConfirmed or (now - judgeAt) >= 2.0 then
+        if castConfirmed or debuffConfirmed then
+            WR_PaladinForever_CrusaderSealJudgeRetries = 0
             local untilAt
             if castConfirmed and castAt >= judgeAt - 0.2 then
                 -- 真实审判施放事件：十字军审判从施放时刻起 40 秒
@@ -1243,20 +1397,50 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             WR_PaladinForever_CrusaderSealSwitchBase = WR_PaladinForever_LastSealAppliedAt() or 0
             WR_PaladinForever_CrusaderSealDeadline = now + 15
             phase = 3
-        elseif (now - judgeAt) > 10 then
-            -- 审判一直没打出去：回 phase 0 重新来（开关保持勾选）
-            WR_PaladinForever_CrusaderSealPhase = 0
-            WR_PaladinForever_CrusaderSealAt = nil
-            WR_PaladinForever_CrusaderSealJudgeAt = nil
-            WR_PaladinForever_CrusaderSealJudgeBase = nil
-            WR_PaladinForever_CrusaderSealDeadline = nil
-            phase = 0
+        elseif (now - judgeAt) >= 2.0 then
+            -- ★★★ 2026-11-17 用户口径「防骑审判buff维持不灵敏」修复：
+            --   2 秒内施放事件与目标光环都没确认 = 审判多半没打出去
+            --   （提示时审判实际还在 CD / 被 GCD 吞 / AHK 漏按）。
+            --   旧版在这里直接按「提示时刻 + 40 秒」进维持期——审判没打出去时
+            --   目标 buff 空窗近 40 秒没人管，正是「维持不灵敏」的主因。
+            --   现改为：立即回 phase 1 重试（审判一就绪马上重新提示，1 个 tick 内反应）；
+            --   连续 3 次仍无任何确认才按旧兜底记 40 秒并切回常驻，防止全程 secret
+            --   读不到施放事件的极端场景死循环。
+            local retries = (tonumber(WR_PaladinForever_CrusaderSealJudgeRetries) or 0) + 1
+            WR_PaladinForever_CrusaderSealJudgeRetries = retries
+            if retries >= 3 then
+                WR_PaladinForever_CrusaderSealJudgeRetries = 0
+                local untilAt = judgeAt + WR_PaladinForever_CRUSADER_JUDGEMENT_SECONDS
+                WR_PaladinForever_CrusaderSealDebuffUntil = untilAt
+                WR_PaladinForever_CrusaderSealTarget = WR_PaladinForever_JudgementSealTargetKey()
+                WR_PaladinForever_NoteSingleSlotJudgement("crusader", untilAt)
+                if mainSeal == WR_PaladinForever_CRUSADER_SEAL_NAME then
+                    WR_PaladinForever_CrusaderSealPhase = 4
+                    WR_PaladinForever_CrusaderSealSwitchAt = nil
+                    WR_PaladinForever_CrusaderSealSwitchBase = nil
+                    WR_PaladinForever_CrusaderSealDeadline = nil
+                    return false
+                end
+                WR_PaladinForever_CrusaderSealPhase = 3
+                WR_PaladinForever_CrusaderSealSwitchAt = 0
+                WR_PaladinForever_CrusaderSealSwitchBase = WR_PaladinForever_LastSealAppliedAt() or 0
+                WR_PaladinForever_CrusaderSealDeadline = now + 15
+                phase = 3
+            else
+                -- 回 phase 1 重试：buff 圣印保持在身上，审判一就绪马上重新提示
+                WR_PaladinForever_CrusaderSealPhase = 1
+                WR_PaladinForever_CrusaderSealAt = now - 1.0  -- 跳过「等切印生效」的 1 秒
+                WR_PaladinForever_CrusaderSealJudgeAt = nil
+                WR_PaladinForever_CrusaderSealJudgeBase = nil
+                WR_PaladinForever_CrusaderSealDeadline = nil
+                phase = 1
+            end
         end
     end
 
     if phase == 3 then
-        if mainSeal == WR_PaladinForever_CRUSADER_SEAL_NAME then
-            -- 切回目标与当前常驻相同：直接进入维持期，不重复提示上印
+        if backSeal == WR_PaladinForever_CRUSADER_SEAL_NAME then
+            -- 切回目标就是十字军圣印（上一次圣印本身）：直接进入维持期，不重复提示上印
             WR_PaladinForever_CrusaderSealPhase = 4
             WR_PaladinForever_CrusaderSealSwitchAt = nil
             WR_PaladinForever_CrusaderSealSwitchBase = nil
@@ -1286,11 +1470,11 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
         -- ★ 2026-11-14 用户口径：能平砍的时候才挂自身圣印（切回也是挂印），
         --   不能平砍就不切，避免目标跑远 / 死亡时空放圣印；能平砍后下一 tick 会自动切回。
         if (now - switchAt) >= 2.0 then
-            -- 显式切回常驻圣印（面板「圣印」专区所选）
+            -- ★ 2026-11-18：显式切回「上一次圣印」（点火前正在用的圣印），不再实时读面板
             WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-            if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+            if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                 WR_PaladinForever_CrusaderSealSwitchAt = now
                 return true
             end
@@ -1298,7 +1482,7 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
     end
 
     if phase == 4 then
-        if not UnitExists("target") or UnitIsDead("target") then
+        if not UnitExists("target") or WR_PaladinForever_UnitIsDeadOrGhost("target") then
             WR_PaladinForever_ResetCrusaderSealState()
             return false
         end
@@ -1317,17 +1501,19 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             WR_PaladinForever_ResetCrusaderSealState()
             return false
         end
-        -- 目标有 debuff 时应保持常驻圣印（圣印专区所选）；若尚未确认切回，继续提示切回
-        -- ★★ 2026-11-11：常驻就是十字军圣印时无需切回（两者共存），跳过着色提示
-        -- ★★★ 2026-11-14：同光明圣印，改为反向确认「常驻圣印是否已在身上」。
-        if mainSeal ~= WR_PaladinForever_CRUSADER_SEAL_NAME
-           and not WR_PaladinForever_MainSealOnPlayer() then
+        -- 目标有 debuff 时应保持「上一次圣印」（点火前正在用的圣印）；尚未确认切回则继续提示
+        -- ★★ 2026-11-11：上一次圣印就是十字军圣印时无需切回（两者共存），跳过着色提示
+        -- ★★★ 2026-11-14：反向确认「切回目标圣印是否已在身上」，读不到不误判（3 秒防抖）。
+        -- ★★★ 2026-11-18 用户口径「切回上一次圣印」：切回目标 = 点火时记录的 BackSeal。
+        if backSeal ~= WR_PaladinForever_CRUSADER_SEAL_NAME
+           and not WR_PaladinForever_JudgementSealOnPlayer(
+               backSeal, WR_PaladinForever_LastSealAppliedAt()) then
             local promptAt = WR_PaladinForever_CrusaderSealMaintainPromptAt or 0
             if (now - promptAt) >= 3.0 then
                 WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-                if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                    WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                    WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                    WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                    WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                     WR_PaladinForever_CrusaderSealMaintainPromptAt = now
                     return true
                 end
@@ -1346,7 +1532,7 @@ end
 --   · 勾选后是常驻开关（不是一次性插入，不会自动取消勾选）；
 --   · 优先维持自己身上的「智慧圣印」（30 秒 Buff，掉了照常补）；
 --   · 目标身上没有「智慧审判」debuff 时，用智慧圣印打审判挂 debuff（攻击/法术有几率回蓝）；
---   · 目标已有「智慧审判」debuff 时，自动切回常驻圣印（面板「圣印」专区所选）；
+--   · 目标已有「智慧审判」debuff 时，自动切回「上一次圣印」（点火前正在用的圣印）；
 --   · 本服「智慧审判」持续 40 秒（ForeverDB build 1.60.1.70862，Classic 为 10 秒），
 --     到期后自动重复上述循环。
 -- 状态机（WR_PaladinForever_WisdomJudgementPhase）：
@@ -1406,6 +1592,9 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
     end
     local wisdomName = WR_PaladinForever_WISDOM_SEAL_NAME
     local wisdomSlot = WR_PaladinForever_WISDOM_SEAL_SLOT
+    -- ★★★ 2026-11-18 用户口径「切回上一次圣印」：同光明状态机。
+    local backSeal = WR_PaladinForever_WisdomJudgementBackSeal or mainSeal
+    local backSlot = WR_PaladinForever_WisdomJudgementBackSlot or mainSealSlot
 
     -- 0 → 首次判定：目标可能已经有智慧审判（例如开关刚打开 / 重载插件）
     if phase == 0 then
@@ -1417,6 +1606,9 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             if kind == "wisdom" then remain = localRemain end
         end
         if type(remain) == "number" and remain > 0 then
+            -- ★ 2026-11-18：点火即记录「上一次圣印」（收尾切回用它）
+            WR_PaladinForever_WisdomJudgementBackSeal = WR_PaladinForever_WisdomJudgementBackSeal or mainSeal
+            WR_PaladinForever_WisdomJudgementBackSlot = WR_PaladinForever_WisdomJudgementBackSlot or mainSealSlot
             WR_PaladinForever_WisdomJudgementPhase = 4
             WR_PaladinForever_WisdomJudgementDebuffUntil = now
                 + ((remain >= 900) and WR_PaladinForever_WISDOM_JUDGEMENT_SECONDS
@@ -1432,13 +1624,13 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
         --   继续维持面板「圣印」专区所选常驻圣印；只有进入「审判剩余 ≤ 2 秒」
         --   窗口（含已就绪）且目标没有智慧审判时，才切智慧圣印去打审判。
         if not WR_PaladinForever_JudgementSwitchDue(WR_PaladinForever_GetJudgeCooldown()) then
-            if mainSeal ~= wisdomName and WR_PaladinForever_WisdomSealOnPlayer() then
+            if backSeal ~= wisdomName and WR_PaladinForever_WisdomSealOnPlayer() then
                 local promptAt = WR_PaladinForever_WisdomJudgementMaintainPromptAt or 0
                 if (now - promptAt) >= 3.0 then
                     WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-                    if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                        WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                        WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                    if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                        WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                        WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                         WR_PaladinForever_WisdomJudgementMaintainPromptAt = now
                         return true
                     end
@@ -1454,6 +1646,9 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
                 if WR_PaladinForever_ShowSealBlock(wisdomName, wisdomSlot) then
                     WR_PaladinForever_MarkPrompt(wisdomName, wisdomSlot)
                     WR_PaladinForever_HideSkillLater(wisdomName, wisdomSlot, 1.5)
+                    -- ★ 2026-11-18：点火即记录「上一次圣印」（收尾切回用它）
+                    WR_PaladinForever_WisdomJudgementBackSeal = WR_PaladinForever_WisdomJudgementBackSeal or mainSeal
+                    WR_PaladinForever_WisdomJudgementBackSlot = WR_PaladinForever_WisdomJudgementBackSlot or mainSealSlot
                     WR_PaladinForever_WisdomJudgementPhase = 1
                     WR_PaladinForever_WisdomJudgementAt = now
                     return true
@@ -1461,6 +1656,9 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             end
         else
             -- 智慧圣印已在身上 → 直接进入「等待审判」
+            -- ★ 2026-11-18：同样记录「上一次圣印」
+            WR_PaladinForever_WisdomJudgementBackSeal = WR_PaladinForever_WisdomJudgementBackSeal or mainSeal
+            WR_PaladinForever_WisdomJudgementBackSlot = WR_PaladinForever_WisdomJudgementBackSlot or mainSealSlot
             WR_PaladinForever_WisdomJudgementPhase = 1
             WR_PaladinForever_WisdomJudgementAt = WR_PaladinForever_WisdomJudgementAt or (now - 2)
             phase = 1
@@ -1477,8 +1675,8 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             end
         elseif (now - wisdomAt) >= 1.0 then
             -- ② 给切印留一个 GCD，再提示审判
-            local judgeCD = WR_PaladinForever_GetJudgeCooldown()
-            if WR_PaladinForever_Ready("审判", judgeCD)
+            -- ★★★ 2026-11-17：审判「真就绪」双通道判定（JudgeTrulyReady），同光明状态机。
+            if WR_PaladinForever_JudgeTrulyReady()
                and WR_PaladinForever_CanHitTarget("审判", "target")
                and WR_PaladinForever_JudgementAllowed(WR_PaladinForever_WISDOM_SEAL_NAME, "wisdom") then
                 if WR_ColorFrame_ShowSkill("审判", 2) then
@@ -1501,7 +1699,8 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
         local castConfirmed = type(castAt) == "number" and castAt > judgeBase + 0.001
         local debuffRemain = WR_PaladinForever_WisdomSealDebuffRemain()
         local debuffConfirmed = type(debuffRemain) == "number" and debuffRemain > 0
-        if castConfirmed or debuffConfirmed or (now - judgeAt) >= 2.0 then
+        if castConfirmed or debuffConfirmed then
+            WR_PaladinForever_WisdomJudgementJudgeRetries = 0
             local untilAt
             if castConfirmed and castAt >= judgeAt - 0.2 then
                 -- 真实审判施放事件：智慧审判从施放时刻起 40 秒
@@ -1530,20 +1729,51 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             WR_PaladinForever_WisdomJudgementSwitchBase = WR_PaladinForever_LastSealAppliedAt() or 0
             WR_PaladinForever_WisdomJudgementDeadline = now + 15
             phase = 3
-        elseif (now - judgeAt) > 10 then
-            -- 审判一直没打出去：回 phase 0 重新来（开关保持勾选）
-            WR_PaladinForever_WisdomJudgementPhase = 0
-            WR_PaladinForever_WisdomJudgementAt = nil
-            WR_PaladinForever_WisdomJudgementJudgeAt = nil
-            WR_PaladinForever_WisdomJudgementJudgeBase = nil
-            WR_PaladinForever_WisdomJudgementDeadline = nil
-            phase = 0
+        elseif (now - judgeAt) >= 2.0 then
+            -- ★★★ 2026-11-17 用户口径「防骑审判buff维持不灵敏」修复：
+            --   2 秒内施放事件与目标光环都没确认 = 审判多半没打出去
+            --   （提示时审判实际还在 CD / 被 GCD 吞 / AHK 漏按）。
+            --   旧版在这里直接按「提示时刻 + 40 秒」进维持期——审判没打出去时
+            --   目标 buff 空窗近 40 秒没人管，正是「维持不灵敏」的主因。
+            --   现改为：立即回 phase 1 重试（审判一就绪马上重新提示，1 个 tick 内反应）；
+            --   连续 3 次仍无任何确认才按旧兜底记 40 秒并切回常驻，防止全程 secret
+            --   读不到施放事件的极端场景死循环。
+            local retries = (tonumber(WR_PaladinForever_WisdomJudgementJudgeRetries) or 0) + 1
+            WR_PaladinForever_WisdomJudgementJudgeRetries = retries
+            if retries >= 3 then
+                WR_PaladinForever_WisdomJudgementJudgeRetries = 0
+                local untilAt = judgeAt + WR_PaladinForever_WISDOM_JUDGEMENT_SECONDS
+                WR_PaladinForever_WisdomJudgementDebuffUntil = untilAt
+                WR_PaladinForever_WisdomJudgementTarget = WR_PaladinForever_JudgementSealTargetKey()
+                WR_PaladinForever_WisdomJudgementTargetEpoch = WR_PaladinForever_TargetEpoch or 0
+                WR_PaladinForever_NoteSingleSlotJudgement("wisdom", untilAt)
+                if mainSeal == WR_PaladinForever_WISDOM_SEAL_NAME then
+                    WR_PaladinForever_WisdomJudgementPhase = 4
+                    WR_PaladinForever_WisdomJudgementSwitchAt = nil
+                    WR_PaladinForever_WisdomJudgementSwitchBase = nil
+                    WR_PaladinForever_WisdomJudgementDeadline = nil
+                    return false
+                end
+                WR_PaladinForever_WisdomJudgementPhase = 3
+                WR_PaladinForever_WisdomJudgementSwitchAt = 0
+                WR_PaladinForever_WisdomJudgementSwitchBase = WR_PaladinForever_LastSealAppliedAt() or 0
+                WR_PaladinForever_WisdomJudgementDeadline = now + 15
+                phase = 3
+            else
+                -- 回 phase 1 重试：buff 圣印保持在身上，审判一就绪马上重新提示
+                WR_PaladinForever_WisdomJudgementPhase = 1
+                WR_PaladinForever_WisdomJudgementAt = now - 1.0  -- 跳过「等切印生效」的 1 秒
+                WR_PaladinForever_WisdomJudgementJudgeAt = nil
+                WR_PaladinForever_WisdomJudgementJudgeBase = nil
+                WR_PaladinForever_WisdomJudgementDeadline = nil
+                phase = 1
+            end
         end
     end
 
     if phase == 3 then
-        if mainSeal == WR_PaladinForever_WISDOM_SEAL_NAME then
-            -- 切回目标与当前常驻相同：直接进入维持期，不重复提示上印
+        if backSeal == WR_PaladinForever_WISDOM_SEAL_NAME then
+            -- 切回目标就是智慧圣印（上一次圣印本身）：直接进入维持期，不重复提示上印
             WR_PaladinForever_WisdomJudgementPhase = 4
             WR_PaladinForever_WisdomJudgementSwitchAt = nil
             WR_PaladinForever_WisdomJudgementSwitchBase = nil
@@ -1573,11 +1803,11 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
         -- ★ 2026-11-14 用户口径：能平砍的时候才挂自身圣印（切回也是挂印），
         --   不能平砍就不切，避免目标跑远 / 死亡时空放圣印；能平砍后下一 tick 会自动切回。
         if (now - switchAt) >= 2.0 then
-            -- 显式切回常驻圣印（面板「圣印」专区所选）
+            -- ★ 2026-11-18：显式切回「上一次圣印」（点火前正在用的圣印），不再实时读面板
             WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-            if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+            if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                 WR_PaladinForever_WisdomJudgementSwitchAt = now
                 return true
             end
@@ -1585,7 +1815,7 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
     end
 
     if phase == 4 then
-        if not UnitExists("target") or UnitIsDead("target") then
+        if not UnitExists("target") or WR_PaladinForever_UnitIsDeadOrGhost("target") then
             WR_PaladinForever_ResetWisdomJudgementState()
             return false
         end
@@ -1609,17 +1839,19 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             WR_PaladinForever_ResetWisdomJudgementState()
             return false
         end
-        -- 目标有 debuff 时应保持常驻圣印（圣印专区所选）；若尚未确认切回，继续提示切回
-        -- ★★ 2026-11-11：常驻就是智慧圣印时无需切回（两者共存），跳过着色提示
-        -- ★★★ 2026-11-14：同光明圣印，改为反向确认「常驻圣印是否已在身上」。
-        if mainSeal ~= WR_PaladinForever_WISDOM_SEAL_NAME
-           and not WR_PaladinForever_MainSealOnPlayer() then
+        -- 目标有 debuff 时应保持「上一次圣印」（点火前正在用的圣印）；尚未确认切回则继续提示
+        -- ★★ 2026-11-11：上一次圣印就是智慧圣印时无需切回（两者共存），跳过着色提示
+        -- ★★★ 2026-11-14：反向确认「切回目标圣印是否已在身上」，读不到不误判（3 秒防抖）。
+        -- ★★★ 2026-11-18 用户口径「切回上一次圣印」：切回目标 = 点火时记录的 BackSeal。
+        if backSeal ~= WR_PaladinForever_WISDOM_SEAL_NAME
+           and not WR_PaladinForever_JudgementSealOnPlayer(
+               backSeal, WR_PaladinForever_LastSealAppliedAt()) then
             local promptAt = WR_PaladinForever_WisdomJudgementMaintainPromptAt or 0
             if (now - promptAt) >= 3.0 then
                 WR_PaladinForever_SealSwitchAllowUntil = now + 0.5
-                if WR_PaladinForever_ShowSealBlock(mainSeal, mainSealSlot) then
-                    WR_PaladinForever_MarkPrompt(mainSeal, mainSealSlot)
-                    WR_PaladinForever_HideSkillLater(mainSeal, mainSealSlot, 1.5)
+                if WR_PaladinForever_ShowSealBlock(backSeal, backSlot) then
+                    WR_PaladinForever_MarkPrompt(backSeal, backSlot)
+                    WR_PaladinForever_HideSkillLater(backSeal, backSlot, 1.5)
                     WR_PaladinForever_WisdomJudgementMaintainPromptAt = now
                     return true
                 end
@@ -1633,16 +1865,43 @@ end
 -- ============================================================
 -- ★ 2026-11-16：神圣之盾「目标为我」判定（面板 FH_SZS_TARGETME）
 --   当前目标（怪）的目标是否正是玩家本人。
---   UnitIsUnit 在战斗 / secret 状态下仍可安全比较；任何 API 缺失、
+--   UnitIsUnit 可能返回 secret boolean（不能直接比较），此时用 UnitThreatSituation 兜底；任何 API 缺失、
 --   目标不是可攻击活体、没有目标或抛错都按「不满足」处理（绝不误放）。
 -- ============================================================
 function WR_PaladinForever_TargetTargetIsPlayer()
     local okCast, castable = pcall(WR_PaladinForever_TargetCastable, "target")
     if not okCast or castable ~= true then return false end
     local okTT, hasTT = pcall(UnitExists, "targettarget")
-    if not okTT or hasTT ~= true then return false end
-    local ok, same = pcall(UnitIsUnit, "targettarget", "player")
-    return ok and same == true
+    if not okTT then return false end
+    -- ★ 2026-11-17 二次加固：即使 issecretvalue 不可用，布尔比较也包在 pcall 里，绝不抛错
+    if not WR_PaladinForever_IsSecret(hasTT) then
+        local okExists, exists = pcall(function() return hasTT == true end)
+        if okExists and exists ~= true then return false end
+    end
+
+    -- ① 常规判断：UnitIsUnit("targettarget","player")。
+    --   ★ 2026-11-17 修复：Forever 12.x 在副本/战斗限制下这里返回 secret boolean，
+    --     旧写法 same == true 会抛 "attempt to compare local same (a secret boolean value)"，
+    --     整条防骑循环中断 → 神圣之盾永远不亮。先过滤 secret；普通 boolean 才作为权威结果。
+    if UnitIsUnit ~= nil then
+        local ok, same = pcall(UnitIsUnit, "targettarget", "player")
+        if ok and not WR_PaladinForever_IsSecret(same) then
+            -- ★ 2026-11-17 二次加固：比较本身 pcall，secret 布尔即使漏检也不会抛错
+            local okCmp, isSame = pcall(function() return same == true end)
+            if okCmp then return isSame == true end
+        end
+    end
+
+    -- ② secret 兜底：UnitThreatSituation 的 2/3 都表示「玩家是该怪的主目标」
+    --   （2=主目标但非高威胁，3=主目标且高威胁），等价于怪的目标是玩家本人。
+    --   DBM 在 Forever 同样用该 API 代替被 secret 化的 UnitDetailedThreatSituation。
+    if UnitThreatSituation ~= nil then
+        local okT, status = pcall(UnitThreatSituation, "player", "target")
+        if okT and not WR_PaladinForever_IsSecret(status) and type(status) == "number" then
+            return status >= 2
+        end
+    end
+    return false
 end
 
 -- ============================================================
@@ -1774,8 +2033,12 @@ function WR_PaladinForever_InterruptStep()
     if not WR_PaladinForever_SpellKnown("制裁之锤") then return false end
     -- 技能可用性（蓝量 / 沉默 / 真冷却等）；战斗内 CD 读不到时 WR_SpellUsable 会放行，
     -- 再由 WR_PaladinForever_ShowSkillCD 的本地冷却记账兜底。
+    -- ★ 2026-11-18：不能传 GlobalCooldown=true。本文件每 tick 把全局 GCD 设为
+    --   WR_GetGCD("审判")（= 审判剩余冷却 0~10 秒），ShiFaSuDu=0.3，于是「true 版」
+    --   第三道门 ≈「审判剩余 CD ≤ 0.3 秒」——审判一好就打，几乎整场被拦，
+    --   打断滑块形同关闭。与驱邪术/奉献/愤怒之锤同一口径：只查自身冷却。
     if type(WR_SpellUsable) == "function" then
-        local okU, usable = pcall(WR_SpellUsable, "制裁之锤", true)
+        local okU, usable = pcall(WR_SpellUsable, "制裁之锤")
         if not okU or usable ~= true then return false end
     end
     if not WR_PaladinForever_CanHitTarget("制裁之锤", "target") then return false end
@@ -1800,6 +2063,188 @@ function WR_PaladinForever_InterruptStep()
         return WR_PaladinForever_ShowSkillCD("制裁之锤", 22, WR_PaladinForever_HammerCooldown())
     end
     return WR_ColorFrame_ShowSkill("制裁之锤", 22) == true
+end
+
+-- ============================================================
+-- ★★ 2026-11-17：全局保护（自动保护之手）
+-- ------------------------------------------------------------
+-- 面板「防护 → 全局保护」下拉 saveVariable = FH_ZZBH_HP：
+--   1 = 30% / 2 = 40% / 3 = 50% / 4 = 禁用（默认 4）。
+-- 语义：团内非坦克队友血量 ≤ 阈值时，自动对其施放「保护之手」（槽位 64）。
+-- 实现：复用焦点施法框架 WR_FocusCast —— 先亮对应队伍的「设焦点」色块，
+--       下一 tick 焦点已切到该队友后亮 64 号「保护之手」色块；
+--       与「指向保护」一次性复选框完全独立（后者走 mouseover 分支）。
+-- 注意：保护之手会让目标物理免疫，不能给坦克（会丢仇恨），因此跳过 TANK 职责；
+--       自身由防骑自己的圣疗/圣盾处理，也不进入候选。
+-- ============================================================
+local WR_PROT_GLOBAL_PROTECTION_THRESHOLDS = { 0.30, 0.40, 0.50 }
+
+local function WR_PaladinForever_ProtGlobalProtectionThreshold()
+    local v = tonumber(PigSet and PigSet.FH_ZZBH_HP)
+    if not v then return nil end
+    return WR_PROT_GLOBAL_PROTECTION_THRESHOLDS[v]
+end
+
+local WR_PROT_GLOBAL_UNITS_CACHE, WR_PROT_GLOBAL_UNITS_CACHE_KEY
+local function WR_PaladinForever_ProtGlobalProtectionGroupUnits()
+    local raid = (GetNumRaidMembers and GetNumRaidMembers()) or 0
+    local party = (GetNumPartyMembers and GetNumPartyMembers()) or 0
+    local cacheKey = tostring(raid) .. ":" .. tostring(party)
+    if WR_PROT_GLOBAL_UNITS_CACHE and WR_PROT_GLOBAL_UNITS_CACHE_KEY == cacheKey then
+        return WR_PROT_GLOBAL_UNITS_CACHE
+    end
+    local units = {}
+    if raid > 0 then
+        for i = 1, math.min(raid, 25) do
+            units[#units + 1] = "raid" .. i
+        end
+    elseif party > 0 then
+        for i = 1, math.min(party, 4) do
+            units[#units + 1] = "party" .. i
+        end
+    end
+    WR_PROT_GLOBAL_UNITS_CACHE = units
+    WR_PROT_GLOBAL_UNITS_CACHE_KEY = cacheKey
+    return units
+end
+
+local function WR_PaladinForever_ProtGlobalProtectionIsTank(unit, index)
+    -- 优先按单位 token 查职责；读不到再按序号走仓库既有的 WR_NumIsTank 缓存。
+    if type(UnitGroupRolesAssigned) == "function" then
+        local okRole, role = pcall(UnitGroupRolesAssigned, unit)
+        -- ★★ 2026-11-18：role 在受限上下文里可能是 secret string，
+        --   裸 == "TANK" 比较会抛错（EUI EllesmereUI.lua:2333 同款实证：
+        --   issecretvalue(role) 时角色不可读）。比较包 pcall，读不到按未知处理。
+        if okRole and role ~= nil and not WR_PaladinForever_IsSecret(role) then
+            local okT, isTankRole = pcall(function() return role == "TANK" end)
+            if okT and isTankRole == true then return true end
+            local okOther, isOther = pcall(function() return role == "HEALER" or role == "DAMAGER" end)
+            if okOther and isOther == true then return false end
+        end
+    end
+    if index and type(WR_NumIsTank) == "function" then
+        local okTank, isTank = pcall(WR_NumIsTank, index)
+        if okTank and isTank == true then return true end
+    end
+    return false
+end
+
+local function WR_PaladinForever_ProtGlobalProtectionInRange(unit)
+    if type(IsSpellInRange) == "function" then
+        local ok, inRange = pcall(IsSpellInRange, "保护之手", unit)
+        if ok and type(inRange) == "number" then return inRange == 1 end
+    end
+    if type(UnitInRange) == "function" then
+        local ok, inRange = pcall(UnitInRange, unit)
+        if ok and inRange ~= nil then return inRange == true end
+    end
+    -- 读不到距离时放行（与循环其它射程门一致：读不到不判死）
+    return true
+end
+
+local function WR_PaladinForever_ProtGlobalProtectionEligible(unit, index, threshold)
+    if type(unit) ~= "string" or unit == "" then return false end
+    if type(UnitExists) ~= "function" or not UnitExists(unit) then return false end
+    -- ★★ 2026-11-18：身份门全部走 secret 安全的布尔收敛（pcall 调用 + pcall 比较）。
+    --   旧写法裸真值 / 裸 not 判断：战斗中这些 API 返回 secret boolean 时，
+    --   ① 「不确认」被当成「不是」，② 裸 == 比较直接抛错打断整条循环。
+    if type(UnitIsUnit) == "function" then
+        local okSame, same = pcall(UnitIsUnit, unit, "player")
+        if okSame and WR_PaladinForever_SafeBool(same) == true then return false end
+    end
+    if type(UnitIsDeadOrGhost) == "function" then
+        local okDead, dead = pcall(UnitIsDeadOrGhost, unit)
+        if okDead and WR_PaladinForever_SafeBool(dead) == true then return false end
+    end
+    if type(UnitIsPlayer) == "function" then
+        local okPlayer, isPlayer = pcall(UnitIsPlayer, unit)
+        if okPlayer and WR_PaladinForever_SafeBool(isPlayer) == false then return false end
+    end
+    if type(UnitIsFriend) == "function" then
+        local okFriend, isFriend = pcall(UnitIsFriend, "player", unit)
+        if okFriend and WR_PaladinForever_SafeBool(isFriend) == false then return false end
+    end
+    if WR_PaladinForever_ProtGlobalProtectionIsTank(unit, index) then return false end
+    if type(WR_GetUnitBuffTime) == "function" and WR_GetUnitBuffTime(unit, "保护之手") > 1.5 then
+        return false
+    end
+    -- 自律（Forbearance）期间保护之手无法施放，直接跳过避免白按。
+    if type(WR_GetUnitDebuffTime) == "function" and WR_GetUnitDebuffTime(unit, "自律") > 0 then
+        return false
+    end
+    local hp = WR_GetUnitHP(unit)
+    if type(hp) ~= "number" or hp > threshold then return false end
+    if not WR_PaladinForever_ProtGlobalProtectionInRange(unit) then return false end
+    return true
+end
+
+local function WR_PaladinForever_ProtGlobalProtectionPrompt(unit)
+    -- ★ 2026-11-18：UnitIsUnit 在受限上下文里返回 secret boolean，裸真值 / 裸比较
+    --   都会失效或抛错，统一走 SafeBool（只认确认 true）。
+    local focusIsUnit = false
+    if type(UnitIsUnit) == "function" then
+        local okSame, same = pcall(UnitIsUnit, "focus", unit)
+        focusIsUnit = okSame and WR_PaladinForever_SafeBool(same) == true
+    end
+    if focusIsUnit then
+        -- 已经是焦点：直接亮 64 号技能块，并走 ShowSkillCD 的本地 5 分钟冷却记账，
+        -- 避免保护之手冷却中每 tick 重复亮块、AHK 反复空按。
+        if type(WR_PaladinForever_ShowSkillCD) == "function" then
+            return WR_PaladinForever_ShowSkillCD("保护之手", 64, 300) == true
+        end
+        if type(WR_ColorFrame_ShowSkill) == "function" then
+            return WR_ColorFrame_ShowSkill("保护之手", 64) == true
+        end
+        return false
+    end
+    if type(WR_FocusCast) == "function" then
+        return WR_FocusCast(unit, 64, "保护之手", "全局保护") == true
+    end
+    return false
+end
+
+function WR_PaladinForever_ProtGlobalProtectionStep()
+    local threshold = WR_PaladinForever_ProtGlobalProtectionThreshold()
+    if not threshold then return false end
+    -- 自动保护只在战斗中生效：脱战低血不浪费 5 分钟保护之手 CD（鼠标指向预读仍走 FH_ZZBH）。
+    if type(UnitAffectingCombat) == "function" and not UnitAffectingCombat("player") then return false end
+    if not WR_PaladinForever_SpellKnown("保护之手") then return false end
+    -- ★ 2026-11-18：去掉 GlobalCooldown=true（同上：全局 GCD 是审判剩余冷却，
+    --   传 true 等于「审判不在 CD 才允许保护之手」，会让全局保护几乎永不触发）。
+    if type(WR_SpellUsable) == "function" then
+        local okUsable, usable = pcall(WR_SpellUsable, "保护之手")
+        if not okUsable or usable ~= true then return false end
+    end
+
+    local units = WR_PaladinForever_ProtGlobalProtectionGroupUnits()
+
+    -- 当前焦点已经满足条件时，优先把技能打在焦点上，避免每 tick 来回切焦点。
+    local focusIndex
+    for i = 1, #units do
+        if type(UnitIsUnit) == "function" then
+            local okSame, same = pcall(UnitIsUnit, "focus", units[i])
+            if okSame and WR_PaladinForever_SafeBool(same) == true then
+                focusIndex = i
+                break
+            end
+        end
+    end
+    if focusIndex and WR_PaladinForever_ProtGlobalProtectionEligible("focus", focusIndex, threshold) then
+        return WR_PaladinForever_ProtGlobalProtectionPrompt("focus")
+    end
+
+    local bestUnit, bestHP
+    for i = 1, #units do
+        local unit = units[i]
+        if WR_PaladinForever_ProtGlobalProtectionEligible(unit, i, threshold) then
+            local hp = WR_GetUnitHP(unit)
+            if type(hp) == "number" and (bestHP == nil or hp < bestHP) then
+                bestUnit, bestHP = unit, hp
+            end
+        end
+    end
+    if not bestUnit then return false end
+    return WR_PaladinForever_ProtGlobalProtectionPrompt(bestUnit)
 end
 
 function WR_PaladinForeverProt()
@@ -1957,9 +2402,20 @@ function WR_PaladinForeverProt()
         --   战斗内外均可（脱战可预读），成功后自动取消勾选。
         --   ★ 这三个技能都用 [@focus] / [target=focus] 宏，会占用焦点槽；
         --     这里只做「提示 + 取消勾选」，真正的施放由 AHK 按对应键完成。
-        local mouseoverOK = UnitExists("mouseover") and UnitIsPlayer("mouseover")
-                            and not UnitIsDeadOrGhost("mouseover")
-                            and not UnitIsUnit("mouseover", "player")
+        -- ★★ 2026-11-18：身份门 secret 安全（pcall 调用 + pcall 比较，读不到即判否，
+        --   一次性开关宁可这次不亮，也不能因为 secret 比较抛错打断整条循环）。
+        local mouseoverOK = false
+        do
+            local okE, exists = pcall(UnitExists, "mouseover")
+            if okE and WR_PaladinForever_SafeBool(exists) == true then
+                local okP, isPlayer = pcall(UnitIsPlayer, "mouseover")
+                local okD, dead = pcall(UnitIsDeadOrGhost, "mouseover")
+                local okS, same = pcall(UnitIsUnit, "mouseover", "player")
+                mouseoverOK = WR_PaladinForever_SafeBool(isPlayer) == true
+                             and WR_PaladinForever_SafeBool(dead) ~= true
+                             and WR_PaladinForever_SafeBool(same) ~= true
+            end
+        end
         if mouseoverOK then
             -- 指向保护（64）/ 指向牺牲（23）/ 指向拯救（35）
             if WR_ProtOneShot("FH_ZZBH", "保护之手", 64) then return true end
@@ -2081,12 +2537,17 @@ function WR_PaladinForeverProt()
     --     这是客户端硬限制（插件不得基于战斗数值做逻辑），不是这里写错了。
     --     要真正可用只能改成事件/计数驱动（例如记「本场已交过圣疗」），收益远低于
     --     回归风险，暂不做；玩家可手动施放，或走面板「插入 圣疗术 / 圣盾术」一次性开关。
-    if PlayerHP < 0.20 and WR_SpellUsable("圣疗术", true) then
+    -- ★ 2026-11-18：去掉 WR_SpellUsable 的 GlobalCooldown=true（全局 GCD 是审判剩余冷却，
+    --   传 true 等于「审判不在 CD 才能自保」，生存分支几乎永不触发）。
+    if PlayerHP < 0.20 and WR_SpellUsable("圣疗术") then
         if WR_PaladinForever_ShowSkillCD("圣疗术", 48, 1200) then return true end
     end
-    if PlayerHP < 0.35 and WR_SpellUsable("圣佑术", true) then
+    if PlayerHP < 0.35 and WR_SpellUsable("圣佑术") then
         if WR_PaladinForever_ShowSkillCD("圣佑术", 78, 300) then return true end
     end
+
+    -- ★★ 2026-11-17：全局保护（自动保护之手）—— 团内非坦克队友低血救场
+    if WR_PaladinForever_ProtGlobalProtectionStep() then return true end
 
     -- ★★ 2026-11-16：面板「打断」滑块（FH_DD）→ 制裁之锤
     --   0=关闭；5~100=目标施法进度达到该百分比时提示制裁之锤（默认 50）。
@@ -2316,7 +2777,13 @@ function WR_PaladinForeverProt()
         --   常驻是正义/愤怒等不产生审判 debuff 的圣印时，审判不产生审判 debuff，
         --   即使对应 buff 维持开关开着，主调度仍应正常打审判；
         --   状态机只在切印/挂 debuff 的窗口内先 return true 抢占，phase4 维持期放行。
-        and not (PigSet and (PigSet.FH_CRGMSY or PigSet.FH_ZHSP)
+        -- ★★★ 2026-11-18 用户口径「审判buff选十字军、圣印选智慧/光明时不要打审判，
+        --   会顶掉审判buff」：防顶掉门补上十字军审判开关 FH_SZJSP——旧门只写了
+        --   FH_CRGMSY / FH_ZHSP，十字军审判开关开着、常驻圣印选智慧/光明时，
+        --   主调度这一发就是智慧/光明审判，会把状态机刚挂好的十字军审判顶掉。
+        --   审判的续挂由十字军状态机独占（切十字军圣印 → 审判 → 切回）；
+        --   常驻十字军（同一条审判）与愤怒/正义（不产生审判 debuff）照常打审判。
+        and not (PigSet and (PigSet.FH_CRGMSY or PigSet.FH_ZHSP or PigSet.FH_SZJSP)
             and WR_PaladinForever_JudgementUsesSingleSlot(mainSeal))
         -- ★★★ 2026-11-13 用户口径「光明/智慧审判互斥」：本次审判会打光明/智慧审判
         --   （常驻圣印是光明/智慧，或状态机把自己切到光明/智慧）且目标身上已有
@@ -2336,9 +2803,46 @@ function WR_PaladinForeverProt()
         and (PigSet.FH_HS ~= false)
         and WR_PaladinForever_SpellKnown("神圣打击")
     -- 驱邪术（亡灵/恶魔，30 码内；本地 15 秒 CD）
-    local exorcismEligible = WR_PaladinForever_IsUndeadOrDemon("target")
-        and WR_PaladinForever_CanHitTarget("驱邪术", "target")
-        and WR_SpellUsable("驱邪术", true)
+    -- ★★★ 2026-11-18 修复「驱邪术永不点亮」：
+    --   旧写法 WR_SpellUsable("驱邪术", true) 的第三道门是
+    --   `(GCD or 0.4) <= (ShiFaSuDu or 0.4)`，而本函数的全局 GCD 来自
+    --   WR_GetGCD("审判")——它返回的是【审判自己的剩余冷却】（8~10 秒），
+    --   不是公共冷却。于是审判一进 CD，驱邪术的可用性恒 false：
+    --   单体链每次轮到它都在审判刚打完的 8~10 秒窗口里 → 永远不亮；
+    --   多目标链同理（审判之后必然进入该窗口）。
+    --   修复：不再把 GlobalCooldown=true 传进来（公共冷却由 ShowSkillCD 的
+    --   提示防抖 + 1.5 秒保持窗口兜底），并保留客户端可用性通道作为兜底。
+    local exoTypeOK = WR_PaladinForever_IsUndeadOrDemon("target")
+    local exoCastable = WR_PaladinForever_TargetCastable("target")
+    local exoRangeOK = WR_PaladinForever_InSpellRange("驱邪术", "target")
+    -- ★★★ 2026-11-18：参考 PaladinAssist 的 spell 状态（learned/usable/left）。
+    --   旧写法即使不传 GlobalCooldown=true，WR_SpellUsable 的第一道门仍拿
+    --   全局 GCD（本函数 GCD=WR_GetGCD("审判")，8~10 秒）做比较；统一走共享状态。
+    local exoState = nil
+    if type(WR_PaladinForever_ExorcismState) == "function" then
+        exoState = WR_PaladinForever_ExorcismState()
+    end
+    local exoUsable
+    if type(WR_PaladinForever_ExorcismReady) == "function" then
+        exoUsable = WR_PaladinForever_ExorcismReady()
+    else
+        exoUsable = WR_SpellUsable("驱邪术")
+    end
+    local exoClientOK = (exoState ~= nil and exoState.usable == true)
+    WR_PaladinForever_ExoLastGate = {
+        typeOK = exoTypeOK,
+        castable = exoCastable,
+        range = TargetRange,
+        rangeOK = exoRangeOK,
+        usable = exoUsable,
+        clientOK = exoClientOK,
+        learned = exoState and exoState.learned or nil,
+        left = exoState and exoState.left or nil,
+        gcdVar = GCD,
+        shifa = ShiFaSuDu,
+        at = GetTime(),
+    }
+    local exorcismEligible = exoTypeOK and exoCastable and exoRangeOK and exoUsable
     -- 愤怒之锤（斩杀收尾；受面板「愤怒之锤」FH_FNZC 控制，默认开）
     --   ★★ 2026-11-13 用户口径「新增愤怒之锤的使用分支，明确触发条件/冷却/资源限制」：
     --   触发条件（全部满足才点亮）：
@@ -2364,7 +2868,7 @@ function WR_PaladinForeverProt()
     --   血量可读走 <20%，血量不可读走 C_Spell.IsSpellUsable（执行期信号，非 secret）。
     local hammerEligible = (PigSet == nil or PigSet.FH_FNZC ~= false)
         and WR_PaladinForever_HammerExecuteReady()
-        and WR_SpellUsable("愤怒之锤", true)   -- 保留原 GCD/读条/客户端冷却门
+        and WR_SpellUsable("愤怒之锤")   -- ★ 2026-11-18：去掉误用审判剩余冷却的 GCD 门（见驱邪术注释）
         and WR_PaladinForever_TargetCastable("target")
         and WR_PaladinForever_CanHitTarget("愤怒之锤", "target")
         and WR_PaladinForever_HammerTargetAllowed("target")   -- ★ 2026-11-14：「精英」开关开启时只打精英/BOSS
@@ -2391,7 +2895,7 @@ function WR_PaladinForeverProt()
     local consecEligible = (PigSet == nil or PigSet.FH_FX ~= false)
         and PlayerMP >= WR_PaladinForever_PROT_CONSECRATION_MANA_MIN
         and WR_PaladinForever_CanHitTarget("奉献", "target")
-        and WR_SpellUsable("奉献", true)
+        and WR_SpellUsable("奉献")   -- ★ 2026-11-18：同上，避免被审判剩余冷却误挡
 
     -- 统一「尝试提示」闭包：返回 true 表示本 tick 已点亮色块，调用方直接 return true
     --   ★ 每个闭包内再复核一次射程门：eligible 是 tick 开头算的，本节内不变量，
@@ -2415,6 +2919,13 @@ function WR_PaladinForeverProt()
     end
     local function tryExorcism()
         if not exorcismEligible then return false end
+        -- ★★ 2026-11-18 复核（用户口径「普通怪也亮驱邪术」回归）：
+        --   exorcismEligible 是 tick 开头算的快照；tryExorcism 是唯一点亮入口，
+        --   这里每 tick 复核一次类型门，绝不把「技能可用」当类型证据。
+        --   类型明确不是亡灵/恶魔 → 一票否决；未知（全 secret）→ 维持
+        --   exorcismEligible 的通道④口径，交给调用方决定。
+        local okType, typeOK = pcall(WR_PaladinForever_IsUndeadOrDemon, "target")
+        if okType and typeOK == false then return false end
         if not WR_PaladinForever_CanHitTarget("驱邪术", "target") then return false end
         return WR_PaladinForever_ShowSkillCD("驱邪术", 20, 15)
     end

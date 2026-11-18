@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PALADIN" then return end
 -- ============================================================
 -- Paladin_Menu.lua
 -- 圣骑士全专精配置菜单（惩戒 / 防护 / 神圣）
@@ -124,7 +126,7 @@ Paladin_Menu = {
             {
                 text = "|cff00adf0全局保护|r",
                 menuItems = { { text = "|cffF58CBA30%|r" }, { text = "|cffF58CBA40%|r" }, { text = "|cffF58CBA50%|r" }, { text = "|cffaaffaa禁用|r" } },
-                tooltipText = "开启|cff00adf0全局保护（自动保护之手）|r后，团内非坦克队友血量≤阈值时自动对其施放|cff00adf0保护之手|r\n|cffaaffaa禁用|r：不自动补，仅鼠标指向施放\n（本下拉仅控制团血自动补，与「指向保护」插入复选框相互独立）",
+                tooltipText = "开启|cff00adf0全局保护（自动保护之手）|r后，战斗内团内非坦克队友血量≤阈值时自动对其施放|cff00adf0保护之手|r（自律期间不会施放）\n|cffaaffaa禁用|r：不自动补，仅鼠标指向施放\n（本下拉仅控制团血自动补，与「指向保护」插入复选框相互独立）",
                 saveVariable = "FH_ZZBH_HP",
                 defaultID = 4
             },
@@ -180,7 +182,7 @@ Paladin_Menu = {
             { row = 6, column = 1, IconID = 132293, text = "|cffF58CBA切目标|r", tooltipText = "开启后，自动切换到最近的可攻击目标（坦克用于快速切目标建立仇恨）", saveVariable = "FH_TAB", defaultState = false },
             -- ★ 指向保护 / 指向牺牲（鼠标指向施放，团血阈值可选）
             { row = 6, column = 2, IconID = 135964, text = "|cff00adf0指向保护|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0保护之手|r（优先级最高）\n战斗内外均可：脱战也可鼠标指向|cff00adf0预读保护|r（开怪前先套）\n|cffaaffaa施放成功后自动取消勾选（一次性），悬停不再反复触发|r\n（本复选框仅控制鼠标指向直接插入；团血自动补由上方「全局保护」下拉独立控制，不受本复选框影响）", saveVariable = "FH_ZZBH", section = "插入", defaultState = false },
-            { row = 6, column = 3, IconID = 135966, text = "|cff00adf0指向牺牲|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0牺牲之手|r（优先级最高）\n战斗内外均可：脱战也可鼠标指向|cff00adf0预读牺牲|r（开怪前先套）\n|cffaaffaa施放成功后自动取消勾选（一次性），悬停不再反复触发|r\n（本复选框仅控制鼠标指向直接插入；团血自动补由上方「全局牺牲」下拉独立控制，不受本复选框影响）", saveVariable = "FH_ZZXS", section = "插入", defaultState = false },
+            { row = 6, column = 3, IconID = 135966, text = "|cff00adf0指向牺牲|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0牺牲之手|r（优先级最高）\n战斗内外均可：脱战也可鼠标指向|cff00adf0预读牺牲|r（开怪前先套）\n|cffaaffaa施放成功后自动取消勾选（一次性），悬停不再反复触发|r\n（本复选框仅控制鼠标指向直接插入；不参与团血自动补，与「全局保护」下拉相互独立）", saveVariable = "FH_ZZXS", section = "插入", defaultState = false },
             { row = 6, column = 4, IconID = 135967, text = "|cff00adf0指向拯救|r", tooltipText = "开启后，对|cff00adf0鼠标指向|r的队友施放|cff00adf0拯救之手|r（减威胁，优先级最高）\n战斗内外均可：脱战也可鼠标指向|cff00adf0预读拯救|r（开怪前先套）\n|cffaaffaa施放成功后自动取消勾选（一次性），悬停不再反复触发|r\n（拯救为减威胁技能，仅鼠标指向直接插入，无团血自动补）", saveVariable = "FH_ZZJZ", section = "插入", defaultState = false },
             -- ★★ 2026-11-11：删除「单体」循环开关（FH_DT）。原「十字军圣印 → 审判 → 切回」起手
             --   由下方「十字军审判」buff 维持开关取代（常驻维持，不再是一次性起手）。
@@ -191,11 +193,11 @@ Paladin_Menu = {
             -- ★ 2026-11-08：神圣之盾开关（常驻；默认开 = 保持原有行为）
             { row = 7, column = 1, IconID = 135880, text = "|cffF58CBA神圣之盾|r", tooltipText = "开启后，防护循环会在|cff00adf0神圣之盾|r冷却好时提示施放（防护核心减伤/仇恨）。\n\n|cffaaffaa默认勾选|r，与加入此开关之前的行为一致。\n关闭后循环不再提示神圣之盾，适合想手动控制、或该技能浪费蓝量时。\n未学会神圣之盾时不会提示（与开关无关）。", saveVariable = "FH_SZS", defaultState = true },
             -- ★★ 2026-11-16：神圣之盾「目标为我」开关（默认关 = 原行为）
-            { row = 7, column = 2, IconID = 135880, text = "|cffF58CBA目标为我|r", tooltipText = "|cff00adf0神圣之盾·目标为我|r（需同时勾选左侧「神圣之盾」总开关）\n\n|cffaaffaa开启后：|r只有当前目标（怪）的目标是|cff00adf0玩家自己|r时才提示神圣之盾；目标打别人、没有目标或读不到目标的目标时都不提示。\n\n|cffaaffaa关闭时：|r保持原行为——神圣之盾冷却好且已学会就提示，不检查怪物的目标。\n\n适合只在怪确实打你（被围 / 聚怪）时开盾，避免怪打别人时浪费蓝量和 GCD。", saveVariable = "FH_SZS_TARGETME", defaultState = false },
+            { row = 7, column = 2, IconID = 135880, text = "|cffF58CBA目标为我|r", tooltipText = "|cff00adf0神圣之盾·目标为我|r（勾选本项会自动开启左侧「神圣之盾」总开关）\n\n|cffaaffaa开启后：|r只有当前目标（怪）的目标是|cff00adf0玩家自己|r时才提示神圣之盾；目标打别人、没有目标或读不到目标的目标时都不提示。\n\n|cffaaffaa关闭时：|r保持原行为——神圣之盾冷却好且已学会就提示，不检查怪物的目标。\n\n适合只在怪确实打你（被围 / 聚怪）时开盾，避免怪打别人时浪费蓝量和 GCD。", saveVariable = "FH_SZS_TARGETME", defaultState = false, requiresVariable = "FH_SZS" },
             -- ★★ 2026-11-13：愤怒之锤斩杀开关（默认开 = 目标 <20% 自动收尾）
             { row = 7, column = 3, IconID = 132326, text = "|cffF58CBA愤怒之锤|r", tooltipText = "开启后，目标进入|cff00adf0斩杀期|r时自动提示|cff00adf0愤怒之锤|r斩杀收尾（30 码，宏 NUMPAD1 / 颜色槽 1，本地 6 秒 CD，读条 0.87 秒，耗蓝 295）。\n\n|cffaaffaa触发条件：|r面板开关开 + 目标进入斩杀期（本服隐藏目标血量：血量可读时按 <20%，不可读时按客户端「愤怒之锤可用」判定，等价于生命 <20%）+ 目标可攻击且存活 + 30 码内 + 冷却转好 + 蓝量 ≥20%（低于 20% 不点亮，防止斩杀读条拖垮资源）。\n\n|cffaaffaa优先级衔接：|r多目标链：奉献（≥3 目标）→ 审判 → 愤怒之锤 → 神圣打击 → 驱邪术 → 神圣之盾；\n单体链：神圣打击（CD 好永远优先）→ 审判/神圣打击 Ready-first → 愤怒之锤 → 驱邪术 → 奉献 → 神圣之盾。\n\n|cffaaffaa读条保护：|r读条 0.87 秒 + 提示保持 1.5 秒窗口内整条循环让路，其它技能色块不会覆盖打断（打断 = 白烧 295 蓝零收益）。\n\n|cffff5040关闭后|r：主链与兜底环节都不再提示愤怒之锤。\n\n|cffaaffaa精英限定：|r右侧「精英」开关勾选后，只对精英怪 / BOSS 提示（详见该按钮说明）。", saveVariable = "FH_FNZC", defaultState = true },
             -- ★★ 2026-11-14：愤怒之锤「精英/BOSS 限定」开关（默认关 = 原行为）
-            { row = 7, column = 4, IconID = 132326, text = "|cffF58CBA精英|r", tooltipText = "|cff00adf0愤怒之锤·精英/BOSS 限定|r（需同时勾选左侧「愤怒之锤」总开关）\n\n|cffaaffaa开启后：|r只对|cff00adf0精英怪 / BOSS|r提示愤怒之锤；普通小怪即使进入斩杀期也不提示（省 0.87 秒读条 + 295 蓝）。\n\n|cffaaffaa判定（任一命中即算）：|r目标分类 elite / rareelite / worldboss / boss、boss1~5 单位帧、骷髅级（等级 -1）、UnitIsBoss。\n\n|cffaaffaa关闭时：|r保持原行为——进入斩杀期就对当前目标提示，不限怪物类型。", saveVariable = "FH_FNZC_JY", defaultState = false },
+            { row = 7, column = 4, IconID = 132326, text = "|cffF58CBA精英|r", tooltipText = "|cff00adf0愤怒之锤·精英/BOSS 限定|r（勾选本项会自动开启左侧「愤怒之锤」总开关）\n\n|cffaaffaa开启后：|r只对|cff00adf0精英怪 / BOSS|r提示愤怒之锤；普通小怪即使进入斩杀期也不提示（省 0.87 秒读条 + 295 蓝）。\n\n|cffaaffaa判定（任一命中即算）：|r目标分类 elite / rareelite / worldboss / boss、boss1~5 单位帧、骷髅级（等级 -1）、UnitIsBoss。\n\n|cffaaffaa关闭时：|r保持原行为——进入斩杀期就对当前目标提示，不限怪物类型。", saveVariable = "FH_FNZC_JY", defaultState = false, requiresVariable = "FH_FNZC" },
 
             -- ==========================================================
             -- ★★ 2026-11-11：圣印专区（按钮，可折叠；位于「审判buff」专区下方）
@@ -267,6 +269,8 @@ Paladin_Menu = {
               tooltipText = "目标血量低于设定值时使用圣光术（0 = 不使用）。", saveVariable = "SS_SGS" },
             { text = "|cffF58CBA圣光闪现|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 1, defaultVal = 85,
               tooltipText = "目标血量低于设定值时使用圣光闪现（0 = 不使用）。", saveVariable = "SS_SGSX" },
+            { text = "|cffF58CBA停条窗口|r", isSlider = true, minValue = 1, maxValue = 5, valueStep = 1, defaultVal = 5,
+              tooltipText = "过量停条判定窗口：施法剩余时间 ≤ 窗口时，若目标有效血量已满就停止施法。\n1=0.1秒 / 2=0.2秒 / 3=0.3秒 / 4=0.4秒 / 5=0.5秒。\n仅在下方功能「过量停条」开启时生效。", saveVariable = "SS_GLTCCK" },
             -- ★ 2026-11-15：保留「祝福设置」按钮（三专精统一入口；功能区的「祝福」图标也能右键打开）
             {
                 text = "",
@@ -289,6 +293,7 @@ Paladin_Menu = {
             { row = 2, column = 1, IconID = "Interface\\Icons\\Spell_Holy_DispelMagic", text = "|cffF58CBA驱散|r", tooltipText = "自动使用清洁术驱散中毒 / 疾病 / 魔法（不能解诅咒）。", saveVariable = "SS_QJS_ON", section = "功能", defaultState = true },
             { row = 2, column = 2, IconID = "Interface\\Icons\\Ability_ThunderClap", text = "|cffF58CBA愤怒之锤|r", tooltipText = "目标进入斩杀期时自动使用愤怒之锤。", saveVariable = "SS_FNZS", section = "功能", defaultState = true },
             { row = 2, column = 3, IconID = "Interface\\Icons\\Spell_Holy_Excorcism_02", text = "|cffF58CBA驱邪术|r", tooltipText = "目标为亡灵/恶魔时自动使用驱邪术。", saveVariable = "SS_QXS", section = "功能", defaultState = true },
+            { row = 2, column = 4, IconID = "Interface\\Icons\\Spell_Holy_HealingAura", text = "|cffF58CBA过量停条|r", tooltipText = "开启后，圣光术/圣光闪现读条到最后一段（窗口由左侧「停条窗口」设置）时，如果目标有效血量已满，就点亮 101 停止施法，避免过量治疗。\n\n|cffff5040泄蓝模式（治疗模式=泄蓝）不受此开关限制。|r", saveVariable = "SS_GLTC", section = "功能", defaultState = false },
 
             -- ===== 插入（一次性，放完自关） =====
             { row = 1, column = 1, IconID = "Interface\\Icons\\Spell_Holy_SealOfMight", text = "|cffF58CBA制裁|r", tooltipText = "插入制裁之锤：目标正在读条时使用一次，放完自动关闭。", saveVariable = "SS_CRZC", section = "插入", defaultState = false },

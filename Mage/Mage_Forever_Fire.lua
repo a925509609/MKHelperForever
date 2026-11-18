@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "MAGE" then return end
 -- ============================================================
 -- Mage_Forever_Fire.lua
 -- 《魔兽世界：无限》(Forever) 火焰专精循环

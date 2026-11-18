@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PALADIN" then return end
 -- ============================================================
 -- Paladin_Holy_Features.lua
 -- 神圣骑士（奶骑 · WoW Forever 60级）功能层
@@ -116,6 +118,12 @@ function HS.InitDefaults()
     setn("SS_SGS", 60)              -- 圣光术
     setn("SS_SGSX", 85)             -- 圣光闪现
     setn("SS_SDS", 30)              -- 圣盾术（保命，不在截图但保留）
+
+    -- ★ 2026-11-17 奶骑加血逻辑：治疗模式 / 自动焦点 / 过量停条
+    setn("SS_ZLMS", 1)              -- 治疗模式：1全团 / 2目标 / 3预读 / 4泄蓝 / 5坦克 / 6脆皮 / 7-11一~五队 / 12-15萨12/34/13/24
+    setb("SS_ZDJD", true)           -- 自动焦点（有人低于阈值才切，保留手动焦点优先）
+    setb("SS_GLTC", false)          -- 过量停条（默认关，参照旧版奶骑默认）
+    setn("SS_GLTCCK", 5)            -- 过量停条窗口：1=0.1秒 ... 5=0.5秒
 
     -- 圣印 / 审判默认
     setn("SS_SY_SEAL", 7)           -- 常驻：智慧圣印（截图高亮）
@@ -591,7 +599,7 @@ function HS.PotionStep()
     if type(WR_Use_ZLYS) ~= "function" then return false end
     local okU, can = pcall(WR_Use_ZLYS)
     if not okU or can ~= true then return false end
-    return HS.Show("治疗药水", 75)
+    return HS.Show("治疗药水", 79)
 end
 
 function HS.HammerStep()
@@ -612,17 +620,25 @@ end
 
 function HS.ExorcismStep()
     if not HS.On("SS_QXS", true) then return false end
+    -- ★★★ 2026-11-18：参考 PaladinAssist 的 spell 状态机
+    --   （C_Spell.IsSpellUsable + GetSpellCooldownDuration）。
+    --   旧写法 WR_SpellUsable("驱邪术", true) 的 GCD 严格门使用全局 GCD /
+    --   施法速度（奶骑会沿用上一个循环留下的 GCD），驱邪术会被永久判死。
+    --   统一走共享步骤：三系同一口径，不再传 GlobalCooldown=true。
+    if type(WR_PaladinForever_ExorcismStep) == "function" then
+        return WR_PaladinForever_ExorcismStep()
+    end
     if not HS.TargetExistsAttackable() then return false end
     if type(WR_PaladinForever_IsUndeadOrDemon) == "function" then
         local ok, hit = pcall(WR_PaladinForever_IsUndeadOrDemon, "target")
         if not ok or hit ~= true then return false end
     end
     if type(WR_SpellUsable) == "function" then
-        local ok, usable = pcall(WR_SpellUsable, "驱邪术", true)
+        local ok, usable = pcall(WR_SpellUsable, "驱邪术")
         if not ok or usable ~= true then return false end
     end
     if type(WR_PaladinForever_ShowSkillCD) == "function" then
-        return WR_PaladinForever_ShowSkillCD("驱邪术", 20, 10)
+        return WR_PaladinForever_ShowSkillCD("驱邪术", 20, 15)
     end
     return false
 end

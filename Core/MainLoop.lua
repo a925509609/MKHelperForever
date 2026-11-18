@@ -49,6 +49,34 @@ local BOSS_SPECIALS_DISPATCH = {
     WARLOCK     = "WR_Warlock_BossSpecials",
 }
 
+-- ★ 2026-11-17 性能：职业菜单名 / 循环入口名改为加载期常量。
+--   原实现在 OnUpdate 每个 tick 新建一次 ClassMenu 大表并重复 UnitClassBase，
+--   现只保留字符串表，首次 tick 解析成缓存引用，之后零分配。职业不变，缓存无需失效。
+local CLASS_MENU_NAME = {
+    PALADIN     = "Paladin_Menu",
+    DRUID       = "Druid_Menu",
+    MAGE        = "Mage_Menu",
+    WARRIOR     = "Warrior_Menu",
+    PRIEST      = "Priest_Menu",
+    DEATHKNIGHT = "DeathKnight_Menu",
+    HUNTER      = "Hunter_Menu",
+    ROGUE       = "Rogue_Menu",
+    SHAMAN      = "Shaman_Menu",
+    WARLOCK     = "Warlock_Menu",
+}
+local CLASS_ROTATION_NAME = {
+    PALADIN     = "WR_PaladinForeverRotation",
+    DRUID       = "WR_DruidForeverRotation",
+    MAGE        = "WR_MageForeverRotation",
+    WARRIOR     = "WR_WarriorForeverRotation",
+    PRIEST      = "WR_PriestForeverRotation",
+    DEATHKNIGHT = nil, -- DK 按专精分派 WR_DeathKnightBlood/Frost/Unholy
+    HUNTER      = nil, -- Hunter 保留旧三系回退，见下方专精分支
+    ROGUE       = "WR_RogueForeverRotation",
+    SHAMAN      = "WR_ShamanForeverRotation",
+    WARLOCK     = "WR_WarlockForeverRotation",
+}
+
 -- 跟随状态机变量
 -- currentFollowPhase: "idle" | "waiting_focus" | "waiting_follow" | "done"
 -- currentFollowUnit: 目标单位token
@@ -847,6 +875,9 @@ wrTalentEventFrame:SetScript("OnEvent", function()
 end)
 
 -- 主循环OnUpdate
+-- ★ 2026-11-17 性能：职业菜单/循环入口首次 tick 解析后缓存，避免每 tick 建表与全局查找。
+local wrClassMenuCache, wrClassMenuCacheKey
+local wrRotationFn, wrRotationFnKey
 local frame = CreateFrame("Frame", "WOW-Robot")
 frame:SetScript("OnUpdate", function(self, elapsed)
     if WR_StopTime == nil or GetTime() - WR_StopTime > (WR_TemporaryTtopTime or 0.5) then
@@ -919,26 +950,21 @@ frame:SetScript("OnUpdate", function(self, elapsed)
                 end
             end
             local Talent_Name, Talent_Id = WR_TalentCache[1], WR_TalentCache[2]
-            local PlayerClassBase = UnitClassBase("player")
-            local ClassMenu = {
-                ["PALADIN"]     = Paladin_Menu,
-                ["DRUID"]       = Druid_Menu,
-                ["MAGE"]        = Mage_Menu,
-                ["WARRIOR"]     = Warrior_Menu,
-                ["PRIEST"]      = Priest_Menu,
-                ["DEATHKNIGHT"] = DeathKnight_Menu,
-                ["HUNTER"]      = Hunter_Menu,
-                ["ROGUE"]       = Rogue_Menu,
-                ["SHAMAN"]      = Shaman_Menu,
-                ["WARLOCK"]     = Warlock_Menu,
-            }
+            -- ★ 2026-11-17 性能：WR_PlayerClass 在加载期已确定，职业菜单首次 tick 解析后缓存。
+            local PlayerClassBase = WR_PlayerClass or UnitClassBase("player")
+            if wrClassMenuCacheKey ~= PlayerClassBase then
+                wrClassMenuCacheKey = PlayerClassBase
+                local menuName = CLASS_MENU_NAME[PlayerClassBase]
+                wrClassMenuCache = menuName and _G[menuName] or nil
+            end
+            local ClassMenu = wrClassMenuCache
             -- ★ 性能优化：配置面板隐藏时（战斗中通常如此）跳过每 tick 的 UI 刷新，
             -- 仅在面板可见时才刷新（OnShow 也会触发一次），省去无谓的布局重算。
             -- ★ 但首次构建（注册全部专精斜杠命令）不依赖面板可见性：
             --   确保"不呼出面板也能用命令"（切换输出等命令在面板打开前即已注册）。
             local needBuild = (not WR_TalentFrameCreateOK)
             if WR_ConfigFrame and (WR_ConfigFrame:IsShown() or needBuild) then
-                WR_TalentFrame(ClassMenu[PlayerClassBase], Talent_Name, Talent_Id)
+                WR_TalentFrame(ClassMenu, Talent_Name, Talent_Id)
             end
             p_t0 = WR_Profiling and debugprofilestop() or 0
             if WR_PriorityCheck() then
@@ -969,28 +995,16 @@ frame:SetScript("OnUpdate", function(self, elapsed)
             --   就把残留色块熄灭 —— 否则 AHK 读到同色会一直按，正是用户反馈的
             --   「技能不够蓝释放时，应当不亮色块，导致一直按按键」。
             if type(WR_SoD_BeginTick) == "function" then WR_SoD_BeginTick() end
-            if PlayerClassBase == "PALADIN" then
-                if type(WR_PaladinForeverRotation) == "function" then
-                    WR_PaladinForeverRotation()
-                end
-            elseif PlayerClassBase == "DRUID" then
-                -- Forever 原生循环（内部按 isForever 回退旧 SoD 三系）
-                if type(WR_DruidForeverRotation) == "function" then
-                    WR_DruidForeverRotation()
-                end
-            elseif PlayerClassBase == "MAGE" then
-                if type(WR_MageForeverRotation) == "function" then
-                    WR_MageForeverRotation()
-                end
-            elseif PlayerClassBase == "WARRIOR" then
-                if type(WR_WarriorForeverRotation) == "function" then
-                    WR_WarriorForeverRotation()
-                end
-            elseif PlayerClassBase == "PRIEST" then
-                if type(WR_PriestForeverRotation) == "function" then
-                    WR_PriestForeverRotation()
-                end
-              elseif PlayerClassBase == "DEATHKNIGHT" then
+            -- ★ 2026-11-17 性能：常见职业走名称表 + 首 tick 缓存，只有 DK/HUNTER/MONK 保留专精分支。
+            if wrRotationFnKey ~= PlayerClassBase then
+                wrRotationFnKey = PlayerClassBase
+                local rotName = CLASS_ROTATION_NAME[PlayerClassBase]
+                wrRotationFn = rotName and _G[rotName] or nil
+            end
+            local rotFn = wrRotationFn
+            if type(rotFn) == "function" then
+                rotFn()
+            elseif PlayerClassBase == "DEATHKNIGHT" then
                 if Talent_Name == "鲜血" and type(WR_DeathKnightBlood) == "function" then
                     WR_DeathKnightBlood()
                 elseif Talent_Name == "冰霜" and type(WR_DeathKnightFrost) == "function" then
@@ -1008,18 +1022,6 @@ frame:SetScript("OnUpdate", function(self, elapsed)
                     WR_HunterMarksmanship()
                 elseif Talent_Name == "生存" then
                     WR_HunterSurvival()
-                end
-            elseif PlayerClassBase == "ROGUE" then
-                if type(WR_RogueForeverRotation) == "function" then
-                    WR_RogueForeverRotation()
-                end
-            elseif PlayerClassBase == "SHAMAN" then
-                if type(WR_ShamanForeverRotation) == "function" then
-                    WR_ShamanForeverRotation()
-                end
-            elseif PlayerClassBase == "WARLOCK" then
-                if type(WR_WarlockForeverRotation) == "function" then
-                    WR_WarlockForeverRotation()
                 end
             elseif PlayerClassBase == "MONK" then
                 if Talent_Name == "酒仙" and WR_MonkBrewmaster then

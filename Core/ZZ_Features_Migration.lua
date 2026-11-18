@@ -540,7 +540,12 @@ if PigSet.FH_QJS_Target == nil then PigSet.FH_QJS_Target = true end
 -- ★ 防护骑指向保护/牺牲（2026-08-09 新增）
 if PigSet.FH_ZZBH == nil then PigSet.FH_ZZBH = false end        -- 指向保护之手总开关（默认关）
 if PigSet.FH_ZZXS == nil then PigSet.FH_ZZXS = false end        -- 指向牺牲之手总开关（默认关）
-if PigSet.FH_ZZBH_HP == nil then PigSet.FH_ZZBH_HP = 4 end     -- 团血阈值（4=禁用）
+if PigSet.FH_ZZBH_HP == nil then PigSet.FH_ZZBH_HP = 4 end     -- 团血阈值（1=30% / 2=40% / 3=50% / 4=禁用）
+-- ★ 2026-11-17：子选项勾选时同步父总开关（旧存档可能只勾了「目标为我」/「精英」）
+--   「目标为我」属于「神圣之盾」的子条件，「精英」属于「愤怒之锤」的子条件；
+--   父开关没开时子项单独勾着不会出提示，用户会误以为子功能失效。
+if PigSet.FH_SZS_TARGETME == true then PigSet.FH_SZS = true end
+if PigSet.FH_FNZC_JY == true then PigSet.FH_FNZC = true end
 -- ★ 2026-11-06：已删除的防骑下拉（制裁之锤/团本循环/全局牺牲）
 PigSet.FH_ZCZC = nil
 PigSet.FH_RAID_MODE = nil

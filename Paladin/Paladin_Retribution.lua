@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PALADIN" then return end
 -- ============================================================
 -- Paladin_Retribution.lua  (★ SoD 探索赛季改编版)
 -- 惩戒骑士自动循环 —— 符文自适应（P1-P4 一套代码，装备哪阶段符文解锁哪些技能）

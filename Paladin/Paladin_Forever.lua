@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PALADIN" then return end
 -- ============================================================
 -- Paladin_Forever.lua  《魔兽世界：无限》(Forever) 圣骑士完整循环
 -- ------------------------------------------------------------
@@ -51,7 +53,22 @@ function WR_PaladinForeverRotation()
     if spec == "神圣" then
         WR_RunHealerWithFleshPriority(WR_PaladinForeverHoly)
     elseif spec == "防护" then
-        WR_PaladinForeverProt()
+        -- ★★★ 2026-11-18 看门狗（用户口径「防骑循环存在失效的情况」）：
+        --   Forever 12.x 战斗上下文里单位字段大量 secret 化，任何一处裸比较抛
+        --   "attempt to compare a secret ..." 都会让本 tick 的防护循环当场中断，
+        --   表现为「循环失效」（该 tick 什么都不提示）。这里用 pcall 包住整个
+        --   防护循环：出错时限频打印一次现场（默认 5 秒一次，防刷屏），
+        --   循环下一 tick 自动继续，不再被单次抛错打死。
+        --   惩戒/神圣分支不包：它们的读条路径不同，保持原派发行为，便于定位。
+        local okProt, errProt = pcall(WR_PaladinForeverProt)
+        if not okProt then
+            local nowW = GetTime()
+            if not WR_PaladinForeverProtWatchdogAt
+               or (nowW - WR_PaladinForeverProtWatchdogAt) > 5 then
+                WR_PaladinForeverProtWatchdogAt = nowW
+                print("|cffff8800[防骑看门狗]|r 循环本轮中断：" .. tostring(errProt))
+            end
+        end
     elseif spec == "惩戒" then
         WR_PaladinForeverRet()
     end
@@ -356,6 +373,9 @@ WR_PaladinForever_SpellRankIDs = {
     -- ★★★ 2026-11-14：补全 Rank2/3（24274/24239，Forever DB 实测：44/52/60 级）。
     --   当前 rank 换级后施放事件上报的是新 rank ID；只登记 Rank1 会让 6 秒本地 CD 断档（色块反复亮）。
     ["愤怒之锤"] = { 24275, 24274, 24239 },
+    -- ★★ 2026-11-18：驱邪术全部 rank。战斗中事件按「当前 rank ID」上报；缺表时
+    --   本地 15 秒 CD 无记录 → 每次施放后 1.5 秒又重亮 → AHK 同色连按、过量施放。
+    ["驱邪术"] = { 879, 699, 1160, 5232, 10404, 10405, 10314 },
     -- ★ 2026-11-15：奶骑 60 级新技能（圣光守望 / 圣光誓约）
     --   战斗中 UNIT_SPELLCAST_SUCCEEDED 的 spellName 可能是 secret，按 ID 记账才能
     --   保证本地 CD / 施放确认正常推进。
@@ -636,19 +656,30 @@ function WR_PaladinForever_JudgementRemain(cd)
     if type(memo) == "table" and memo.at == now then
         return memo.value
     end
-    local cdv = tonumber(cd)
-    if not cdv or cdv <= 0 then
-        cdv = WR_PaladinForever_GetJudgeCooldown()
-    end
-    local castAt = WR_PaladinForever_GetLastCastAt("审判")
+    -- ★★★ 2026-11-17 用户口径「防骑审判buff维持不灵敏」修复：
+    --   客户端剩余冷却【可读】时（脱战 / 非 secret 客户端）直接以客户端为准。
+    --   旧版优先用本地账（castAt + cdv），cdv 来自天赋探测（8/10 秒），
+    --   探测一有偏差，「审判剩余 ≤ 2 秒」切印窗口就整体提前/延后：
+    --     · cdv 偏小 → 窗口提前开，切印后审判实际还在 CD，打不出去；
+    --     · cdv 偏大 → 窗口推迟，审判 buff 掉了迟迟不补 —— 表现为「维持不灵敏」。
+    --   客户端读不到（战斗中 secret）时仍退回本地账，与旧行为一致。
     local remain
-    if not castAt then
-        -- 无本地施放记录：退到客户端剩余冷却（战斗中不可读时返回 nil）
-        local left = WR_PaladinForever_ClientCooldownLeft("审判")
-        if type(left) == "number" and left > 0 then remain = left else remain = 0 end
-    else
-        remain = (castAt + cdv) - now
+    local left = WR_PaladinForever_ClientCooldownLeft("审判")
+    if type(left) == "number" then
+        remain = left
         if remain < 0 then remain = 0 end
+    else
+        local cdv = tonumber(cd)
+        if not cdv or cdv <= 0 then
+            cdv = WR_PaladinForever_GetJudgeCooldown()
+        end
+        local castAt = WR_PaladinForever_GetLastCastAt("审判")
+        if not castAt then
+            remain = 0
+        else
+            remain = (castAt + cdv) - now
+            if remain < 0 then remain = 0 end
+        end
     end
     WR_PaladinForever_JudgeRemainMemo = { at = now, value = remain }
     return remain
@@ -658,6 +689,19 @@ end
 function WR_PaladinForever_JudgementSwitchDue(cd, lead)
     local l = tonumber(lead) or WR_PaladinForever_JUDGE_SWITCH_LEAD or 2.0
     return WR_PaladinForever_JudgementRemain(cd) <= l + 1e-6
+end
+
+-- ★★★ 2026-11-17 用户口径「防骑审判buff维持不灵敏」：审判「真就绪」双通道判定
+--   本地 CD 记账（castAt + cdv）与客户端剩余冷却（脱战 / 非 secret 时可读）交叉：
+--   · 客户端可读且仍在 CD → 立即判未就绪（防止本地 cdv 偏小导致的空按/无效提示）；
+--   · 客户端可读且已就绪 → 直接判就绪（防止本地账偏大导致的迟迟不提示）；
+--   · 客户端读不到（战斗中 secret）→ 退回本地记账，与旧行为一致。
+function WR_PaladinForever_JudgeTrulyReady()
+    local left = WR_PaladinForever_ClientCooldownLeft("审判")
+    if type(left) == "number" then
+        return left <= 0.05
+    end
+    return WR_PaladinForever_Ready("审判", WR_PaladinForever_GetJudgeCooldown())
 end
 
 -- ★ 隐藏某个技能的可视提示：颜色槽位 + 技能图标框（若当前显示的是该技能）
@@ -2100,6 +2144,7 @@ do
                                "腐蚀圣印", "复仇圣印", "审判", "神圣打击",
                                "奉献", "驱邪术", "愤怒之锤", "制裁之锤",
                                "圣疗术", "圣佑术",
+                               "保护之手", "牺牲之手", "自由之手", "拯救之手",
                                -- ★★ 2026-11-13（奶骑）：治疗技能也必须能在
                                --   战斗中按 spellID 反查出名字，否则：
                                --   ① ShowSkillCD 的「施放记录通道」拿不到起点 →
@@ -2166,6 +2211,12 @@ do
         if event == "PLAYER_TARGET_CHANGED" then
             if type(WR_PaladinForever_NoteTargetChanged) == "function" then
                 WR_PaladinForever_NoteTargetChanged()
+            end
+            -- ★★ 2026-11-17：换目标瞬间探测新目标类型（能读就刷新 memo，
+            --   读不到就清）——驱邪术「亡灵/恶魔」判定靠它把进战前读到的
+            --   类型带进受限战斗上下文，同时防止旧目标类型误套新目标。
+            if type(WR_PaladinForever_NoteTargetTypeProbe) == "function" then
+                WR_PaladinForever_NoteTargetTypeProbe()
             end
             return
         end
@@ -2500,22 +2551,426 @@ SlashCmdList["FH_SEAL"] = function(msg)
     end
     print("|cff00ff00[圣印]|r 已选择常驻圣印：" .. opt[1] .. "（槽 " .. tostring(opt[2]) .. "）")
 end
-
 -- ★ 目标是否为亡灵/恶魔（驱邪术仅对这两类有效）
-function WR_PaladinForever_IsUndeadOrDemon(unit)
-    if type(UnitCreatureType) ~= "function" then return false end
-    local ct
-    if type(WR_SafeCreatureType) == "function" then
-        ct = WR_SafeCreatureType(unit or "target")
-    else
-        local ok, v = pcall(UnitCreatureType, unit or "target")
-        if ok and type(v) == "string"
-           and not (type(WR_IsSecretValue) == "function" and WR_IsSecretValue(v)) then
-            ct = v
+-- ★★ 2026-11-17 修复「防骑不打驱邪术（亡灵/恶魔怪不亮）」：
+--   Forever 12.x 客户端 UI 文档实证：UnitCreatureType 标注
+--   SecretWhenUnitIdentityRestricted —— 战斗/受限上下文里返回值是 secret，
+--   旧版 WR_SafeCreatureType 把它收敛成 nil → 本函数恒 false →
+--   单体链与多目标链共用的 exorcismEligible 恒 false → 永不提示驱邪术。
+--   类型判定只接受直读或由直读建立的缓存证据：
+--   ① 直读：UnitCreatureType 返回 {名字, id}。id 是客户端枚举
+--      （3=恶魔 / 6=亡灵），比按中文名匹配更稳（免本地化）；
+--      名字通道保留 亡灵/恶魔/Undead/Demon 匹配，兼容旧桩与经典客户端。
+--   ② 同目标 memo：直读成功时记 {TargetEpoch, 时刻, 结论}；同一目标
+--      （TargetEpoch 未变）后续直读失败（进战后变 secret）时沿用 memo。
+--      覆盖主流程：进战前选目标（可读，memo 记下）→ 进战 → 仍能判对。
+--   ③ 怪名缓存：直读成功且怪名可读时按怪名学习（WR_PaladinForever_CreatureTypeByName）；
+--      受限时 UnitName 走的是另一条受限通道（SecretWhenUnitNameIdentityRestricted），
+--      名字若仍可读则查缓存命中。
+--   ④ 类型全部读不到 → false。技能可用性不等于目标类型，禁止据此放行；
+--      IsUsableSpell / C_Spell.IsSpellUsable 仅供独立的技能就绪检查使用。
+--   换目标由 PLAYER_TARGET_CHANGED 事件里的 WR_PaladinForever_NoteTargetTypeProbe
+--   处理：换目标瞬间尽力直读新目标并刷新 memo；读不到就清 memo——
+--   绝不把旧目标的类型误套给新目标。
+WR_PaladinForever_TargetTypeMemo = WR_PaladinForever_TargetTypeMemo or nil
+WR_PaladinForever_CreatureTypeByName = WR_PaladinForever_CreatureTypeByName or {}
+
+local function WR_PaladinForever_SecretOr(v)
+    if type(WR_IsSecretValue) == "function" then
+        local ok, s = pcall(WR_IsSecretValue, v)
+        if ok and s == true then return nil end
+    end
+    return v
+end
+
+-- 解析 UnitCreatureType 的返回（名字 + id）→ "undead" / "demon" / false / nil
+local function WR_PaladinForever_ParseCreatureType(name, id)
+    name = WR_PaladinForever_SecretOr(name)
+    id = WR_PaladinForever_SecretOr(id)
+    if type(name) ~= "string" or name == "" then name = nil end
+    id = tonumber(id)
+    if id == 6 then return "undead" end
+    if id == 3 then return "demon" end
+    if name == "亡灵" or name == "Undead" then return "undead" end
+    if name == "恶魔" or name == "Demon" then return "demon" end
+    if name or id then return false end -- 可读但不是亡灵/恶魔
+    return nil                          -- 名字与 id 全读不到（未知）
+end
+
+local function WR_PaladinForever_DirectCreatureType(unit)
+    if type(UnitCreatureType) ~= "function" then return nil end
+    local ok, name, id = pcall(UnitCreatureType, unit)
+    if not ok then return nil end
+    return WR_PaladinForever_ParseCreatureType(name, id)
+end
+
+-- 直读成功时的记账：刷新同目标 memo + 按怪名学习
+local function WR_PaladinForever_RecordCreatureType(unit, kind)
+    if unit ~= "target" then return end
+    WR_PaladinForever_TargetTypeMemo = {
+        epoch = WR_PaladinForever_TargetEpoch or 0,
+        at = GetTime(),
+        kind = kind,
+    }
+    if type(WR_SafeUnitName) == "function" then
+        local okN, nm = pcall(WR_SafeUnitName, unit)
+        if okN and type(nm) == "string" and nm ~= "" then
+            WR_PaladinForever_CreatureTypeByName[nm] = kind
         end
     end
-    if not ct then return false end
-    return ct == "亡灵" or ct == "恶魔" or ct == "Undead" or ct == "Demon"
+end
+
+-- 换目标瞬间调用（PLAYER_TARGET_CHANGED）：能读就刷新 memo，读不到就清
+function WR_PaladinForever_NoteTargetTypeProbe()
+    local kind = WR_PaladinForever_DirectCreatureType("target")
+    if kind == "undead" or kind == "demon" or kind == false then
+        WR_PaladinForever_RecordCreatureType("target", kind)
+    else
+        WR_PaladinForever_TargetTypeMemo = nil
+    end
+end
+
+-- 客户端技能可用性（供技能就绪检查与 /FH_QX_DEBUG 使用，不用于推断目标类型）：
+--   返回 true（技能可用）/ false（技能不可用）/ nil（接口缺失或返回 secret）。
+--   0.5 秒小缓存避免每 tick 双 pcall；目标类型始终由独立类型门判定。
+function WR_PaladinForever_ExorcismUsableChannel()
+    local nowU = GetTime()
+    local epoch = WR_PaladinForever_TargetEpoch or 0
+    local cache = WR_PaladinForever_ExoUsableCache
+    if type(cache) == "table" and cache.key == epoch
+        and (nowU - (cache.at or 0)) <= 0.5 and cache.result ~= nil then
+        if cache.result == "hit" then return true end
+        if cache.result == "miss" then return false end
+    end
+    local exoKey = "驱邪术"
+    if type(WR_ResolveSpellID) == "function" then
+        local sid = WR_ResolveSpellID("驱邪术")
+        if type(sid) == "number" then exoKey = sid end
+    end
+    local u = nil
+    -- ★★★ 2026-11-18：参考 PaladinAssist 的 refreshSpell，优先 C_Spell.IsSpellUsable。
+    --   旧实现先问全局 IsUsableSpell；Forever 里该兼容入口可能恒 false / 不认当前
+    --   rank，会把 C_Spell 的明确结果挡掉（可用性通道恒 miss → 驱邪术永不亮）。
+    --   现在 C_Spell 优先，只有它不存在 / 读不到时才回落 IsUsableSpell。
+    if type(C_Spell) == "table" and type(C_Spell.IsSpellUsable) == "function" then
+        local ok, v, noMana = pcall(C_Spell.IsSpellUsable, exoKey)
+        if ok then
+            if type(v) == "table" then
+                noMana = v.insufficientPower or v.noMana or noMana
+                v = v.isUsable or v.usable
+            end
+            v = WR_PaladinForever_SecretOr(v)
+            noMana = WR_PaladinForever_SecretOr(noMana)
+            if noMana == true then
+                u = false
+            elseif v == true or v == false then
+                u = v
+            end
+        end
+    end
+    if u ~= true and u ~= false and type(IsUsableSpell) == "function" then
+        local ok, a, noMana = pcall(IsUsableSpell, exoKey)
+        if ok then
+            local val = WR_PaladinForever_SecretOr(a)
+            if type(val) == "table" then
+                noMana = val.insufficientPower or val.noMana or noMana
+                val = WR_PaladinForever_SecretOr(val.isUsable or val.usable)
+            end
+            noMana = WR_PaladinForever_SecretOr(noMana)
+            if noMana == true then
+                u = false
+            elseif val == true or val == false then
+                u = val
+            end
+        end
+    end
+    WR_PaladinForever_ExoUsableCache = {
+        key = epoch,
+        at = nowU,
+        result = (u == true and "hit") or (u == false and "miss") or nil,
+    }
+    if u == true or u == false then return u end
+    return nil
+end
+
+-- ============================================================
+-- ★★★ 2026-11-18：参考 BigHammer PaladinAssist 的「技能状态机」
+--   参考实现：PaladinAssist 12CA28C1 的 createSpell/refreshSpell——
+--     learned = C_SpellBook.IsSpellKnown(spellId)
+--     usable  = C_Spell.IsSpellUsable(spellId)       （引擎执行期求值，不读 secret 字段）
+--     left    = C_Spell.GetSpellCooldownDuration(spellId)
+--               :EvaluateRemainingDuration(curve2550)（引擎侧算冷却剩余秒数）
+--   用途：驱邪术不再走 WR_SpellUsable(..., true) 的 GCD 严格门。那个门把
+--   全局 GCD / 施法速度变量当公共冷却，而本职业 GCD=WR_GetGCD("审判") 是审判
+--   自己的剩余冷却（8~10 秒），审判一进 CD 驱邪术就永远不亮。
+--   这里与 PaladinAssist 一样：可用性交给 C_Spell.IsSpellUsable，冷却交给
+--   DurationObject；两者都读不到时由本地施放记账兜底，绝不比较 secret 值。
+-- ============================================================
+WR_PaladinForever_ExoStateCache = WR_PaladinForever_ExoStateCache or nil
+WR_PaladinForever_DurationCurve255 = WR_PaladinForever_DurationCurve255 or nil
+
+-- 当前 rank 的驱邪术 spellID（WR_ResolveSpellID 优先，退化为全 rank 表末项）
+function WR_PaladinForever_ExorcismSpellID()
+    local sid = nil
+    if type(WR_ResolveSpellID) == "function" then
+        local ok, v = pcall(WR_ResolveSpellID, "驱邪术")
+        if ok and type(v) == "number" then sid = v end
+    end
+    if type(sid) == "number" then return sid end
+    local ids = WR_PaladinForever_SpellRankIDs and WR_PaladinForever_SpellRankIDs["驱邪术"]
+    if type(ids) == "table" then
+        for i = #ids, 1, -1 do
+            if type(ids[i]) == "number" then return ids[i] end
+        end
+    end
+    return nil
+end
+
+-- 0~255 秒的标量曲线：EvaluateRemainingDuration 在引擎侧求值，
+-- 避免在 Lua 里对 secret 数字做比较（参考 PaladinAssist 的 curve2550）。
+local function WR_PaladinForever_GetDurationCurve255()
+    if WR_PaladinForever_DurationCurve255 ~= nil then
+        return WR_PaladinForever_DurationCurve255 or nil
+    end
+    if type(C_CurveUtil) ~= "table" or type(C_CurveUtil.CreateCurve) ~= "function" then
+        WR_PaladinForever_DurationCurve255 = false
+        return nil
+    end
+    local ok, curve = pcall(C_CurveUtil.CreateCurve)
+    if not ok or curve == nil then
+        WR_PaladinForever_DurationCurve255 = false
+        return nil
+    end
+    pcall(function()
+        curve:AddPoint(0, 0)
+        curve:AddPoint(255, 255)
+    end)
+    WR_PaladinForever_DurationCurve255 = curve
+    return curve
+end
+
+-- 返回技能冷却剩余秒数；读不到返回 nil；没有冷却返回 0。
+-- 全程 pcall：DurationObject 的返回值可能是 secret，参与运算会抛错，
+-- 此时返回 nil 交给本地施放记账兜底。
+function WR_PaladinForever_SpellCooldownLeft(spell)
+    local sid = nil
+    if type(spell) == "number" then
+        sid = spell
+    elseif type(WR_ResolveSpellID) == "function" then
+        local okR, v = pcall(WR_ResolveSpellID, spell)
+        if okR and type(v) == "number" then sid = v end
+    end
+    if type(sid) ~= "number" then return nil end
+    if type(C_Spell) ~= "table" or type(C_Spell.GetSpellCooldownDuration) ~= "function" then
+        return nil
+    end
+    local okD, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
+    if not okD then return nil end
+    if durObj == nil then return 0 end
+    local curve = WR_PaladinForever_GetDurationCurve255()
+    if not curve then return nil end
+    local okE, res = pcall(function()
+        return durObj:EvaluateRemainingDuration(curve)
+    end)
+    if not okE or res == nil then return nil end
+    -- 标量曲线直接给数字；部分客户端返回 Color（取 B 通道 ×255）
+    local left = nil
+    if type(res) == "number" then
+        local okNum, v = pcall(function() return res + 0 end)
+        if okNum then left = v end
+    elseif type(res) == "table" or type(res) == "userdata" then
+        local okRGB, r, g, b = pcall(function() return res:GetRGB() end)
+        if okRGB and type(b) == "number" then
+            local okScale, v = pcall(function() return b * 255 end)
+            if okScale then left = v end
+        end
+    end
+    if type(left) ~= "number" then return nil end
+    if left < 0 then left = 0 end
+    return left
+end
+
+-- 参考 PaladinAssist 的 spell 状态：learned / usable / left（0.1 秒缓存）
+function WR_PaladinForever_ExorcismState()
+    local nowS = GetTime()
+    local epochS = WR_PaladinForever_TargetEpoch or 0
+    local cache = WR_PaladinForever_ExoStateCache
+    if type(cache) == "table" and cache.epoch == epochS
+        and (nowS - (cache.at or 0)) <= 0.10 then
+        return cache
+    end
+    local sid = WR_PaladinForever_ExorcismSpellID()
+    local state = {
+        at = nowS,
+        epoch = epochS,
+        spellId = sid,
+        learned = nil,
+        usable = nil,
+        left = nil,
+    }
+    -- learned：C_SpellBook（参考 PaladinAssist）→ IsPlayerSpell → 共享 SpellKnown
+    --   任一通道明确 true 即视为已学会；全部通道都明确 false 才判未学。
+    local checkedLearned = false
+    local learnedTrue = false
+    if type(sid) == "number" then
+        if type(C_SpellBook) == "table" and type(C_SpellBook.IsSpellKnown) == "function" then
+            local okK, known = pcall(C_SpellBook.IsSpellKnown, sid)
+            if okK and type(known) == "boolean" then
+                checkedLearned = true
+                if known then learnedTrue = true end
+            end
+        end
+        if not learnedTrue and type(IsPlayerSpell) == "function" then
+            local okP, known = pcall(IsPlayerSpell, sid)
+            if okP and type(known) == "boolean" then
+                checkedLearned = true
+                if known then learnedTrue = true end
+            end
+        end
+    end
+    if not learnedTrue and type(WR_PaladinForever_SpellKnown) == "function" then
+        local okS, known = pcall(WR_PaladinForever_SpellKnown, "驱邪术")
+        if okS and type(known) == "boolean" then
+            checkedLearned = true
+            if known then learnedTrue = true end
+        end
+    end
+    if learnedTrue then
+        state.learned = true
+    elseif checkedLearned then
+        state.learned = false
+    end
+    -- usable：沿用已有的引擎可用性通道（IsUsableSpell / C_Spell.IsSpellUsable）
+    state.usable = WR_PaladinForever_ExorcismUsableChannel()
+    -- left：参考 PaladinAssist 的 GetSpellCooldownDuration 通道
+    state.left = WR_PaladinForever_SpellCooldownLeft("驱邪术")
+    WR_PaladinForever_ExoStateCache = state
+    return state
+end
+
+-- 驱邪术此刻是否「可以提示」：已学会 + 客户端可用 + 冷却就绪（读不到交给本地记账）
+function WR_PaladinForever_ExorcismReady()
+    local state = WR_PaladinForever_ExorcismState()
+    if state.learned == false then return false end
+    if state.usable == false then return false end
+    if type(state.left) == "number" and state.left > 0.25 then return false end
+    -- 本地施放记账兜底（战斗中 C_Spell 冷却不可读时）
+    if type(WR_PaladinForever_GetLastCastAt) == "function" then
+        local okL, last = pcall(WR_PaladinForever_GetLastCastAt, "驱邪术")
+        if okL and type(last) == "number" and last > 0
+            and (GetTime() - last) < 14.8 then
+            return false
+        end
+    end
+    return true
+end
+
+function WR_PaladinForever_IsUndeadOrDemon(unit)
+    unit = unit or "target"
+    -- ① 直读（可读 = 结论确定：命中 / 明确不是）
+    local kind = WR_PaladinForever_DirectCreatureType(unit)
+    if kind == "undead" or kind == "demon" or kind == false then
+        WR_PaladinForever_RecordCreatureType(unit, kind)
+        return kind == "undead" or kind == "demon"
+    end
+    -- ② 怪名缓存（受限上下文里 UnitName 可能仍是另一条受限通道，能读就查）
+    if type(WR_SafeUnitName) == "function" then
+        local okN, nm = pcall(WR_SafeUnitName, unit)
+        if okN and type(nm) == "string" and nm ~= "" then
+            local cached = WR_PaladinForever_CreatureTypeByName[nm]
+            if cached == "undead" or cached == "demon" then return true end
+            if cached == false then return false end
+        end
+    end
+    -- ③ 同目标 memo（TargetEpoch 未变 = 还是原来那只；120 秒防陈旧）
+    if unit == "target" then
+        local memo = WR_PaladinForever_TargetTypeMemo
+        if type(memo) == "table" and (memo.kind == "undead" or memo.kind == "demon")
+            and (memo.epoch or 0) == (WR_PaladinForever_TargetEpoch or 0)
+            and (GetTime() - (memo.at or 0)) <= 120 then
+            return true
+        end
+        if type(memo) == "table" and memo.kind == false
+            and (memo.epoch or 0) == (WR_PaladinForever_TargetEpoch or 0)
+            and (GetTime() - (memo.at or 0)) <= 120 then
+            return false -- 同一目标进战前明确读过：不是亡灵/恶魔
+        end
+    end
+    -- ④ 类型未知时不提示。IsSpellUsable 仅表示技能/资源可用，
+    --   不证明当前目标是亡灵/恶魔；以它兜底会对其它类型误亮色块。
+    return false
+end
+
+-- ============================================================
+-- ★★★ 2026-11-18：三系共用的驱邪术步骤（参考 PaladinAssist 的 spell 状态）
+--   Ret/Holy 的 ExorcismStep 直接复用这里；Prot 的 exorcismEligible 复用
+--   WR_PaladinForever_ExorcismReady。所有分支同一判据：
+--     开关 → 目标可攻击存活 → 亡灵/恶魔 → 30 码 → learned/usable/left → 点亮
+--   不再使用 WR_SpellUsable(..., true)（GCD/施法速度严格门会误杀）。
+-- ============================================================
+function WR_PaladinForever_ExorcismStep(toggleVar)
+    if type(toggleVar) == "string" and PigSet and PigSet[toggleVar] == false then
+        return false
+    end
+    if type(WR_PaladinForever_TargetCastable) == "function"
+        and not WR_PaladinForever_TargetCastable("target") then
+        return false
+    end
+    if type(WR_PaladinForever_IsUndeadOrDemon) ~= "function" then return false end
+    local okT, hit = pcall(WR_PaladinForever_IsUndeadOrDemon, "target")
+    if not okT or hit ~= true then return false end
+    if type(WR_PaladinForever_InSpellRange) == "function" then
+        local okR, rangeOK = pcall(WR_PaladinForever_InSpellRange, "驱邪术", "target")
+        if not okR or rangeOK ~= true then return false end
+    end
+    if not WR_PaladinForever_ExorcismReady() then return false end
+    if type(WR_PaladinForever_ShowSkillCD) == "function" then
+        return WR_PaladinForever_ShowSkillCD("驱邪术", 20, 15)
+    end
+    return false
+end
+
+-- 诊断：/FH_QX_DEBUG 打印驱邪术四通道现场，实机核对哪条通道生效
+SLASH_FH_QX_DEBUG1 = "/FH_QX_DEBUG"
+SlashCmdList["FH_QX_DEBUG"] = function()
+    local kind = WR_PaladinForever_DirectCreatureType("target")
+    local nm = nil
+    if type(WR_SafeUnitName) == "function" then
+        local okN, v = pcall(WR_SafeUnitName, "target")
+        if okN and type(v) == "string" then nm = v end
+    end
+    local memo = WR_PaladinForever_TargetTypeMemo
+    local memoText = "无"
+    if type(memo) == "table" then
+        memoText = "kind=" .. tostring(memo.kind)
+            .. " epoch=" .. tostring(memo.epoch)
+            .. " age=" .. string.format("%.1f", GetTime() - (memo.at or 0)) .. "s"
+    end
+    local gate = WR_PaladinForever_ExoLastGate
+    local gateText = "无（循环未跑过）"
+    if type(gate) == "table" then
+        gateText = "类型=" .. tostring(gate.typeOK)
+            .. " 可攻击=" .. tostring(gate.castable)
+            .. " 距离=" .. tostring(gate.range)
+            .. " 射程=" .. tostring(gate.rangeOK)
+            .. " 可用=" .. tostring(gate.usable)
+            .. " 客户端=" .. tostring(gate.clientOK)
+            .. " GCD变量=" .. tostring(gate.gcdVar)
+            .. " 施法速度=" .. tostring(gate.shifa)
+            .. " 年龄=" .. string.format("%.1f", GetTime() - (gate.at or 0)) .. "s"
+    end
+    local exoStateDbg = WR_PaladinForever_ExorcismState()
+    print("|cff00ff00[驱邪术诊断]|r 直读=" .. tostring(kind)
+        .. " | 怪名=" .. tostring(nm)
+        .. " | 名字缓存=" .. (nm and tostring(WR_PaladinForever_CreatureTypeByName[nm]) or "-")
+        .. " | memo=" .. memoText
+        .. " | 可用性通道=" .. tostring(type(WR_PaladinForever_ExorcismUsableChannel) == "function" and WR_PaladinForever_ExorcismUsableChannel() or "?")
+        .. " | 技能状态(learned=" .. tostring(exoStateDbg.learned)
+        .. " usable=" .. tostring(exoStateDbg.usable)
+        .. " left=" .. tostring(exoStateDbg.left) .. ")"
+        .. " | TargetEpoch=" .. tostring(WR_PaladinForever_TargetEpoch or 0)
+        .. " | 最终判定=" .. tostring(WR_PaladinForever_IsUndeadOrDemon("target"))
+        .. "\n|cff00ff00[驱邪术门槛]|r " .. gateText)
 end
 
 -- ★ 目标是否正在可打断的施法/引导（用于制裁之锤）
@@ -2717,7 +3172,7 @@ local function WR_PaladinForever_AuraDataDispelState(data)
 end
 
 -- ★★★ 2026-11-16 用户口径「清洁术只能驱散疾病、中毒、魔法，不能驱散诅咒」复查修复：
---   旧探针把 C_UnitAuras.GetAuraSlots(...HARMFUL|RAID...) 只要有槽位就返回 true，
+--   旧探针把 C_UnitAuras.GetAuraSlots(...HARMFUL...) 只要有槽位就返回 true，
 --   实测某些客户端该过滤器会包含诅咒（或至少无法保证排除），导致中诅咒后
 --   清洁术不断点亮。现在改为：只有真正读到 AuraData 的 dispelName / canActivePlayerDispel
 --   并明确是可驱散类型时才返回 true；全部读不到则返回 nil（未知），绝不猜「可驱散」。
@@ -2744,7 +3199,7 @@ function WR_PaladinForever_ProbeDispellableByFilter(unit)
         local token = nil
         local gotAny = false
         for n = 1, 40 do
-            local okS, nextToken, slot = pcall(slotFn, unit, "HARMFUL|RAID", 1, token)
+            local okS, nextToken, slot = pcall(slotFn, unit, "HARMFUL", 1, token)
             if not okS then sawUnknown = true; break end
             if slot == nil then break end
             gotAny = true
@@ -2765,7 +3220,7 @@ function WR_PaladinForever_ProbeDispellableByFilter(unit)
     if C_UnitAuras.GetAuraDataByIndex ~= nil then
         local any = false
         for i = 1, 40 do
-            local ok, data = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL|RAID")
+            local ok, data = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL")
             if not ok then sawUnknown = true; break end
             if data == nil then break end
             any = true
@@ -2884,9 +3339,20 @@ local function WR_PaladinForever_ScanUnitDebuffTypes(unit)
         end
         if spellId ~= nil and not WR_PaladinForever_IsSecretValue(spellId) then
             local okNum, num = pcall(tonumber, spellId)
-            if okNum and num ~= nil and WR_PaladinForever_NEVER_CLEANSE_SPELL_IDS[num] then
-                sawKnownNonCleansable = true
-                return nil
+            if okNum and type(num) == "number" and num > 0 then
+                if WR_PaladinForever_NEVER_CLEANSE_SPELL_IDS[num] then
+                    sawKnownNonCleansable = true
+                    return nil
+                end
+                -- ★★★ 2026-11-18 五次修复：静态 spellID 分类，不依赖 dispelName 是否 secret。
+                --   战斗里 5416/744/13298/3427 等 ID 可从 auraData.spellId 直接读到，
+                --   类型由 C_TooltipInfo.GetSpellByID 的静态提示行判定（见下方函数）。
+                local idKind = WR_PaladinForever_DispelKindBySpellID and WR_PaladinForever_DispelKindBySpellID(num) or nil
+                if idKind == "poison" or idKind == "disease" or idKind == "magic" then return true end
+                if idKind == "curse" or idKind == "bleed" then
+                    sawKnownNonCleansable = true
+                    return nil
+                end
             end
         end
         if dt == nil or WR_PaladinForever_IsSecretValue(dt) then
@@ -2968,7 +3434,12 @@ local function WR_PaladinForever_ScanUnitDebuffTypes(unit)
         end
     end
 
-    if sawKnownNonCleansable then return false end
+    -- ★ 2026-11-18 复查修复：unknown（secret 类型）存在时绝不能判 false。
+    --   疾病（感染之伤等）在战斗中 dispelName/类型全是 secret → 记 sawUnknown；
+    --   只要同时有任一可读的诅咒/流血/黑名单 debuff，旧写法一票否决返回 false，
+    --   UnitHasDispel 在多API扫描层直接判无 → 清洁术永不点亮。
+    --   与严格探针同口径：只有「全部可读且没有一个可驱散类型」才允许判无。
+    if sawKnownNonCleansable and not sawUnknown then return false end
     if sawAny and not sawUnknown then return false end
     return nil
 end
@@ -3274,13 +3745,19 @@ function WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame()
     local sawSecretType = false
     local sawKnownNonCleansable = false
     local sawAnyEntry = false
+    -- ★ 2026-11-18：类型整体读不到（atlas/字段为 nil 或 secret）也必须记为 unknown。
+    --   否则「疾病(类型 secret) + 可读诅咒」并存时会被一票否决判无 → 清洁术不亮。
 
     local function scanValue(v)
         -- 注意：不能先写 v == nil —— secret string 参与 == 比较同样会抛错。
-        if type(v) ~= "string" then return nil end
+        if type(v) ~= "string" then
+            sawUnknownType = true
+            return nil
+        end
         sawAnyEntry = true
         if WR_PaladinForever_IsSecretText(v) then
             sawSecretType = true
+            sawUnknownType = true
             return nil
         end
         local k = WR_PaladinForever_NormalizeDispelType(v)
@@ -3289,6 +3766,8 @@ function WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame()
         --   阻止后面「secret 类型」兜底把它当成可驱散而乱放清洁术。
         if k == "curse" or k == "bleed" then
             sawKnownNonCleansable = true
+        else
+            sawUnknownType = true
         end
         return nil
     end
@@ -3368,6 +3847,7 @@ function WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame()
                 --   兜底误判为可驱散 → 中诅咒时清洁术异常乱放。
                 --   直接读 DebuffBorder 的普通字符串图集名即可安全区分类型。
                 local k = borderKind(button)
+                if k == nil then sawUnknownType = true end
                 if k == "poison" or k == "disease" or k == "magic" then return true end
                 if k == "curse" or k == "bleed" then sawKnownNonCleansable = true end
             end
@@ -3389,31 +3869,190 @@ function WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame()
     --   也是 secret，读不到图集时会把所有 secret debuff 当成可驱散。
     --   现在只有明确证据才放行；读不到类型时返回 nil（未知），交给后续
     --   严格探针/缓存路径，绝不猜可驱散。
-    if sawKnownNonCleansable then return false end
-    -- 帧可见但只扫到无类型/非可驱散条目 → 可判无；含 secret 条目时不能判无。
-    if frameVisible and sawAnyEntry and not sawSecretType then return false end
-    if sawSecretType then return nil end
-    if sawAnyEntry then return nil end
+    -- ★ 2026-11-18 复查修复：unknown（secret / 读不到类型）优先级高于 known-non。
+    --   战斗中疾病/中毒的类型全是 secret；旧写法在「疾病 + 任一可读诅咒」并存时
+    --   一票否决判无 → 清洁术不亮。只有全部条目可读且无一个可驱散类型才判无。
+    local sawUnknownAny = sawSecretType or sawUnknownType
+    if sawKnownNonCleansable and not sawUnknownAny then return false end
+    -- 帧可见但只扫到无类型/非可驱散条目 → 可判无；含 unknown 条目时不能判无。
+    if frameVisible and sawAnyEntry and not sawUnknownAny then return false end
     return nil
 end
 
 -- ============================================================
--- ★★★ 2026-11-17：引擎级「玩家本人可驱散」探测容器
+-- ★★★ 2026-11-17 复查：引擎级「可驱散类型」探测容器
 -- 12.x 战斗内光环字段全是 secret，C_UnitAuras 的索引/槽位查询会被
 -- RequiresUnitAuraAccess 拒绝；但 AuraContainer 的过滤器由引擎侧求值：
---   filter = "HARMFUL|RAID" 只匹配「当前玩家自己能驱散」的 debuff
---   （圣骑士 = 魔法 / 疾病 / 中毒，不含诅咒 / 流血，与清洁术完全一致）。
+--   filter = "HARMFUL" + candidateFilters.includeDispelTypes = { Magic, Disease, Poison }
+--   只保留清洁术能驱散的三种 debuff（诅咒 / 流血不会进来），完全不读 secret 光环字段。
+-- 旧版用 "HARMFUL|RAID" 是错误的：该 token 只表示「团队 debuff」，
+--   不表示「玩家本人可驱散」。单体 / 5 人本里的疾病、中毒、魔法不会被它命中，
+--   探测容器恒为空 → UnitHasDispel 恒 false → 战斗中清洁术永不点亮。
 -- 登录/进世界时预创建 1×1 透明容器（战斗内不能创建），每 tick 只读
 -- group:GetFramesByIndex() 的数组长度；>0 即说明存在可驱散 debuff。
 -- ============================================================
+WR_PaladinForever_CLEANSE_PROBE_FILTER = "HARMFUL"
+-- 同时带英文枚举与中文显示名：不同客户端 auraData.dispelName 的本地化形态不一致。
+WR_PaladinForever_CLEANSE_PROBE_DISPEL_TYPES = {
+    -- ★ 2026-11-18：补全大小写变体。auraData.dispelName 的形态在不同客户端
+    --   服务端实现里不统一（Magic / magic / MAGIC / 本地化中文），
+    --   键差一个大小写引擎侧就匹配不上 → 组恒空 → 疾病/魔法/中毒全部探不到。
+    Magic = true, Disease = true, Poison = true,
+    magic = true, disease = true, poison = true,
+    MAGIC = true, DISEASE = true, POISON = true,
+    ["魔法"] = true, ["疾病"] = true, ["中毒"] = true,
+}
+-- ★★★ 2026-11-18 三次修复：受限内容「免读回」通道。
+--   EUI AuraKit 1277-1280 实证：受限内容下引擎给 AuraButton 挂
+--   DenyTaintedAccessWhenAurasAreSecret —— 挂牌之后插件侧对按钮的任何读取
+--   （GetAtlas / GetVertexColor / IsShown / DebuffBorder / GetDispelTypeTexture）
+--   都被拒绝；DBM AuraTracking 870 同款（ShouldAurasBeSecret() 时跳过按钮配置）。
+--   前两版「注册图标/边框再读回分类」在真机战斗中结构性失效：
+--   离线夹具全绿、真机分类全 unknown。本版改为三条免读回通道：
+--   ① WR_CLEANSE_PROBE_YOU 组：filter = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+--     （EUI RaidFrames 生产同款，EUI_RaidFrames_AuraContainers 3294/661）。
+--     引擎侧按职业/专精判「我本人可驱散」，防骑清洁术属职业驱散；
+--     组内有帧 = 引擎已回答「有我能驱散的 debuff」，零读回。
+--   ② 已知 debuff ID 存在性直查（EUI AuraBuffReminders NON_SECRET_SPELL_IDS
+--     同款，EllesmereUIAuraBuffReminders.lua 499-550）：未上秘密旗的 spellID
+--     战斗中 GetPlayerAuraBySpellID 照样返回非 nil；「非 nil 即存在」。
+--     nil 一律当未知（秘密旗 ID 返回 nil ≠ 不存在），绝不判无。
+--   ③ includeDispelTypes 组保留（脱战 / 非受限内容仍由它精确判型）。
+WR_PaladinForever_CLEANSE_PROBE_YOU_FILTER = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+-- ★ 已知可驱散 debuff ID → 类型（服务端截图实锤 + 经典常见；实测命中后追加）：
+--   ★★★ 2026-11-18 四次修复：用户三张截图实锤 744 / 13298 / 15654 全不在
+--   第三版白名单内——免读回、免容器的 ID 直查通道（真机唯一不依赖探测容器的
+--   通道）对用户真实中的毒形同虚设。补齐截图三 ID + 经典常见 debuff 全 rank
+--   家族。白名单多录只是多查几个 ID，查不到静默跳过，无副作用；
+--   绝不收录诅咒类 ID（清洁术驱不了诅咒，误收录会空放 GCD）。
+WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS = {
+    -- 中毒（poison）
+    [5416] = "poison",   -- 毒性钉刺（2026-11-18 截图实锤）
+    [744] = "poison",    -- 毒药（蜘蛛/野兽类，2026-11-18 截图实锤）
+    [13298] = "poison",  -- 毒药（蛇虫类，2026-11-18 截图实锤）
+    -- 疾病（disease）
+    [3427] = "disease",  -- 感染之伤（2026-11-17 截图实锤）
+    -- 魔法（magic）：暗言术：痛全 rank（15654 为 2026-11-18 截图实锤）
+    [589] = "magic", [591] = "magic", [592] = "magic", [970] = "magic",
+    [992] = "magic", [2767] = "magic", [10892] = "magic", [10893] = "magic",
+    [10894] = "magic", [15654] = "magic",
+    -- 魔法：腐蚀术全 rank
+    [172] = "magic", [173] = "magic", [6222] = "magic", [6223] = "magic",
+    -- 魔法：献祭全 rank
+    [348] = "magic", [707] = "magic", [1094] = "magic", [2941] = "magic", [11665] = "magic",
+    -- 魔法：控制类
+    [118] = "magic",     -- 变形术
+    [13710] = "magic",   -- 缓速
+    [8122] = "magic",    -- 心灵控制
+}
 WR_PaladinForever_CleanseProbe = WR_PaladinForever_CleanseProbe or {}
 WR_PaladinForever_CleanseProbeRetryAt = WR_PaladinForever_CleanseProbeRetryAt or {}
+
+-- ★★★ 2026-11-18 二次修复：探测按钮注册引擎「驱散类型图标」纹理。
+--   EUI AuraKit 源码实证（EllesmereUI_AuraKit.lua 251-261 / 690-706 / 940-1002）：
+--   引擎 AuraButton 的驱散类型图标是「注册制」——必须在 initializeFrame
+--   （按钮创建窗口；创建期之后写按钮被 DenyTaintedAccessWhenAurasAreSecret 拒绝）
+--   里建持手 + CreateTexture，再 pcall(button.AddDispelTypeTexture, button, tex,
+--   { style = Enum.CustomAuraButtonDispelTypeTextureStyle.Icon, showWhenHarmful
+--   = true, showWhenHelpful = false })。引擎随后逐光环盖章
+--   RaidFrame-Icon-DebuffPoison/Disease/Magic/Curse/Bleed 图集，
+--   受限内容（战斗/首领战/挑战/PVP）内外同一机制。
+--   旧版 initializeFrame 空函数什么都不注册 → 帧上无任何可读
+--   类型纹理 → kind 全 unknown → 战斗中 AurasRestricted 兜底判无 →
+--   中毒（毒性钉刺 5416）/疾病/魔法全部哑火。
+WR_PaladinForever_CleanseDispelTex = WR_PaladinForever_CleanseDispelTex
+    or setmetatable({}, { __mode = "k" })
+WR_PaladinForever_CleanseDispelTexRetry = WR_PaladinForever_CleanseDispelTexRetry
+    or setmetatable({}, { __mode = "k" })
+function WR_PaladinForever_CleanseProbeInitFrame(button)
+    if type(button) ~= "table" and type(button) ~= "userdata" then return end
+    if WR_PaladinForever_CleanseDispelTex[button] ~= nil then return end
+    local now = GetTime()
+    local lastFail = WR_PaladinForever_CleanseDispelTexRetry[button]
+    if lastFail ~= nil and (now - lastFail) < 2 then return end
+    local iconStyle = Enum and Enum.CustomAuraButtonDispelTypeTextureStyle
+        and Enum.CustomAuraButtonDispelTypeTextureStyle.Icon
+    if iconStyle == nil then
+        -- 无 Icon 枚举的旧客户端：结构上注册不了，永久记 false 防止每帧重试。
+        WR_PaladinForever_CleanseDispelTex[button] = false
+        return
+    end
+    local okHolder, holder = pcall(CreateFrame, "Frame", nil, button)
+    if not okHolder or holder == nil then
+        WR_PaladinForever_CleanseDispelTexRetry[button] = now
+        return
+    end
+    pcall(function()
+        holder:SetAllPoints(button)
+        if type(holder.EnableMouse) == "function" then holder:EnableMouse(false) end
+    end)
+    local tex = holder:CreateTexture(nil, "OVERLAY")
+    if tex == nil then
+        WR_PaladinForever_CleanseDispelTexRetry[button] = now
+        return
+    end
+    tex:Hide()
+    local okAdd = pcall(button.AddDispelTypeTexture, button, tex, {
+        style = iconStyle,
+        showWhenHarmful = true,
+        showWhenHelpful = false,
+    })
+    if not okAdd then
+        -- 旧引擎别名（EUI 同款回退）：无 style 语义，靠顶点色分类兜底。
+        okAdd = pcall(button.SetAuraBorder, button, tex)
+    end
+    if not okAdd then
+        local okAPI, a1, a2 = pcall(function()
+            return button.AddDispelTypeTexture, button.SetAuraBorder
+        end)
+        if okAPI and (a1 ~= nil or a2 ~= nil) then
+            -- API 在但调用被拒（疑似受限拒绝）：2 秒后重试。
+            WR_PaladinForever_CleanseDispelTexRetry[button] = now
+        else
+            -- 结构上没有注册接口：永久跳过，不浪费每次读取。
+            WR_PaladinForever_CleanseDispelTex[button] = false
+        end
+        return
+    end
+    WR_PaladinForever_CleanseDispelTex[button] = tex
+end
+_G.WR_PaladinForever_CleanseProbeInitFrame = WR_PaladinForever_CleanseProbeInitFrame
+
+local function WR_PaladinForever_CleanseProbeCandidateFilters()
+    -- ★★★ 2026-11-18 四次修复：引擎 includeDispelTypes 候选表只收规范英文
+    --   令牌（EUI 生产同款：Magic/Disease/Poison/Bleed/Curse，
+    --   EllesmereUI_UnitFrames_AuraContainers CANDIDATE_CLASSES 87-91）。
+    --   旧表把 magic/MAGIC/魔法 等变体键也灌给引擎——C 侧候选校验遇到
+    --   非规范键可能整表拒绝 → filtered 组连脱战精确判型都哑火。
+    --   变体键只留给插件侧字符串比较，不再进引擎候选表。
+    return { includeDispelTypes = { Magic = true, Disease = true, Poison = true } }
+end
 
 local function WR_PaladinForever_CleanseProbeEnsure(unit)
     if type(unit) ~= "string" or unit == "" then return nil end
     local probes = WR_PaladinForever_CleanseProbe
     local rec = probes[unit]
-    if rec ~= nil then return rec end
+    if rec ~= nil then
+        -- ★ 2026-11-18：已创建的容器幂等补挂 blanket RAW 组（旧会话容器 / 注册失败重试）。
+        if rec.rawGroup == nil and rec.frame ~= nil then
+            pcall(function()
+                rec.rawGroup = rec.frame:AddAuraGroup("WR_CLEANSE_PROBE_RAW", WR_PaladinForever_CLEANSE_PROBE_FILTER, {
+                    maxFrameCount = 40,
+                    initializeFrame = WR_PaladinForever_CleanseProbeInitFrame,
+                })
+            end)
+        end
+        -- ★ 2026-11-18 三次修复/四次修复：幂等补挂 YOU 组（旧会话容器 / 注册失败
+        --   重试）；形态对齐 EUI 生产组——maxFrameCount=10、无自定义 initializeFrame。
+        if rec.youGroup == nil and rec.frame ~= nil then
+            pcall(function()
+                rec.youGroup = rec.frame:AddAuraGroup("WR_CLEANSE_PROBE_YOU", WR_PaladinForever_CLEANSE_PROBE_YOU_FILTER, {
+                    maxFrameCount = 10,
+                })
+            end)
+        end
+        return rec
+    end
     local retryAt = WR_PaladinForever_CleanseProbeRetryAt[unit]
     if retryAt ~= nil and GetTime() < retryAt then return nil end
     if type(CreateFrame) ~= "function" then return nil end
@@ -3435,20 +4074,78 @@ local function WR_PaladinForever_CleanseProbeEnsure(unit)
         WR_PaladinForever_CleanseProbeRetryAt[unit] = GetTime() + 5
         return nil
     end
+    -- ★★★ 2026-11-18 四次修复：容器必须真的有 AddAuraGroup。旧版不校验——
+    --   Blizzard_AuraContainer 未加载成功/模板缺失时 CreateFrame 造出的壳没有
+    --   内建方法，后续 AddAuraGroup 全部 pcall 吞错 → 四组全空全哑火。
+    local okAddApi, addApiFn = pcall(function() return frame.AddAuraGroup end)
+    if not okAddApi or addApiFn == nil then
+        WR_PaladinForever_CleanseProbeRetryAt[unit] = GetTime() + 5
+        return nil
+    end
     pcall(function()
         frame:SetSize(1, 1)
         frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-        frame:SetAlpha(0.001)
+        -- ★ 2026-11-18 四次修复：不再 SetAlpha(0.001)。引擎 AuraContainer 的
+        --   解析/排版 OnUpdate 是 run-when-visible 模式（AuraKit 1612-1615 实证），
+        --   生产容器从不压 alpha；1×1 尺寸 + EnableMouse(false) 足够隐形。
         if type(frame.EnableMouse) == "function" then frame:EnableMouse(false) end
-        frame:SetUnit(unit)
     end)
+    local group = nil
     local okG = pcall(function()
-        frame:AddAuraGroup("WR_CLEANSE_PROBE", "HARMFUL|RAID", {
+        group = frame:AddAuraGroup("WR_CLEANSE_PROBE", WR_PaladinForever_CLEANSE_PROBE_FILTER, {
             maxFrameCount = 1,
-            initializeFrame = function() end,
+            -- ★ 引擎侧类型过滤：只保留清洁术能驱散的 魔法 / 疾病 / 中毒。
+            --   不用 RAID_PLAYER_DISPELLABLE：它按职业/专精模板判定，
+            --   某些服务端版本会把防护/惩戒的清洁术能力漏掉；按 debuff 类型过滤最稳。
+            candidateFilters = WR_PaladinForever_CleanseProbeCandidateFilters(),
+            -- ★ 四次修复：filtered 组也是纯计数通道，摘除装饰初始化器
+            --   （对齐生产组形态；类型读回只在 RAW 组保留）。
         })
     end)
     if not okG then
+        pcall(function() frame:Hide() end)
+        WR_PaladinForever_CleanseProbeRetryAt[unit] = GetTime() + 5
+        return nil
+    end
+    -- ★★★ 2026-11-18：blanket RAW 组（无候选过滤）。
+    --   受限内容（战斗/首领战/挑战/PVP）里 candidateFilters 读的
+    --   auraData.dispelName 被 REDACTED —— includeDispelTypes 匹配不到任何东西
+    --   （EllesmereUI Nameplates 源码同款实证：「the include-Magic candidate
+    --   matches nothing」）→ filtered 组战斗中恒空。RAW 组不限类型，
+    --   受限内容下引擎照样填充按钮；类型改由 CleanseProbeHasDispellable
+    --   逐帧读引擎驱散边框（诅咒/流血照样排除，读不到不猜）。
+    local rawGroup = nil
+    local okRawGroup = pcall(function()
+        rawGroup = frame:AddAuraGroup("WR_CLEANSE_PROBE_RAW", WR_PaladinForever_CLEANSE_PROBE_FILTER, {
+            maxFrameCount = 40,
+            initializeFrame = WR_PaladinForever_CleanseProbeInitFrame,
+        })
+    end)
+    if not okRawGroup then rawGroup = nil end
+    -- ★★★ 2026-11-18 三次修复①：引擎级「本人可驱散」令牌组（免读回通道）。
+    --   EUI RaidFrames 生产同款 filter：引擎内部按职业/专精判「我本人可驱散」，
+    --   组内有帧即答案；受限内容下由引擎求值，插件零读回。
+    --   ★ 四次修复：对齐生产组形态——无自定义 initializeFrame（存在性通道
+    --   零读回，不需要按钮装饰，EUI TypeIcons byme 组同款），maxFrameCount=10
+    --   对齐引擎 10 按钮批次防指纹下限（AuraKit GROUP_BATCH 同款）。
+    local youGroup = nil
+    local okYouGroup = pcall(function()
+        youGroup = frame:AddAuraGroup("WR_CLEANSE_PROBE_YOU", WR_PaladinForever_CLEANSE_PROBE_YOU_FILTER, {
+            maxFrameCount = 10,
+        })
+    end)
+    if not okYouGroup then youGroup = nil end
+    -- ★★★ 2026-11-17 复查：对齐 EllesmereUI AuraKit 的装配顺序——先加组，
+    -- 再 SetUnit + UpdateAllAuras（AK.CreateContainerShell / Stage 3 同款）。
+    -- 旧顺序 SetUnit 在 AddAuraGroup 之前：AuraContainer 的 UNIT_AURA 数据管线
+    -- 按「当前组列表」装配，之后新增的组可能拿不到该 unit 的光环数据源，
+    -- 组永远为空 → 探测器恒 false → UnitHasDispel 一票否决 → 战斗内+脱战清洁术全部哑火。
+    -- ★★★ 2026-11-18 四次修复：SetUnit 结果必须校验。旧版 pcall 吞错——
+    --   SetUnit 静默失败（受限上下文/时序拒绝）时容器永远绑在引擎
+    --   NO_UNIT("none") 上（EUI RaidFrames NO_UNIT 注释同款），所有组恒空，
+    --   是真机三次修复全哑火的容器级根因候选。失败不缓存 rec，5 秒后重建。
+    local okSetUnit = pcall(frame.SetUnit, frame, unit)
+    if not okSetUnit then
         pcall(function() frame:Hide() end)
         WR_PaladinForever_CleanseProbeRetryAt[unit] = GetTime() + 5
         return nil
@@ -3457,10 +4154,312 @@ local function WR_PaladinForever_CleanseProbeEnsure(unit)
         frame:Show()
         if type(frame.UpdateAllAuras) == "function" then frame:UpdateAllAuras() end
     end)
-    rec = { frame = frame, unit = unit }
+    rec = { frame = frame, unit = unit, group = group, rawGroup = rawGroup, youGroup = youGroup, setUnitOK = true }
     probes[unit] = rec
     WR_PaladinForever_CleanseProbeRetryAt[unit] = nil
     return rec
+end
+
+-- ★ 2026-11-18：从引擎维护的光环按钮读「驱散类型」。受限内容下
+--   dispelName 是 secret，但按钮的驱散边框/类型纹理由引擎（非 taint 侧）
+--   填充 —— 与暴雪 DebuffFrame 的 DebuffBorder 同一机制，读普通字符串
+--   图集名即可安全区分类型。返回 poison/disease/magic/curse/bleed 或 nil。
+-- ★ EUI 实证的标准驱散色（EllesmereUI_UnitFrames 2778-2782），
+--   注册纹理无图集时的顶点色分类兜底（与 EUI 按钮取色同一原理）。
+local WR_PaladinForever_CLEANSE_VERT_COLORS = {
+    magic = { 0.349, 0.475, 1.0 },
+    curse = { 0.636, 0.0, 0.64 },
+    disease = { 0.671, 0.384, 0.098 },
+    poison = { 0.0, 0.706, 0.286 },
+    bleed = { 0.75, 0.15, 0.15 },
+}
+local function WR_PaladinForever_CleanseProbeKindFromVertex(tex)
+    if tex == nil or type(tex.GetVertexColor) ~= "function" then return nil end
+    local okC, r, g, b = pcall(tex.GetVertexColor, tex)
+    if not okC or r == nil or g == nil or b == nil then return nil end
+    if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return nil end
+    if WR_PaladinForever_IsSecretValue(r) or WR_PaladinForever_IsSecretValue(g)
+        or WR_PaladinForever_IsSecretValue(b) then return nil end
+    local best, bestD = nil, 0.15
+    for kind, c in pairs(WR_PaladinForever_CLEANSE_VERT_COLORS) do
+        local d = math.abs(r - c[1]) + math.abs(g - c[2]) + math.abs(b - c[3])
+        if d < bestD then best, bestD = kind, d end
+    end
+    return best
+end
+
+local function WR_PaladinForever_CleanseProbeFrameKind(frame)
+    if frame == nil then return nil end
+    local function kindFromTexture(tex)
+        if tex == nil then return nil end
+        local s = nil
+        local okA, atlas = pcall(function() return tex:GetAtlas() end)
+        if okA and type(atlas) == "string" and not WR_PaladinForever_IsSecretValue(atlas) then
+            local okL, lowered = pcall(string.lower, atlas)
+            if okL and type(lowered) == "string" then s = lowered end
+        end
+        if s == nil then
+            local okT, path = pcall(function() return tex:GetTexture() end)
+            if okT and type(path) == "string" and not WR_PaladinForever_IsSecretValue(path) then
+                local okL2, lowered2 = pcall(string.lower, path)
+                if okL2 and type(lowered2) == "string" then s = lowered2 end
+            end
+        end
+        if s == nil then return nil end
+        if string.find(s, "curse", 1, true) then return "curse" end
+        if string.find(s, "bleed", 1, true) then return "bleed" end
+        if string.find(s, "poison", 1, true) then return "poison" end
+        if string.find(s, "disease", 1, true) then return "disease" end
+        if string.find(s, "magic", 1, true) then return "magic" end
+        return nil
+    end
+    -- ⓪ 2026-11-18 主通道：初始化窗口注册的引擎驱散类型图标纹理。
+    --   EUI AuraKit 实证：引擎逐光环盖章 RaidFrame-Icon-Debuff<Type> 图集，
+    --   受限内容内外同一机制；未注册的按钮上根本没有这个纹理可读——
+    --   旧版 initializeFrame 为空正是战斗中类型全 unknown 的根因。
+    local regTex = WR_PaladinForever_CleanseDispelTex[frame]
+    if regTex ~= nil and regTex ~= false then
+        -- 引擎明确隐藏（且可读）→ 该光环无驱散类型，明确排除。
+        -- IsShown 是引擎驱动的 aspect，受限内容下可能是 secret：只信可读布尔。
+        local okShown, shown = pcall(regTex.IsShown, regTex)
+        if okShown and type(shown) == "boolean"
+            and not WR_PaladinForever_IsSecretValue(shown) and shown == false then
+            return "untyped"
+        end
+        local k0 = kindFromTexture(regTex)
+        if k0 ~= nil then return k0 end
+        local kv = WR_PaladinForever_CleanseProbeKindFromVertex(regTex)
+        if kv ~= nil then return kv end
+        -- 注册纹理读不到类型 → 继续走旧通道（DebuffBorder / GetDispelTypeTexture）。
+    end
+    -- ① DebuffBorder（引擎边框，暴雪 DebuffFrame 同款）
+    local okB, border = pcall(function() return frame.DebuffBorder end)
+    if okB and border ~= nil then
+        local k = kindFromTexture(border)
+        if k ~= nil then return k end
+    end
+    -- ② 引擎 dispel 类型纹理（AuraButton mixin：GetDispelTypeTexture）
+    local okN, n = pcall(function() return frame:GetDispelTypeTextureCount() end)
+    if okN and type(n) == "number" and not WR_PaladinForever_IsSecretValue(n) then
+        for i = 1, n do
+            local okT, tex = pcall(function() return frame:GetDispelTypeTexture(i) end)
+            if okT and tex ~= nil then
+                local k = kindFromTexture(tex)
+                if k ~= nil then return k end
+            end
+        end
+    end
+    return nil
+end
+
+-- ★★★ 2026-11-18 三次修复②：已知 debuff ID 存在性直查（免读回、免容器）。
+--   EUI AuraBuffReminders 同款通道（NON_SECRET_SPELL_IDS）：未上秘密旗的
+--   spellID 在战斗中 GetPlayerAuraBySpellID 照样返回完整 auraData；
+--   「非 nil 即存在」——受限内容读不到字段不改变「这个 debuff 在身上」。
+--   秘密旗 ID（如 Devotion Aura 465 的 ContextuallySecret）返回 nil：
+--   nil 一律当未知（返回 nil），绝不据此判无。仅 player 单位可查。
+function WR_PaladinForever_PlayerAuraIDHasDispellable(unit)
+    if unit ~= "player" then return nil end
+    if type(C_UnitAuras) ~= "table" then return nil end
+    -- 用 ~= nil 而不是 type=="function"：离线夹具/部分客户端把 C API 暴露成
+    -- 可调用 userdata，type() 不一定是 "function"（ProbeDispellableByFilter 同款约定）。
+    local byIdFn = C_UnitAuras.GetPlayerAuraBySpellID
+    if byIdFn == nil then return nil end
+    for sid, kind in pairs(WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS) do
+        if kind == "poison" or kind == "disease" or kind == "magic" then
+            local ok, aura = pcall(byIdFn, sid)
+            if ok and aura ~= nil then return true end
+        end
+    end
+    return nil
+end
+_G.WR_PaladinForever_PlayerAuraIDHasDispellable = WR_PaladinForever_PlayerAuraIDHasDispellable
+
+-- ★★★ 2026-11-18 四次修复④：C_TooltipInfo 驱散提示扫描（免读回、免容器）。
+--   实证：!Pig Tooltip.lua 321（TooltipDataProcessor.UnitAura 读 data.id）+
+--   PartyMemberFrame.lua 366（GameTooltip:SetUnitDebuff(unit, j)）——本客户端
+--   驱散提示数据流可用，用户截图「法术ID: 744 / 中毒 / 剩余23秒」正是该数据流
+--   （引擎 C 侧组装，不受 DenyTaintedAccessWhenAurasAreSecret 限制）。
+--   EUI 明令禁止从 Lua 创建扫描 GameTooltipTemplate 帧
+--   （EllesmereUIBlizzardSkin 126: reference_tooltip_template_taint），
+--   因此只走 C_TooltipInfo（GetUnitDebuffByIndex / GetUnitDebuff 兼容序）。
+--   全部 pcall + secret 过滤，只认肯定证据：读不到一律 nil（未知），绝不判无。
+--   0.5 秒节流；调用被拒记 2.5 秒冷却（受限拒绝不会在半秒内解除）。
+WR_PaladinForever_CleanseTooltipScanAt = 0
+WR_PaladinForever_CleanseTooltipScanCache = nil
+WR_PaladinForever_CleanseTooltipScanDenied = false
+WR_PaladinForever_CleanseTooltipScanRetryAt = 0
+function WR_PaladinForever_CleanseTooltipScan(unit)
+    if unit ~= "player" then return nil end
+    local now = GetTime()
+    if now - WR_PaladinForever_CleanseTooltipScanAt < 0.5 then
+        return WR_PaladinForever_CleanseTooltipScanCache
+    end
+    WR_PaladinForever_CleanseTooltipScanAt = now
+    if WR_PaladinForever_CleanseTooltipScanDenied then
+        if now < WR_PaladinForever_CleanseTooltipScanRetryAt then
+            return WR_PaladinForever_CleanseTooltipScanCache
+        end
+        WR_PaladinForever_CleanseTooltipScanDenied = false
+    end
+    WR_PaladinForever_CleanseTooltipScanCache = nil
+    local C_TI = C_TooltipInfo
+    if type(C_TI) ~= "table" then return nil end
+    local scanFn = C_TI.GetUnitDebuffByIndex or C_TI.GetUnitDebuff
+    if scanFn == nil then return nil end
+    for i = 1, 20 do
+        local ok, data = pcall(scanFn, unit, i)
+        if not ok then
+            -- 调用被拒（受限拒绝/实现差异）：本轮未知，2.5 秒内不再打扰引擎。
+            WR_PaladinForever_CleanseTooltipScanDenied = true
+            WR_PaladinForever_CleanseTooltipScanRetryAt = now + 2.5
+            return nil
+        end
+        if data == nil then break end
+        -- ① 顶层 id（!Pig 同款字段）→ 已知白名单
+        local okId, sid = pcall(function() return data.id end)
+        if okId and type(sid) == "number" and not WR_PaladinForever_IsSecretValue(sid) then
+            local kind = WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS[sid]
+            if kind == "poison" or kind == "disease" or kind == "magic" then
+                WR_PaladinForever_CleanseTooltipScanCache = true
+                return true
+            end
+        end
+        -- ② 行文本：引擎自绘驱散类型行「中毒/疾病/魔法」（截图实证行形态）
+        local okLines, lines = pcall(function() return data.lines end)
+        if okLines and type(lines) == "table" then
+            local okN, n = pcall(function() return #lines end)
+            if okN and type(n) == "number" and not WR_PaladinForever_IsSecretValue(n) then
+                for j = 1, n do
+                    local okL, left = pcall(function() return lines[j].leftText end)
+                    if okL and type(left) == "string" and not WR_PaladinForever_IsSecretValue(left)
+                        and (left == "中毒" or left == "疾病" or left == "魔法") then
+                        WR_PaladinForever_CleanseTooltipScanCache = true
+                        return true
+                    end
+                    local okR, right = pcall(function() return lines[j].rightText end)
+                    if okR and type(right) == "string" and not WR_PaladinForever_IsSecretValue(right)
+                        and (right == "中毒" or right == "疾病" or right == "魔法") then
+                        WR_PaladinForever_CleanseTooltipScanCache = true
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+_G.WR_PaladinForever_CleanseTooltipScan = WR_PaladinForever_CleanseTooltipScan
+
+-- ============================================================
+-- ★★★ 2026-11-18 五次修复：debuff spellID → 驱散类型 静态分类通道
+--   受限内容（战斗/首领战/挑战/PVP）里 auraData.dispelName 是 secret，
+--   引擎探测容器也可能因为装配时序/第三方 UI 而拿不到纹理，导致
+--   「自己/目标/队友身上明明是中毒/疾病/魔法，清洁术却永不点亮」。
+--   但 auraData.spellId 是普通数字（本文件 ID 直查通道已多次实锤），
+--   而「某法术属于中毒/疾病/魔法/诅咒/流血」是静态数据 —— 用
+--   C_TooltipInfo.GetSpellByID 读一次提示行即可判定，不吃单位光环权限、
+--   不看战斗状态、对 player/target/party/mouseover 全部通用。
+--   只认肯定证据：读不到 → nil（未知），绝不据此判「没有」。
+-- ============================================================
+WR_PaladinForever_DispelKindByIDCache = WR_PaladinForever_DispelKindByIDCache or {}
+WR_PaladinForever_DispelKindByIDMissAt = WR_PaladinForever_DispelKindByIDMissAt or {}
+WR_PaladinForever_DispelKindByIDCount = WR_PaladinForever_DispelKindByIDCount or 0
+
+local function WR_PaladinForever_KindFromSpellTooltip(data)
+    if type(data) ~= "table" then return nil end
+    local okL, lines = pcall(function() return data.lines end)
+    if not okL or type(lines) ~= "table" then return nil end
+    local okN, n = pcall(function() return #lines end)
+    if not okN or type(n) ~= "number" or WR_PaladinForever_IsSecretValue(n) then return nil end
+    for j = 1, n do
+        local line = lines[j]
+        if type(line) == "table" then
+            local okA, left = pcall(function() return line.leftText end)
+            if okA and type(left) == "string" then
+                local k = WR_PaladinForever_NormalizeDispelType(left)
+                if k ~= nil then return k end
+            end
+            local okB, right = pcall(function() return line.rightText end)
+            if okB and type(right) == "string" then
+                local k = WR_PaladinForever_NormalizeDispelType(right)
+                if k ~= nil then return k end
+            end
+        end
+    end
+    return nil
+end
+
+-- 返回 "poison"/"disease"/"magic"/"curse"/"bleed" 或 nil（未知/无驱散类型）
+function WR_PaladinForever_DispelKindBySpellID(spellId)
+    local sid = spellId
+    if type(sid) ~= "number" then
+        local okN, n = pcall(tonumber, sid)
+        if not okN or type(n) ~= "number" then return nil end
+        sid = n
+    end
+    local cache = WR_PaladinForever_DispelKindByIDCache
+    local hit = cache[sid]
+    if hit ~= nil then return hit end
+
+    -- ① 本文件已按截图/实测确认的 debuff ID（不依赖任何 API）
+    local known = WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS[sid]
+    if known ~= nil then
+        cache[sid] = known
+        return known
+    end
+
+    -- ② 静态法术提示：失败/被拒不缓存，10 秒后重试（避免每 tick 砸引擎）
+    local missAt = WR_PaladinForever_DispelKindByIDMissAt
+    local now = GetTime()
+    if (missAt[sid] or 0) + 10 > now then return nil end
+    local TI = C_TooltipInfo
+    if TI ~= nil then
+        local fn = TI.GetSpellByID
+        if fn ~= nil then
+            local ok, data = pcall(fn, sid)
+            if ok and data ~= nil then
+                local kind = WR_PaladinForever_KindFromSpellTooltip(data)
+                if kind ~= nil then
+                    if WR_PaladinForever_DispelKindByIDCount < 600 then
+                        cache[sid] = kind
+                        WR_PaladinForever_DispelKindByIDCount = WR_PaladinForever_DispelKindByIDCount + 1
+                    end
+                    return kind
+                end
+            end
+        end
+    end
+    missAt[sid] = now
+    return nil
+end
+
+-- 逐条 aura 的 spellId 分类（任意单位通用；完全不读 dispelName/dispelType）
+--   true  = 明确存在可驱散（毒/病/魔法）
+--   false = 全部读得懂且都不需要清洁术（含只有诅咒/流血）
+--   nil   = 未知（API 缺失、spellId secret、类型读不到）
+function WR_PaladinForever_UnitAuraIDHasDispellable(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    if type(C_UnitAuras) ~= "table" then return nil end
+    local byIdx = C_UnitAuras.GetAuraDataByIndex
+    if byIdx == nil then return nil end
+    local sawAny, sawUnknown = false, false
+    for i = 1, 40 do
+        local ok, data = pcall(byIdx, unit, i, "HARMFUL")
+        if not ok then return nil end
+        if data == nil then break end
+        sawAny = true
+        local okS, sid = pcall(function() return data.spellId end)
+        if okS and type(sid) == "number" and not WR_PaladinForever_IsSecretValue(sid) then
+            local kind = WR_PaladinForever_DispelKindBySpellID(sid)
+            if kind == "poison" or kind == "disease" or kind == "magic" then return true end
+            if kind ~= "curse" and kind ~= "bleed" then sawUnknown = true end
+        else
+            sawUnknown = true
+        end
+    end
+    if sawAny and not sawUnknown then return false end
+    return nil
 end
 
 local function WR_PaladinForever_CleanseProbeHasDispellable(unit)
@@ -3468,14 +4467,117 @@ local function WR_PaladinForever_CleanseProbeHasDispellable(unit)
     if rec == nil then return nil end
     local frames
     local ok = pcall(function()
-        local group = rec.frame:GetAuraGroup("WR_CLEANSE_PROBE")
+        local group = rec.group
+        if group == nil then
+            group = rec.frame:GetAuraGroup("WR_CLEANSE_PROBE")
+        end
         if group == nil then return nil end
         frames = group:GetFramesByIndex()
     end)
     if not ok or type(frames) ~= "table" then return nil end
-    local count = #frames
-    if type(count) ~= "number" then return nil end
+    -- frames 本身可能是引擎安全表；#frames 也可能被 secret 包装，全部 pcall + secret 过滤。
+    local okCount, count = pcall(function() return #frames end)
+    if not okCount or type(count) ~= "number" or WR_PaladinForever_IsSecretValue(count) then return nil end
+    -- ★ 2026-11-17：快照给 /FH_QJS_DEBUG 诊断用（组是否真的在收 frame）。
+    --   ★ 四次修复：附 setUnitOK（容器绑定是否成功）与 ttHit（提示扫描缓存）。
+    _G.WR_PaladinForever_CleanseProbeDebug = _G.WR_PaladinForever_CleanseProbeDebug or {}
+    _G.WR_PaladinForever_CleanseProbeDebug[unit] = { at = GetTime(), frames = count, setUnitOK = rec.setUnitOK, ttHit = WR_PaladinForever_CleanseTooltipScanCache }
     if count > 0 then return true end
+    -- ★★★ 2026-11-18 三次修复①：YOU 组命中 = 引擎判定「有我本人可驱散 debuff」
+    --   （免读回：组内有帧就是答案，类型字段一个都不读）。
+    local youFrames
+    local okYou = pcall(function()
+        local yg = rec.youGroup
+        if yg == nil then
+            yg = rec.frame:GetAuraGroup("WR_CLEANSE_PROBE_YOU")
+        end
+        if yg == nil then return nil end
+        youFrames = yg:GetFramesByIndex()
+    end)
+    if okYou and type(youFrames) == "table" then
+        local okYouCount, youCount = pcall(function() return #youFrames end)
+        if okYouCount and type(youCount) == "number" and not WR_PaladinForever_IsSecretValue(youCount) then
+            _G.WR_PaladinForever_CleanseProbeDebug[unit].youFrames = youCount
+            if youCount > 0 then return true end
+        end
+    end
+    -- ★★★ 三次修复②：已知 ID 存在性兜底（主调用点在 UnitHasDispel 链，容器内再兜一次）。
+    local okIdHit, idHit = pcall(WR_PaladinForever_PlayerAuraIDHasDispellable, unit)
+    if okIdHit then
+        _G.WR_PaladinForever_CleanseProbeDebug[unit].idHit = idHit
+        if idHit == true then return true end
+    end
+
+    -- ★★★ 2026-11-18：filtered 组为空 ≠ 「没有可驱散 debuff」。
+    --   受限内容（战斗/首领战/挑战/PVP）里 candidateFilters 读的
+    --   auraData.dispelName 被 REDACTED —— includeDispelTypes 匹配不到任何东西
+    --   （EllesmereUI Nameplates 源码同款实证）→ filtered 组战斗中恒空。
+    --   改读 blanket RAW 组（无候选过滤，受限内容下引擎照样填充按钮），
+    --   类型从引擎维护的按钮驱散边框逐帧读取：poison/disease/magic → true；
+    --   curse/bleed → 明确排除（诅咒绝不错驱）；读不到 → unknown 交回后续
+    --   通道，绝不猜可驱散。
+    local rawFrames
+    local okRaw = pcall(function()
+        local rawGroup = rec.rawGroup
+        if rawGroup == nil then
+            rawGroup = rec.frame:GetAuraGroup("WR_CLEANSE_PROBE_RAW")
+        end
+        if rawGroup == nil then return nil end
+        rawFrames = rawGroup:GetFramesByIndex()
+    end)
+    if okRaw and type(rawFrames) == "table" then
+        local okRawCount, rawCount = pcall(function() return #rawFrames end)
+        if okRawCount and type(rawCount) == "number" and not WR_PaladinForever_IsSecretValue(rawCount) then
+            _G.WR_PaladinForever_CleanseProbeDebug[unit].rawFrames = rawCount
+            if rawCount > 0 then
+                local sawKnownNon = false
+                local sawUnknown = false
+                local kindsSeen = {}
+                for i = 1, rawCount do
+                    local okF, frame = pcall(function() return rawFrames[i] end)
+                    if okF and frame ~= nil then
+                        local k = WR_PaladinForever_CleanseProbeFrameKind(frame)
+                        kindsSeen[#kindsSeen + 1] = k or "?"
+                        if k == "poison" or k == "disease" or k == "magic" then
+                            _G.WR_PaladinForever_CleanseProbeDebug[unit].rawKinds = table.concat(kindsSeen, ",")
+                            return true
+                        end
+                        -- ★ untyped（引擎明确隐藏注册图标）与 curse/bleed 同列明确排除。
+                        if k == "curse" or k == "bleed" or k == "untyped" then
+                            sawKnownNon = true
+                        else
+                            sawUnknown = true
+                        end
+                    else
+                        kindsSeen[#kindsSeen + 1] = "err"
+                        sawUnknown = true
+                    end
+                end
+                _G.WR_PaladinForever_CleanseProbeDebug[unit].rawKinds = table.concat(kindsSeen, ",")
+                -- RAW 组有数据：全部明确 curse/bleed → 明确判无；含 unknown → 未知。
+                if sawKnownNon and not sawUnknown then return false end
+                return nil
+            end
+        end
+    end
+
+    -- ★ 2026-11-18 自愈：组存在但为空时，每 1 秒强制 UpdateAllAuras 一次。
+    --   引擎按 UNIT_AURA 增量维护组；若容器创建时（登录/切图时序）漏过一次
+    --   事件，组可能永久停在空状态 → 疾病/魔法/中毒永远探不到。定期强制
+    --   重解析自愈，代价可控（1 秒一次，且只在空组时触发）。
+    WR_PaladinForever_CleanseProbeRefreshAt = WR_PaladinForever_CleanseProbeRefreshAt or {}
+    local nowS = GetTime()
+    if (WR_PaladinForever_CleanseProbeRefreshAt[unit] or 0) + 1 < nowS then
+        WR_PaladinForever_CleanseProbeRefreshAt[unit] = nowS
+        if type(rec.frame.UpdateAllAuras) == "function" then
+            pcall(function() rec.frame:UpdateAllAuras() end)
+        end
+    end
+    -- 两组都拿不到有效数据 → 未知（nil），交回后续通道（DebuffFrame /
+    -- 多API扫描 / 严格探针），受限内容下由 AurasRestricted 兜底判无。
+    -- 旧版此处 return false 的依据（filtered 组空 = 引擎明确答无）只在
+    -- 非受限内容成立；受限内容里 filtered 组恒空，会把战斗中的
+    -- 疾病/魔法/中毒全部压成假无 —— 正是「战斗中清洁术自身不驱散」的根因。
     return nil
 end
 
@@ -3504,6 +4606,27 @@ function WR_PaladinForever_UnitHasDispel(unit)
     -- ★★★ 2026-11-17：引擎级「玩家本人可驱散」探测器（见上方函数说明）。
     local engineProbe = WR_PaladinForever_CleanseProbeHasDispellable(unit)
     if engineProbe == true then return true end
+    -- ★★★ 2026-11-18 三次修复②：已知 debuff ID 存在性直查（不依赖探测容器，
+    --   容器装配失败/受限战斗下也能命中；非 nil 即存在，nil 当未知绝不判无）。
+    if unit == "player" then
+        local okID, idHit = pcall(WR_PaladinForever_PlayerAuraIDHasDispellable, unit)
+        if okID and idHit == true then return true end
+        -- ★★★ 2026-11-18 四次修复④：C_TooltipInfo 提示扫描（免读回、免容器）。
+        local okTT, ttHit = pcall(WR_PaladinForever_CleanseTooltipScan, unit)
+        if okTT and ttHit == true then return true end
+    end
+    -- ★★★ 2026-11-18 五次修复：全单位 spellID 静态分类（不依赖容器/类型字段）。
+    --   只要 auraData.spellId 可读，就能靠静态提示判定中毒/疾病/魔法；
+    --   target/party/mouseover 与 player 走同一条通道，战斗中同样有效。
+    local okSID, sidHit = pcall(WR_PaladinForever_UnitAuraIDHasDispellable, unit)
+    if okSID and sidHit == true then return true end
+    -- ★★★ 2026-11-17 复查：探测器 false 不再一票否决。
+    --   探测容器为空有两种含义：①引擎明确说「没有可驱散 debuff」；
+    --   ②容器/组装配失败（SetUnit 顺序、UNIT_AURA 注册被挡等），组恒空。
+    --   插件侧区分不了这两种情形，而②会让战斗内+脱战的清洁术全部哑火
+    --   （用户实测复现：战斗中脱战都不驱散）。false 一律放行到后续通道；
+    --   诅咒误报由各通道自己的类型判定（图集探针/严格探针）防住，不靠本层。
+
 
     -- ★★★ 2026-11-15：战斗内自己身上是否有可驱散 debuff 由
     --   WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame 判定：
@@ -3584,6 +4707,86 @@ function WR_PaladinForever_UnitHasDispel(unit)
         if ok and type(remain) == "number" and remain > 0 then return true end
     end
     return false
+end
+
+-- ★★★ 2026-11-17：清洁术诊断（/FH_QJS_DEBUG）。
+--   把每个探测通道在当前状态下的判定逐条打到聊天框，
+--   用于定位「清洁术不亮」卡在哪一层（面板配置 / 探测器 / 缓存 / secret）。
+-- 诊断用：列出当前 HARMFUL 光环的 spellID 与静态分类，便于确认到底哪条读不到
+function WR_PaladinForever_DebugAuraKinds(unit)
+    if type(unit) ~= "string" or unit == "" then return "n/a" end
+    if type(C_UnitAuras) ~= "table" or C_UnitAuras.GetAuraDataByIndex == nil then return "noAPI" end
+    local out = {}
+    for i = 1, 12 do
+        local ok, data = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL")
+        if not ok or data == nil then break end
+        local okS, sid = pcall(function() return data.spellId end)
+        if okS and type(sid) == "number" and not WR_PaladinForever_IsSecretValue(sid) then
+            local kind = WR_PaladinForever_DispelKindBySpellID(sid)
+            out[#out + 1] = tostring(sid) .. "=" .. tostring(kind or "?")
+        else
+            out[#out + 1] = "?=secret"
+        end
+    end
+    if #out == 0 then return "无" end
+    return table.concat(out, " ")
+end
+
+function WR_PaladinForever_CleanseDebugReport()
+    local function report(unit)
+        local parts = {}
+        local okE, exists = pcall(UnitExists, unit)
+        parts[#parts + 1] = "存在=" .. tostring(okE and exists or false)
+        local restricted = false
+        if type(WR_PaladinForever_AurasRestricted) == "function" then
+            local okR, v = pcall(WR_PaladinForever_AurasRestricted)
+            restricted = okR and v == true
+        end
+        parts[#parts + 1] = "secret=" .. tostring(restricted)
+        local probeRec = type(WR_PaladinForever_CleanseProbe) == "table" and WR_PaladinForever_CleanseProbe[unit] or nil
+        parts[#parts + 1] = "probe容器=" .. tostring(probeRec ~= nil)
+        local dbg = _G.WR_PaladinForever_CleanseProbeDebug and _G.WR_PaladinForever_CleanseProbeDebug[unit] or nil
+        if dbg ~= nil then
+            parts[#parts + 1] = "probeFrames=" .. tostring(dbg.frames)
+            parts[#parts + 1] = "probeRaw=" .. tostring(dbg.rawFrames)
+            if dbg.rawKinds ~= nil then
+                parts[#parts + 1] = "rawKinds=" .. tostring(dbg.rawKinds)
+            end
+            if dbg.youFrames ~= nil then
+                parts[#parts + 1] = "youFrames=" .. tostring(dbg.youFrames)
+            end
+        end
+        local okP, probeHit = pcall(WR_PaladinForever_CleanseProbeHasDispellable, unit)
+        parts[#parts + 1] = "probe判定=" .. tostring(okP and probeHit or "err")
+        if unit == "player" and type(WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame) == "function" then
+            local okUI, ui = pcall(WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame)
+            parts[#parts + 1] = "暴雪DebuffFrame=" .. tostring(okUI and ui or "err")
+        end
+        local okD, directHit = pcall(WR_PaladinForever_ScanUnitDebuffTypes, unit)
+        parts[#parts + 1] = "多API扫描=" .. tostring(okD and directHit or "err")
+        local okSID, sidHit = pcall(WR_PaladinForever_UnitAuraIDHasDispellable, unit)
+        parts[#parts + 1] = "ID分类=" .. tostring(okSID and sidHit or "err")
+        parts[#parts + 1] = "aura列表=" .. WR_PaladinForever_DebugAuraKinds(unit)
+        if unit == "player" and type(WR_PaladinForever_PlayerAuraIDHasDispellable) == "function" then
+            local okI, idHit = pcall(WR_PaladinForever_PlayerAuraIDHasDispellable, unit)
+            parts[#parts + 1] = "ID直查=" .. tostring(okI and idHit or "err")
+        end
+        local okF, filterHit = pcall(WR_PaladinForever_ProbeDispellableByFilter, unit)
+        parts[#parts + 1] = "严格探针=" .. tostring(okF and filterHit or "err")
+        parts[#parts + 1] = "最终=" .. tostring(WR_PaladinForever_UnitHasDispel(unit))
+        print("|cff00adf0[清洁术诊断]|r " .. unit .. ":  " .. table.concat(parts, "  "))
+    end
+    report("player")
+    report("target")
+    local mode = tonumber(PigSet and PigSet.FH_QJS) or 5
+    print("|cff00adf0[清洁术诊断]|r 面板: 下拉FH_QJS=" .. mode
+        .. "  自己=" .. tostring(PigSet and PigSet.FH_QJS_Player)
+        .. "  目标=" .. tostring(PigSet and PigSet.FH_QJS_Target))
+    print("|cff00adf0[清洁术诊断]|r 下拉档位: 1=常规 2=优先 3=目标 4=指向 5=不使用；「自己/目标」复选框独立生效（当前档位5时只走复选框）")
+end
+SLASH_FHQJSDBG1 = "/FH_QJS_DEBUG"
+SlashCmdList["FH_QJS_DEBUG"] = function()
+    pcall(WR_PaladinForever_CleanseDebugReport)
 end
 
 function WR_PaladinForever_HasDispel(unit)

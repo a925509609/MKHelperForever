@@ -35,6 +35,20 @@ function WR_FocusHasPriorityDebuff()
     return false
 end
 
+-- ★ 2026-11-17 奶骑加血：任意单位的优先治疗 Debuff 判定。
+--   与 WR_FocusHasPriorityDebuff 同源（PriorityHealthDebuff + HighestPriorityDebuff），
+--   供奶骑在「自动选目标」时对非焦点单位做同样的强刷优先级判定。
+function WR_UnitHasPriorityHealthDebuff(unit)
+    if type(unit) ~= "string" or unit == "" then return false end
+    if type(UnitExists) == "function" and not UnitExists(unit) then return false end
+    if type(WR_GetUnitDebuffTime) ~= "function" then return false end
+    local okH, high = pcall(WR_GetUnitDebuffTime, unit, HighestPriorityDebuff)
+    if okH and type(high) == "number" and high > 0 then return true end
+    local okP, prio = pcall(WR_GetUnitDebuffTime, unit, PriorityHealthDebuff)
+    if okP and type(prio) == "number" and prio > 0 then return true end
+    return false
+end
+
 -- ============================================================
 -- ★ 单位权重计算（用于智能治疗）
 -- ============================================================

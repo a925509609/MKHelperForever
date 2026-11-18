@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PRIEST" then return end
 -- ============================================================
 -- Priest Forever · Shadow 专精循环
 -- 共享 helper 见 Priest_Forever.lua（公共件）

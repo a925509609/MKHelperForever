@@ -193,8 +193,9 @@ local function CreateClassesMacro()
         "/stopmacro [@focus,noexists] [@focus,dead] [@focus,nohelp]\n" ..
         "/cast [@focus,help] 强效王者祝福") -- 107
     WR_CreateMacro("ALT-SHIFT-F8", "/cast 智慧圣印") -- 108
-    WR_CreateMacro("ALT-SHIFT-F12", "/cast [@focus] 圣光闪现") -- 109
-    WR_CreateMacro("ALT-SHIFT-F10", "/cast [@focus] 圣光术") -- 110
+    -- ★ 2026-11-17 奶骑加血：焦点无效（无焦点/死亡/敌对）时落回自己，避免无焦点永远不亮
+    WR_CreateMacro("ALT-SHIFT-F12", "/cast [@focus,help,nodead] 圣光闪现; 圣光闪现") -- 109
+    WR_CreateMacro("ALT-SHIFT-F10", "/cast [@focus,help,nodead] 圣光术; 圣光术") -- 110
     WR_CreateMacro("ALT-CTRL-SHIFT--", "/cast [@focus] 圣洁护盾") -- 111
     WR_CreateMacro("CTRL-SHIFT--", "/cast [@focus,help,nodead] 圣光誓约") -- 112（神圣骑：圣光誓约；旧圣光道标本服不存在）
     WR_CreateMacro("ALT-CTRL--", "/cast [@focus] 神圣震击") -- 113
@@ -254,7 +255,7 @@ local function CreateClassesMacro()
     WR_CreateMacro("CTRL-SHIFT-,", WR_PaladinFocusText("target", "target")) -- 147
     WR_CreateMacro("ALT-CTRL-,", "/focus [@mouseover,exists,nodead,nocombat]") -- 148
     WR_CreateMacro("ALT-SHIFT-,", "/cast [@focus] 救赎") -- 149
-    WR_CreateMacro("CTRL-,", "/cast [@focus] 圣疗术") -- 150
+    WR_CreateMacro("CTRL-,", "/cast [@focus,help,nodead] 圣疗术; 圣疗术") -- 150
     WR_CreateMacro("SHIFT-,", "/focus [@raid1target,exists,nodead,nocombat]") -- 151
     WR_CreateMacro("ALT-,", "/focus [@raid2target,exists,nodead,nocombat]") -- 152
     WR_CreateMacro("ALT-CTRL-SHIFT-.", "/focus [@raid3target,exists,nodead,nocombat]") -- 153

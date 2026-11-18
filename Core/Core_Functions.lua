@@ -520,13 +520,14 @@ function WR_UpdateFrameState()
     WR_FrameState.playerMP = WR_SafeUnitPower("player", Enum.PowerType.Mana)
     WR_FrameState.playerMPMax = WR_SafeUnitPowerMax("player", Enum.PowerType.Mana)
     WR_FrameState.playerMoving = WR_PlayerMove()
-    -- 施法名 / 施法结束时间在 12.x 亦可能为 secret，先检测再比较
-    local castName = UnitCastingInfo("player")
+    -- ★ 2026-11-17 性能：UnitCastingInfo / UnitChannelInfo 各只调用一次（原各 2 次），
+    --   并把结束时间写进 WR_FrameState 供 WR_GetGCD 复用，省掉每次 GCD 查询的 pcall。
+    local castName, _, _, _, castEnd = UnitCastingInfo("player")
     WR_FrameState.playerIsCasting = WR_IsSecretValue(castName) or castName ~= nil
-    local channelName = UnitChannelInfo("player")
+    WR_FrameState.playerCastingEnd = WR_SafeNumber(castEnd, 0)
+    local channelName, _, _, _, channelEnd = UnitChannelInfo("player")
     WR_FrameState.playerIsChanneling = WR_IsSecretValue(channelName) or channelName ~= nil
-    WR_FrameState.playerCastingEnd = WR_SafeNumber((select(5, UnitCastingInfo("player"))), 0)
-    WR_FrameState.playerChannelEnd = WR_SafeNumber((select(5, UnitChannelInfo("player"))), 0)
+    WR_FrameState.playerChannelEnd = WR_SafeNumber(channelEnd, 0)
     WR_FrameState.playerInCombat = UnitAffectingCombat("player")
     WR_FrameState.playerClass = UnitClassBase("player")
     WR_FrameState.playerGUID = UnitGUID("player")
@@ -3220,22 +3221,45 @@ end
 -- ============================================================
 -- ★ 单位距离获取
 -- ============================================================
+-- ★ 2026-11-17 性能：距离结果按 50ms 窗口缓存。LibRangeCheck 每次 GetRange 都会做
+--   GUID 查表与多点采样，职业循环同一 tick 内会对同一目标反复判射程；缓存后同 tick
+--   同一单位只测一次，跨 tick 自动过期，移动/切换目标仍能及时反映。
+local WR_UnitRangeCache = {}
+local WR_UnitRangeCacheExpire = 0
 function WR_UnitRange(Unit)
     if not Unit or not UnitExists(Unit) then return 999 end
+    local now = GetTime()
+    if now > WR_UnitRangeCacheExpire then
+        wipe(WR_UnitRangeCache)
+        WR_UnitRangeCacheExpire = now + 0.05
+    end
+    local cacheKey = Unit
+    if type(cacheKey) ~= "string" and type(cacheKey) ~= "number" then
+        cacheKey = tostring(cacheKey)
+    end
+    local cached = WR_UnitRangeCache[cacheKey]
+    if cached ~= nil then return cached end
+
     -- ★ 无限适配：LibRangeCheck 内部用 UnitGUID(unit) 拼 cacheKey 并作为表键；
     --   战斗中 GUID 是 secret string。库内已做「secret/空 GUID 时跳过缓存」的处理。
     --   这里再做 pcall + 数值收敛兜底。
     local guid = UnitGUID(Unit)
-    if guid == nil then return 999 end
+    if guid == nil then
+        WR_UnitRangeCache[cacheKey] = 999
+        return 999
+    end
     if not WR_LibRangeCheck3 or type(WR_LibRangeCheck3.GetRange) ~= "function" then
+        WR_UnitRangeCache[cacheKey] = 999
         return 999
     end
     local ok, _, maxRange = pcall(WR_LibRangeCheck3.GetRange, WR_LibRangeCheck3, Unit)
-    if not ok then return 999 end
-    maxRange = WR_SafeNumber(maxRange, nil)
-    if maxRange == nil then
+    if not ok then
+        WR_UnitRangeCache[cacheKey] = 999
         return 999
     end
+    maxRange = WR_SafeNumber(maxRange, nil)
+    if maxRange == nil then maxRange = 999 end
+    WR_UnitRangeCache[cacheKey] = maxRange
     return maxRange
 end
 
@@ -3412,30 +3436,53 @@ end
 -- ============================================================
 -- ★ GCD/施法剩余时间获取
 -- ============================================================
+-- ★ 2026-11-17 性能：GCD/冷却结果按 50ms 窗口缓存。
+--   主循环 10Hz（0.1s/tick），同一 tick 内同一技能只算一次；
+--   不同技能各自缓存，不会互相串值。施法结束时间复用 WR_FrameState，
+--   不再每次 WR_GetGCD 都 pcall 一次 UnitCastingInfo。
+local WR_GCDCache = {}
+local WR_GCDCacheExpire = 0
 function WR_GetGCD(SpellName)
+    local now = GetTime()
+    if now > WR_GCDCacheExpire then
+        wipe(WR_GCDCache)
+        WR_GCDCacheExpire = now + 0.05
+    end
+    local cacheKey = SpellName
+    if type(cacheKey) ~= "string" and type(cacheKey) ~= "number" then
+        cacheKey = tostring(cacheKey)
+    end
+    local cached = WR_GCDCache[cacheKey]
+    if cached ~= nil then return cached end
+
     local SpellCD = 0
     -- ★ 无限适配：冷却信息在战斗中可能是 secret number，先收敛为普通数字
     local start, duration = WR_SpellCooldownInfo(SpellName)
     start = WR_SafeNumber(start, 0)
     duration = WR_SafeNumber(duration, 0)
     if start and duration then
-        if start + duration > GetTime() then
-            SpellCD = start + duration - GetTime()
+        if start + duration > now then
+            SpellCD = start + duration - now
         end
     end
 
-    local okCast, _, _, _, _, endTimeMS = pcall(UnitCastingInfo, "player")
-    if okCast then
-        endTimeMS = WR_SafeNumber(endTimeMS, nil)
-    else
-        endTimeMS = nil
-    end
-    if endTimeMS ~= nil then
-        local remain = endTimeMS / 1000 - GetTime()
-        if remain > SpellCD then
-            return remain
+    -- 优先读 WR_UpdateFrameState 已写入的施法结束时间；尚未初始化时再直接查询。
+    local endTimeMS = WR_FrameState.playerCastingEnd
+    if endTimeMS == nil then
+        local okCast, _, _, _, _, v = pcall(UnitCastingInfo, "player")
+        if okCast then
+            endTimeMS = WR_SafeNumber(v, nil)
+        else
+            endTimeMS = nil
         end
     end
+    if endTimeMS ~= nil then
+        local remain = endTimeMS / 1000 - now
+        if remain > SpellCD then
+            SpellCD = remain
+        end
+    end
+    WR_GCDCache[cacheKey] = SpellCD
     return SpellCD
 end
 
@@ -3675,16 +3722,33 @@ end
 --   「蓝不够还亮色块」在循环侧就被挡住；色块侧还有 WR_ColorFrame_ShowSkill
 --   的总闸 + 每 tick 清扫兜底（见 Core/SoD_Runes.lua）。
 -- ============================================================
+-- ★ 2026-11-17 性能：可用性结果按 50ms 窗口缓存。
+--   键包含技能名 + GlobalCooldown 标志 + 当前 GCD/施法速度阈值，保证同一 tick
+--   同一语境下结果一致；跨 tick 自动过期，不会缓存过期的冷却/资源状态。
+local WR_SpellUsableCache = {}
+local WR_SpellUsableCacheExpire = 0
 function WR_SpellUsable(Spell, GlobalCooldown)
+    local now = GetTime()
+    if now > WR_SpellUsableCacheExpire then
+        wipe(WR_SpellUsableCache)
+        WR_SpellUsableCacheExpire = now + 0.05
+    end
+    local cacheKey = tostring(Spell) .. "|" .. (GlobalCooldown == true and "1" or "0")
+        .. "|" .. tostring(GCD) .. "|" .. tostring(ShiFaSuDu)
+    local cached = WR_SpellUsableCache[cacheKey]
+    if cached ~= nil then return cached end
+
     -- ★ 无限 12.x 适配：C_Spell.IsSpellUsable 只认 spellID，而本插件全传中文技能名。
     --   改走 WR_IsSpellUsableCompat（Forever_Compat.lua 提供），它先把名字经
     --   法术书索引解析成 ID，再逐级尝试 IsUsableSpell / C_Spell.IsSpellUsable /
     --   IsPlayerSpell；SoD 经典客户端上该函数直通原 IsUsableSpell，行为不变。
+    local result = false
     if WR_GetGCD(Spell) <= (GCD or 0.4) and WR_IsSpellUsableCompat(Spell) and
        (GlobalCooldown ~= true or (GCD or 0.4) <= (ShiFaSuDu or 0.4)) then
-        return true
+        result = true
     end
-    return false
+    WR_SpellUsableCache[cacheKey] = result
+    return result
 end
 
 -- ============================================================
@@ -4182,13 +4246,16 @@ end
 -- ============================================================
 -- ★ 优先级检查（停手条件）
 -- ============================================================
-function WR_PriorityCheck()
-    local Stop_Buff = {
-        "喝水", "进食", "饮用", "进食饮水", "假死", "影遁",
-        "食物", "饮料", "食物和饮料", "饮水",
-    }
+-- ★ 2026-11-17 性能：停手表提升为文件级常量，避免主循环每 0.1 秒新建两个表。
+local WR_STOP_BUFFS = {
+    "喝水", "进食", "饮用", "进食饮水", "假死", "影遁",
+    "食物", "饮料", "食物和饮料", "饮水",
+}
+local WR_STOP_DEBUFFS = { "假死", "萨隆亚的礼物", "疯狂嗜血" }
 
-    local Stop_Debuff = { "假死", "萨隆亚的礼物", "疯狂嗜血" }
+function WR_PriorityCheck()
+    local Stop_Buff = WR_STOP_BUFFS
+    local Stop_Debuff = WR_STOP_DEBUFFS
 
     local stopTargetName = WR_SafeUnitName("target")
     local playerChannel = WR_SafeChannelName("player")
@@ -4361,36 +4428,6 @@ do
 end
 
 
--- ============================================================
--- ★ 临时诊断命令 /mkfear（排查狂暴之怒解恐惧不提示，确认后删除）
--- ============================================================
-SLASH_MKFEAR1 = "/mkfear"
-SlashCmdList["MKFEAR"] = function(msg)
-    print("===== MKFear 诊断 =====")
-    -- 1. 主循环是否调用过 WR_FZ_KBZN
-    print("[1] WR_FZ_KBZN 累计调用次数 = " .. tostring(WR_FZ_KBZN_CallCount or 0))
-    -- 2. 当前 player HARMFUL cache 真实 debuff 名
-    WR_EnsureAuraCached("player")
-    local cache = WR_AuraCache and WR_AuraCache["player"]
-    if not cache then
-        print("[2] WR_AuraCache[player] 不存在（缓存机制未初始化）")
-    else
-        local auras = cache["HARMFUL"] or {}
-        print("[2] player HARMFUL debuff 数量 = " .. #auras)
-        for i = 1, #auras do
-            local a = auras[i]
-            print("    " .. i .. ". name=[" .. tostring(a.name) .. "] id=[" .. tostring(a.spellId) .. "]")
-        end
-    end
-    -- 3. 直接测试 WR_FZ_KBZN 返回值
-    local r = type(WR_FZ_KBZN) == "function" and WR_FZ_KBZN() or "（WR_FZ_KBZN 未定义）"
-    print("[3] 直接调用 WR_FZ_KBZN() 返回 = " .. tostring(r))
-    -- 4. 测试原 7 个名各自匹配情况
-    for _, n in ipairs({"心灵尖啸","煽动惊恐","恐吓","破胆怒吼","恐惧","低沉咆哮","恐慌"}) do
-        print("    [" .. n .. "] t=" .. WR_GetUnitDebuffTime("player", n))
-    end
-    print("===== MKFear 诊断结束 =====")
-end
 
 -- ============================================================
 -- ★ B-3：统一辅助 ticker（合并 Focus/Mouseover/RaidTarget/Trinket 的分散 OnUpdate）

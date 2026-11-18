@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "WARRIOR" then return end
 -- ============================================================
 -- Warrior_Forever.lua  《魔兽世界：无限》(Forever) WARRIOR 完整循环
 -- ------------------------------------------------------------
@@ -30,7 +32,7 @@ function WR_WarriorArms_KZ()
     -- 被恐惧/定身时开狂暴之怒解控
     if (WR_GetUnitDebuffTime("player", "恐惧") > 0 or WR_GetUnitDebuffTime("player", "昏迷") > 0)
        and WR_SpellUsable("狂暴之怒", true) then
-        if WR_ColorFrame_ShowSkill("狂暴之怒(解控)", 58) then return true end
+        if WR_ColorFrame_ShowSkill("狂暴之怒(解控)", 11) then return true end
     end
     return false
 end
@@ -113,7 +115,7 @@ end
 function WR_WarriorFury_KZ()
     if (WR_GetUnitDebuffTime("player", "恐惧") > 0 or WR_GetUnitDebuffTime("player", "昏迷") > 0)
        and WR_SpellUsable("狂暴之怒", true) then
-        if WR_ColorFrame_ShowSkill("狂暴之怒(解控)", 58) then return true end
+        if WR_ColorFrame_ShowSkill("狂暴之怒(解控)", 11) then return true end
     end
     return false
 end
@@ -171,7 +173,7 @@ end
 
 function WR_WarriorFury_XJ()
     if WR_SpellUsable("迅捷打击", true) then
-        if WR_ColorFrame_ShowSkill("迅捷打击", 70) then return true end
+        if WR_ColorFrame_ShowSkill("迅捷打击", 77) then return true end
     end
     return false
 end

@@ -194,10 +194,10 @@ local function CreateClassesMacro()
   WR_CreateMacro("ALT-NUMPADDIVIDE", "/cancelaura 保护之手\n/cancelaura 能量灌注\n/cancelaura 专注魔法") -- 191
   WR_CreateMacro("ALT-CTRL-NUMPADMULTIPLY", "/focus player") -- 192
   WR_CreateMacro("CTRL-NUMPADMULTIPLY", "/cast [target=cursor] 群体驱散") -- 193
-  WR_CreateMacro("ALT-NUMPADMULTIPLY", "") -- 194
-  WR_CreateMacro("ALT-CTRL-NUMPADMINUS", "") -- 195
-  WR_CreateMacro("CTRL-NUMPADMINUS", "") -- 196
-  WR_CreateMacro("ALT-NUMPADMINUS", "") -- 197
+  WR_CreateMacro("ALT-NUMPADMULTIPLY", "/cast [@focus] 治疗术") -- 194（2026-11-18：治疗术）
+  WR_CreateMacro("ALT-CTRL-NUMPADMINUS", "/cast [@focus] 次级治疗术") -- 195（2026-11-18：次级治疗术）
+  WR_CreateMacro("CTRL-NUMPADMINUS", "/cast [nochanneling] 惩击") -- 196（2026-11-18：惩击）
+  WR_CreateMacro("ALT-NUMPADMINUS", "/cast 黑暗献祭") -- 197（2026-11-18：黑暗献祭）
   WR_CreateMacro("ALT-CTRL-NUMPADPLUS", "") -- 198
   WR_CreateMacro("CTRL-NUMPADPLUS", "") -- 199
   WR_CreateMacro("ALT-NUMPADPLUS", "") -- 200
@@ -245,5 +245,9 @@ WR_SkillColor["PRIEST"] = {
     ["联结治疗"] = 56,       -- 宏 CTRL-F6（原 304 越界）
     ["吸血鬼的拥抱"] = 10,   -- 宏 NUMPAD0（原 305 越界）
     ["沉默"] = 80,           -- 宏 CTRL-SHIFT-F10（原 306 越界，宏原为空槽，2026-11-16 补）
+    ["治疗术"] = 194,        -- 宏 ALT-NUMPADMULTIPLY（2026-11-18 戒律同步新增）
+    ["次级治疗术"] = 195,    -- 宏 ALT-CTRL-NUMPADMINUS（2026-11-18 戒律同步新增）
+    ["惩击"] = 196,          -- 宏 CTRL-NUMPADMINUS（2026-11-18 戒律同步新增）
+    ["黑暗献祭"] = 197,      -- 宏 ALT-NUMPADMINUS（2026-11-18 戒律同步新增）
     ["暗影形态"] = 8,        -- 宏 NUMPAD8（原 307 越界）
 }

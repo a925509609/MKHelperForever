@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "DRUID" then return end
 -- ============================================================
 -- Druid_Feral_Features.lua
 -- 野性德鲁伊（WoW Forever / 60级）功能层

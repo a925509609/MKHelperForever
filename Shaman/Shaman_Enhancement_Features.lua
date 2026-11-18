@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "SHAMAN" then return end
 -- ============================================================
 -- Shaman_Enhancement_Features.lua
 -- 增强萨满（WoW Forever / 60级）功能层

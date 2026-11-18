@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "WARRIOR" then return end
 -- ============================================================
 -- Warrior_Menu.lua
 -- 战士全专精配置菜单（武器 / 狂怒 / 防护）

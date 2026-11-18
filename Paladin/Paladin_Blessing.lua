@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PALADIN" then return end
 -- ============================================================
 -- Paladin_Blessing.lua
 -- 圣骑士「祝福」独立设置列表 + 脱战自动补祝福
@@ -69,9 +71,10 @@ WR_PAL_BLESS_REFRESH_LEAD = 60
 -- ★★★ 2026-11-12 用户口径「补的时机太晚」：10 秒 → 3 秒。
 --   原来 10 秒的初衷是「怕反复刷」，但反复刷的真正源头是「光环读不到被当成
 --   没有」（已由 CacheUnreadable 指数退避单独处理），不是这个重试间隔。
---   现在「读得到 + 确实没有」= AHK 漏按或祝福被驱散，3 秒重试才对得上手感；
---   而且有 pending（2.5 秒）与单位记账（8 秒宽限）双重收口，不会变成连刷。
-WR_PAL_BLESS_PROMPT_CD = 3
+-- ★★★ 2026-11-18 用户口径「脱战后，小队祝福刷的太慢了」：3 → 1.5 秒。
+--   「读得到 + 确实没有」= AHK 漏按或祝福被驱散，1.5 秒（一个 GCD 量级）重试；
+--   pending（1.8 秒）与单位记账（3 秒宽限）双重收口，不会变成连刷。
+WR_PAL_BLESS_PROMPT_CD = 1.5
 -- ★★ 2026-11-12 修复「祝福反复刷」核心二：刚打出这条祝福后的宽限（秒）
 -- ------------------------------------------------------------
 -- 就算名字匹配修好了，只要**任何一次**光环读值失败（战斗中 secret、
@@ -83,15 +86,21 @@ WR_PAL_BLESS_PROMPT_CD = 3
 --     由 UNIT_SPELLCAST_SUCCEEDED 维护）作为「刚刚确实打出去了」的证据；
 --   · 宽限期内一律不再提示补同一条祝福。
 -- 取值远小于祝福实际时长（30 分钟），被驱散时最多晚这么久才补，无实际损失。
-WR_PAL_BLESS_AFTER_CAST_GRACE = 8
+-- ★★★ 2026-11-18 用户口径「脱战后，小队祝福刷的太慢了」：8 → 3 秒。
+--   光环读不到时按「刚施放过」宽限的时间。祝福 30 分钟长 buff，3 秒宽限
+--   足够挡住同一 GCD 内的重复提示；施放事件丢了 / 光环没跟上时 3 秒就能重试，
+--   不再让一个队友干等 8 秒。
+WR_PAL_BLESS_AFTER_CAST_GRACE = 3
 -- 同一单位 + 同一祝福「已点亮、等待 buff 上身确认」的状态保持（秒）
 -- ★★★ 2026-11-12 用户口径「补的时机太晚」：8 秒 → 2.5 秒。
 --   8 秒的假设是「AHK 会一直按同一个色块，早晚打出去」，但真机不是这样：
 --   色块只保持 1.0~1.5 秒，AHK 按下的那一下如果正好撞在**上一个祝福的 GCD**
 --   里，这次施放就直接被客户端拒掉 —— 色块灭了、buff 没上身，而 pending 却
 --   还要再锁 8 秒才允许重试 → 玩家看到的就是「点了半天不补」。
---   现在压到 2.5 秒（≈ GCD 1.5 秒 + AHK 读屏按键余量），GCD 一过立刻能重试。
-WR_PAL_BLESS_PENDING_TTL = 2.5
+--   ★★★ 2026-11-18 用户口径「脱战后，小队祝福刷的太慢了」：2.5 → 1.8 秒。
+--   漏按重试节奏 = max(PENDING_TTL, PROMPT_CD)。压到 1.8 秒（≈ GCD 1.5 秒
+--   + AHK 读屏余量）后，漏按的队友约 1.8 秒就能重亮，整队补刷明显变快。
+WR_PAL_BLESS_PENDING_TTL = 1.8
 -- ★★★ 2026-11-12 新增：祝福是**占 GCD 的主动技能**，两个不同单位之间必须
 --   隔开一个 GCD，否则后一个的按键必然被客户端拒绝（色块白亮一次）。
 --   旧实现完全没有这层节流：每 0.1 秒就点亮下一个队友的色块，
@@ -1504,8 +1513,10 @@ function WR_PaladinBlessing_Auto()
         if ok and v == true then inCombatNow, combatKnown = true, true
         elseif ok and v == false then inCombatNow, combatKnown = false, true end
     end
+    local justLeftCombat = false
     if combatKnown then
         if WR_PaladinBlessing_WasInCombat == true and not inCombatNow then
+            justLeftCombat = true
             WR_PaladinBlessing_RepairPlayerAuraCache(true)    -- 刚脱战：强制重扫一次
         else
             WR_PaladinBlessing_RepairPlayerAuraCache(false)   -- 缓存缺失：节流重扫
@@ -1536,6 +1547,30 @@ function WR_PaladinBlessing_Auto()
         for i = 1, n do units[#units + 1] = "raid" .. i end
     end
     if #units == 0 then return false end
+
+    -- ★★★ 2026-11-18 用户口径「脱战后，小队祝福刷的太慢了」：
+    --   刚脱战瞬间原来只强扫 player 的光环缓存；队友的缓存还是战斗中扫描失败
+    --   留下的 nil/旧值 → 脱战后头几个 tick 里队友要么被判「读不到」吃指数退避
+    --   （10/30/60...秒才试一次），要么空亮一次色块白费一个 GCD —— 整队补刷被拖慢。
+    --   现在脱战瞬间把本轮全部候选单位（自己 + 小队/团队）的光环缓存一次性强制
+    --   重扫（一次性标记，只在「明确 true→false 脱战」时触发），Needs 立即按
+    --   真实光环判定，随后按正常 GCD 间隔节奏逐个补，不再吃退避。
+    if justLeftCombat and WR_PaladinBlessing_OOCRescanDone ~= true then
+        WR_PaladinBlessing_OOCRescanDone = true
+        for i = 1, #units do
+            local u = units[i]
+            if u == "player" then
+                -- player 已在上面 RepairPlayerAuraCache(true) 强扫过，这里不重复
+            elseif WR_PalBless_Fn(WR_ForceRefreshAuraCache) then
+                pcall(WR_ForceRefreshAuraCache, u)
+            elseif type(WR_AuraCacheScanned) == "table" then
+                WR_AuraCacheScanned[u] = false
+            end
+        end
+    end
+    if (inCombatNow == true) or (combatKnown == false) then
+        WR_PaladinBlessing_OOCRescanDone = nil   -- 回到战斗/未知态：复位一次性标记
+    end
 
     -- ★★★ 2026-11-12 用户口径「脱战了没有第一时间补祝福」「给队友加也是这样，
     --   补的时机太晚」：GCD 间隔闸。

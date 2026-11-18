@@ -148,7 +148,11 @@ F.SPELL_ID_OVERRIDES = {
     ["正义之怒"] = 25780,    -- Righteous Fury
     ["虔诚光环"] = 465,      -- Devotion Aura
     ["奉献"] = 20116,        -- Consecration Rank 1
-    ["驱邪术"] = 879,        -- Exorcism Rank 1
+    -- ★★ 2026-11-18：删除 ["驱邪术"] = 879（Exorcism Rank 1）覆盖。
+    --   旧逻辑只要玩家「学过 Rank1」就永远返回 Rank1；60 级角色实际使用的是
+    --   高 rank（如 10314），Rank1 的 IsUsableSpell 在部分客户端判 false /
+    --   冷却查询也对不上 → WR_SpellUsable("驱邪术") 恒 false。改由法术书索引
+    --   解析当前 rank（缺失时 GetSpellInfo 兜底）。
     ["制裁之锤"] = 853,      -- Hammer of Justice Rank 1
     ["攻击"] = 6603,         -- Auto Attack
 }

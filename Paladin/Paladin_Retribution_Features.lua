@@ -1,3 +1,5 @@
+-- ★ 2026-11-17 职业隔离：非本职业直接跳过，避免职业代码/全局符号污染
+if WR_PlayerClass and WR_PlayerClass ~= "PALADIN" then return end
 -- ============================================================
 -- Paladin_Retribution_Features.lua
 -- 惩戒骑士（WoW Forever / 60级）功能层
@@ -144,6 +146,7 @@ function RT.InitDefaults()
     -- 圣印 / 审判默认
     setn("CJ_SY_SEAL", 3)           -- 常驻：命令圣印（惩戒输出印；截图 7 选 1）
     setn("CJ_SY_JF_KIND", 1)        -- 解封之怒·审判编织：不管
+    setn("CJ_SY_JF_STACKS", 3)      -- 解封之怒舞：叠几层换印（参考 PaladinAssist：一层泄蓝/二层平稳/三层爆发）
     setn("CJ_SY_J_CRUSADER_N", 3)
     setn("CJ_SY_J_WISDOM_N", 2)
     setn("CJ_SY_J_LIGHT_N", 1)
@@ -476,9 +479,14 @@ function RT.DanceStep(judgeCD)
         end
     end
 
-    -- 2) 换印：回响叠满 3 层（可读）或同印超过 12 秒（层数读不到的兜底）
+    -- 2) 换印：回响达到配置层数（可读）或同印超过 N×4 秒（层数读不到的兜底）
+    --    ★★★ 2026-11-17：参考 PaladinAssist「圣印舞」档位——
+    --    一层（泄蓝）/ 二层（平稳）/ 三层（爆发），默认三层（原行为）。
+    local needStacks = RT.Val("CJ_SY_JF_STACKS", 3)
+    if needStacks < 1 then needStacks = 1 elseif needStacks > 3 then needStacks = 3 end
     local stacks = RT.EchoStacks()
-    if (stacks ~= nil and stacks >= 3) or (now - (RT.DanceSince or now)) >= 12 then
+    if (stacks ~= nil and stacks >= needStacks)
+       or (now - (RT.DanceSince or now)) >= (needStacks * 4) then
         if RT.SpellKnown(other.name) and RT.ShowSeal(other.name, other.slot) then
             RT.DanceSeal = other.name
             RT.DanceSince = now
@@ -630,7 +638,7 @@ function RT.PotionStep()
     if type(WR_Use_ZLYS) ~= "function" then return false end
     local okU, can = pcall(WR_Use_ZLYS)
     if not okU or can ~= true then return false end
-    return RT.Show("治疗药水", 75)
+    return RT.Show("治疗药水", 79)
 end
 
 function RT.HammerStep()
@@ -651,17 +659,25 @@ end
 
 function RT.ExorcismStep()
     if not RT.On("CJ_QXS", true) then return false end
+    -- ★★★ 2026-11-18：参考 PaladinAssist 的 spell 状态机
+    --   （C_Spell.IsSpellUsable + GetSpellCooldownDuration）。
+    --   旧写法 WR_SpellUsable("驱邪术", true) 的 GCD 严格门使用全局 GCD /
+    --   施法速度（本职业 GCD=WR_GetGCD("审判")），审判一进 CD 就把驱邪术判死。
+    --   统一走共享步骤：三系同一口径，不再传 GlobalCooldown=true。
+    if type(WR_PaladinForever_ExorcismStep) == "function" then
+        return WR_PaladinForever_ExorcismStep()
+    end
     if not RT.TargetExistsAttackable() then return false end
     if type(WR_PaladinForever_IsUndeadOrDemon) == "function" then
         local ok, hit = pcall(WR_PaladinForever_IsUndeadOrDemon, "target")
         if not ok or hit ~= true then return false end
     end
     if type(WR_SpellUsable) == "function" then
-        local ok, usable = pcall(WR_SpellUsable, "驱邪术", true)
+        local ok, usable = pcall(WR_SpellUsable, "驱邪术")
         if not ok or usable ~= true then return false end
     end
     if type(WR_PaladinForever_ShowSkillCD) == "function" then
-        return WR_PaladinForever_ShowSkillCD("驱邪术", 20, 10)
+        return WR_PaladinForever_ShowSkillCD("驱邪术", 20, 15)
     end
     return false
 end
@@ -789,7 +805,7 @@ RT.PopupDefs = {
         title = "圣印  功能",
         width = 430,
         desc = "圣印总开关：开着时按右键里的设置管圣印。\n\n"
-            .. "解封之怒（要点了天赋才能作用）：勾着时命令圣印、正义圣印轮流叠回响，叠满 3 层就换另一个，审判冷却好就打；它起作用时下面「常驻圣印」「保持审判」两组都不管。下拉选「不管」= 舞印期间不补审判；选十字军/智慧/光明 = 审判快好时临时换上对应圣印、审判一次，挂完换回舞印。\n\n"
+            .. "解封之怒（要点了天赋才能作用）：勾着时命令圣印、正义圣印轮流叠回响，叠到设定层数（一层/二层/三层）就换另一个，审判冷却好就打；它起作用时下面「常驻圣印」「保持审判」两组都不管。下拉选「不管」= 舞印期间不补审判；选十字军/智慧/光明 = 审判快好时临时换上对应圣印、审判一次，挂完换回舞印。\n\n"
             .. "常驻圣印：平时身上保持哪个圣印（没有或快到时就补）；标题前面的勾去掉 = 平时不补圣印。\n「卡CD使用」勾着 = 审判冷却好就拿常驻圣印审判。\n\n"
             .. "保持审判：给目标补哪种审判——每行前面的勾 = 参不参加，后面的拉条 = 第几个挂，数字小的先挂（两个数字一样时按从上到下）；标题前面的勾去掉 = 都不挂。\n\n"
             .. "自己只能在目标身上挂一种审判：目标身上已经有你挂的就不管；没有就按顺序找第一个目标身上还没有的（别的圣骑士挂的也算有），审判快好的时候临时换上那个圣印、审判一次，挂完换回常驻圣印。\n\n"
@@ -799,6 +815,7 @@ RT.PopupDefs = {
             { type = "header", text = "- 额外条件" },
             { type = "check", var = "CJ_SY_ON", label = "圣印", default = true },
             { type = "check", var = "CJ_SY_JF", label = "解封之怒", default = true, indent = 18 },
+            { type = "radio", var = "CJ_SY_JF_STACKS", default = 3, options = { { id = 1, label = "一层" }, { id = 2, label = "二层" }, { id = 3, label = "三层" } }, indent = 34 },
             { type = "radio", var = "CJ_SY_JF_KIND", default = 1, options = RT.JF_KINDS, indent = 34 },
             { type = "check", var = "CJ_SY_MAIN_ON", label = "常驻圣印", default = true, indent = 18 },
             { type = "check", var = "CJ_SY_KCD", label = "卡CD使用", default = true, indent = 34 },

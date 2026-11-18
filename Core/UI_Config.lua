@@ -1639,6 +1639,14 @@ local function CreateCheckbox(config)
             PigSet[config.saveVariable] = config.defaultState
         end
         checkbox:SetChecked(PigSet[config.saveVariable])
+        -- ★ 2026-11-17：子选项（「目标为我」/「精英」）勾选时同步父总开关；
+        --   旧存档可能只勾了子项、父总开关没开，从此不再表现为「功能失效」。
+        if config.requiresVariable and PigSet[config.saveVariable] == true then
+            PigSet[config.requiresVariable] = true
+            if type(WR_SyncConfigCheckbox) == "function" then
+                WR_SyncConfigCheckbox(config.requiresVariable)
+            end
+        end
     end
     UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
     if isRadio then
@@ -1733,6 +1741,13 @@ local function CreateCheckbox(config)
         end
         local newState = not PigSet[config.saveVariable]
         PigSet[config.saveVariable] = newState
+        -- ★ 2026-11-17：子选项打开时同步父总开关（「目标为我」→「神圣之盾」，「精英」→「愤怒之锤」）
+        if newState and config.requiresVariable then
+            PigSet[config.requiresVariable] = true
+            if type(WR_SyncConfigCheckbox) == "function" then
+                WR_SyncConfigCheckbox(config.requiresVariable)
+            end
+        end
         checkbox:SetChecked(newState)
         UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
         -- ★ 2026-11-10：互斥组 —— 打开本开关时自动关掉同组其它开关（关掉时不动别人）
@@ -1766,6 +1781,12 @@ local function CreateCheckbox(config)
             msg = strlower(msg or "")
             if msg == "on" then
                 PigSet[config.saveVariable] = true
+                if config.requiresVariable then
+                    PigSet[config.requiresVariable] = true
+                    if type(WR_SyncConfigCheckbox) == "function" then
+                        WR_SyncConfigCheckbox(config.requiresVariable)
+                    end
+                end
                 checkbox:SetChecked(true)
                 UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
                 -- ★ 2026-11-10：互斥组（斜杠命令 / 拖出的切换宏走同一条逻辑）
@@ -1781,6 +1802,12 @@ local function CreateCheckbox(config)
             elseif msg == "" or msg == "toggle" then
                 local newState = not PigSet[config.saveVariable]
                 PigSet[config.saveVariable] = newState
+                if newState and config.requiresVariable then
+                    PigSet[config.requiresVariable] = true
+                    if type(WR_SyncConfigCheckbox) == "function" then
+                        WR_SyncConfigCheckbox(config.requiresVariable)
+                    end
+                end
                 checkbox:SetChecked(newState)
                 UpdateCheckboxGlow(iconFrame, iconTexture, checkbox)
                 -- ★ 2026-11-10：互斥组（toggle 到「开」才互斥，关的时候不影响别人）
