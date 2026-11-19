@@ -22,7 +22,7 @@
 ## 1. TOC 加载顺序重写（`MKHelperForever.toc`）
 
 - `## Interface:` 改为多版本容错列表：`11500,11501,...,11509,12000,12001,12002`（覆盖 SoD 1.15.x + 无限客户端号）。
-- `## Title` 增加 zhCN 标记：`|cffFF69B4 MKHelperForever|cff00ff00[魔兽世界：无限]v1.0`；新增 `## X-Client: forever`。
+- `## Title` 增加 zhCN 标记：`|cffFF69B4 MKHelperForever|cff00ff00 2026-11-19`（2026-11-19 改为「插件名 + 时间」，原为 `[魔兽世界：无限]v1.0` 静态字样）；新增 `## X-Client: forever`。
 - 新增加载行（顺序敏感）：
 
 | 顺序 | 文件 | 作用 |

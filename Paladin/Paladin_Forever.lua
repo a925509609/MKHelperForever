@@ -924,6 +924,38 @@ function WR_PaladinForever_RefreshSealPrompt()
     return true
 end
 
+-- ============================================================
+-- ★★★ 2026-11-19 用户口径「防骑正义之怒要第一优先级，buff 一消失第一时间就要补」：
+--   判定（FuryUp）修好之后，还剩「点亮了但被顶掉」这一层：
+--   WR_ColorFrame_Show 每次会先隐藏【所有】色块 —— 正义之怒色块刚亮起，
+--   下一 tick 的圣印保护窗口 / 审判 / 神圣打击任意一处点亮就会把它顶掉，
+--   AHK 扫不到 → 不按 → 表现仍是「buff 没了不补」。
+--   因此正义之怒也需要自己的短保护窗口（与圣印同一套思路，独立记录，
+--   互不覆盖）：窗口内每 tick 重亮同一色块并让循环直接 return true；
+--   施放成功（FuryUp 转 true）或窗口到期立即熄灭。
+-- ============================================================
+WR_PaladinForever_FURY_PROMPT_HOLD = 1.0
+WR_PaladinForever_FuryPromptSlot = WR_PaladinForever_FuryPromptSlot or nil
+
+-- 点亮正义之怒色块（单次，不重亮）。
+--   ★ 为什么不学圣印做「窗口内每 tick 重亮」：
+--     圣印重亮是因为它排在循环末尾、会被前面的技能顶掉；正义之怒现在是
+--     全循环第一条，不会有任何分支能顶它。而每 tick 重亮 = 色块常亮 =
+--     AHK 每 ~60ms 按一次 /cast 正义之怒（老的「反复施放」bug）。
+--     所以只亮一次 + 1.0 秒保持 + 3 秒 CanPrompt 防抖，施放成功立刻熄灭。
+function WR_PaladinForever_ShowFuryPrompt(slot)
+    local useSlot = slot or 31
+    if not WR_ColorFrame_ShowSkill("正义之怒", useSlot) then return false end
+    WR_PaladinForever_FuryPromptSlot = useSlot
+    return true
+end
+
+function WR_PaladinForever_ClearFuryPrompt()
+    local slot = WR_PaladinForever_FuryPromptSlot or 31
+    WR_PaladinForever_FuryPromptSlot = nil
+    WR_PaladinForever_HideNow("正义之怒", slot)
+end
+
 -- ★ 兜底清理：色块「亮到打出为止」，只在超过保持上限后才熄灭
 --   · 有保持标记（刚提示过）→ 到 PromptHold 时间才清
 --   · 没有保持标记（旧逻辑残留）→ 用 maxAge 兜底
@@ -1074,6 +1106,16 @@ do
             WR_PaladinForever_SealPromptLitName = nil
             WR_PaladinForever_ForceSealAtCombat = false
             WR_PaladinForever_CombatStartAt = nil
+            -- ★★★ 2026-11-18：死亡会移除正义之怒（30 分钟 Buff）。旧实现只清圣印计时，
+            --   FuryCastAt 仍留着「30 分钟内视为已开启」的记账 → 战斗中战复后 FuryUp()
+            --   靠这条记录把「已消失」判成「仍在」，整场战斗都不补。
+            --   死亡即清空记账与观测投影，复活后第一时间补。
+            WR_PaladinForever_FuryCastAt = nil
+            WR_PaladinForever_FuryLastUpAt = nil
+            WR_PaladinForever_FuryLastUpRemain = nil
+            -- ★ 2026-11-19：tooltip 通道的节流与缓存同步清空，战复后第一 tick 就能重判
+            WR_PaladinForever_FuryTooltipAt = 0
+            WR_PaladinForever_FuryTooltipCache = nil
             -- 清掉玩家光环缓存旧值，避免死亡前「圣印还在」的缓存被当成当前状态
             if WR_AuraCache then WR_AuraCache["player"] = nil end
             if type(WR_ForceRefreshAuraCache) == "function" then
@@ -2357,6 +2399,10 @@ do
             -- ★ 重新施放成功：清掉旧观测投影，30 分钟窗口重新起算
             WR_PaladinForever_FuryLastUpAt = nil
             WR_PaladinForever_FuryLastUpRemain = nil
+            -- ★ 2026-11-19：tooltip 判定缓存与节流也一起重置，
+            --   否则施放前那一帧「明确不在」的缓存会压住刚打上的 Buff 3 秒。
+            WR_PaladinForever_FuryTooltipAt = 0
+            WR_PaladinForever_FuryTooltipCache = nil
             WR_PaladinForever_HideNow("正义之怒")
         elseif sid and WR_PaladinForever_IsSealSpellID(sid) then
             -- 只剩数字 ID、名字完全读不到：仍要记一笔并熄灭圣印色块，
@@ -2418,9 +2464,136 @@ end
 --        导致「刚施放过」的兜底记录永远轮不到 → 战斗中光环读不到（secret）时反复提示；
 --     ② FuryCastAt 只由「施放成功事件」写入，不再由「提示」写入 ——
 --        提示只做防刷屏，施放成功才记 30 分钟，这样玩家漏按一次仍能重试。
---   判定顺序：光环扫描 → 缓存剩余 → 观测投影到期 → 施放成功记录（30 分钟兜底） → false。
+--   判定顺序：光环扫描 → GetPlayerAuraBySpellID 直查 → 缓存剩余 → 观测投影到期 → 施放成功记录（30 分钟兜底） → false。
+--
+-- ★★★ 2026-11-18 用户口径「防骑正义之怒 Buff 如果不存在了，一定要第一时间补」：
+--   原有判定只剩两条能确认「缺失」的路：光环扫描（战斗 secret 时整条返回未知）
+--   和观测投影（只有看到过剩余时间才有效）。两者都失效时靠 ④ 的 30 分钟施放记录
+--   硬撑 —— 死亡/战复、被驱散、竞技场重置都会让 Buff 真的消失，却被这条记录判成
+--   「仍在」，整场战斗都不补。
+--   新增 ②：C_UnitAuras.GetPlayerAuraBySpellID(25780) 直查（与清洁术「已知 ID
+--   直查」同一实证）。该 API 的 nil 语义按客户端真实行为区分（EUI
+--   EllesmereUIAuraBuffReminders 同源实证，本服 12.x）：
+--     · 白名单 ID（NON_SECRET_SPELL_IDS）战斗中可直读；非白名单 ID 战斗中可能被
+--       秘密旗挡住 → 返回 nil（哪怕 Buff 还在）。
+--     · 因此「nil = 明确不在」只在两种情况成立：① 脱战（OOC 的 nil 就是不在）；
+--       ② 本场战斗曾明确读到过这个 ID（说明对该 ID 可见），此后 nil 才是真没了。
+--     · 其余情况一律当「未知」，沿用 30 分钟记录兜底 —— 绝不据此反复点亮。
+WR_PaladinForever_FuryByIDCombatOK = WR_PaladinForever_FuryByIDCombatOK or false
+
+-- 返回：true = 明确在身上（第二返回值为 auraData）
+--       false = 明确不在身上
+--       nil   = 读不到/API 缺失/调用被拒/战斗中不可见（未知，绝不作缺失依据）
+function WR_PaladinForever_FuryByIDAura(inCombat)
+    if type(C_UnitAuras) ~= "table" then return nil end
+    local fn = C_UnitAuras.GetPlayerAuraBySpellID
+    if fn == nil then return nil end
+    local ok, aura = pcall(fn, 25780)
+    if not ok then return nil end
+    if aura ~= nil then
+        -- 正证据：战斗中也能读到 → 记下「本场战斗对该 ID 可见」
+        if inCombat then
+            WR_PaladinForever_FuryByIDCombatOK = true
+        end
+        return true, aura
+    end
+    if inCombat and not WR_PaladinForever_FuryByIDCombatOK then
+        return nil   -- 战斗中看不见 ≠ 不在身上
+    end
+    return false
+end
+
+-- ★★★ 2026-11-19 用户口径「防骑正义之怒要第一优先级，buff 一消失第一时间就要补」：
+--   前几版「缺失确认」只剩两条路：
+--     ① HELPFUL 光环扫描 —— 战斗中 name/spellId 是 secret → 整条返回未知；
+--     ② C_UnitAuras.GetPlayerAuraBySpellID —— 非白名单 ID 战斗中可能被秘密旗挡住
+--        返回 nil（哪怕 Buff 还在），只有「本场战斗曾读到过」之后 nil 才可信。
+--   两条都失效时只能靠 ④「30 分钟施放成功记录」硬撑 → 被驱散 / 战复 /
+--   竞技场重置 / 跨场景重载后 Buff 真的没了，却被判成「仍在」，
+--   玩家看到的就是「buff 消失了不补」。
+--
+--   本条新增第三条缺失确认通道：C_TooltipInfo 提示数据流。
+--   引擎 C 侧组装 tooltip 数据，不受 DenyTaintedAccessWhenAurasAreSecret 限制 ——
+--   与清洁术 CleanseTooltipScan 走 GetUnitDebuffByIndex 是同一实证
+--   （!Pig Tooltip.lua 321 / PartyMemberFrame.lua 366 生产可用）。
+--   GetUnitBuffByIndex 逐槽位读玩家 HELPFUL 提示：
+--     · 顶层 data.id == 25780，或提示行「法术ID: 25780」→ 明确在身（true）；
+--     · 扫到第一个空槽位、且全程没有任何 secret / 读不到 → 明确不在（false）；
+--     · 出现 secret / 调用被拒 → nil（未知）。绝不用未知判缺失，
+--       否则每次点亮后都判「没打上」→ AHK 连按（老的「反复施放正义之怒」bug）。
+--   0.5 秒节流：战斗中每 tick（0.1 秒）都扫 40 个槽位没必要，且被拒时会更糟。
+WR_PaladinForever_FuryTooltipAt = WR_PaladinForever_FuryTooltipAt or 0
+WR_PaladinForever_FuryTooltipCache = WR_PaladinForever_FuryTooltipCache or nil
+
+function WR_PaladinForever_FuryByTooltip()
+    local now = GetTime()
+    if now - (WR_PaladinForever_FuryTooltipAt or 0) < 0.5 then
+        return WR_PaladinForever_FuryTooltipCache
+    end
+    WR_PaladinForever_FuryTooltipAt = now
+    WR_PaladinForever_FuryTooltipCache = nil
+    local C_TI = C_TooltipInfo
+    if type(C_TI) ~= "table" then return nil end
+    -- 兼容序：GetUnitBuffByIndex（12.x）→ GetUnitBuff → GetUnitAuraByIndex
+    local scanFn = C_TI.GetUnitBuffByIndex or C_TI.GetUnitBuff or C_TI.GetUnitAuraByIndex
+    if scanFn == nil then return nil end
+    local sawUnknown = false
+    local spellIDFromLines = WR_PaladinForever_SpellIDFromTooltipLines
+    for i = 1, 40 do
+        local ok, data = pcall(scanFn, "player", i)
+        if not ok then
+            -- 调用被拒（受限拒绝 / 实现差异）：整条未知，绝不据此判缺失
+            return nil
+        end
+        if data == nil then
+            -- 扫到空槽位 = 玩家 HELPFUL 列表结束。全程没有未知 → 明确不在身上。
+            local result
+            if sawUnknown then result = nil else result = false end
+            WR_PaladinForever_FuryTooltipCache = result
+            return result
+        end
+        -- 证据一：顶层 data.id（引擎组装，受限内容里通常仍可读）
+        local idReadable = false
+        local okId, topId = pcall(function() return data.id end)
+        if okId and type(topId) == "number" then
+            local idSecret = type(WR_IsSecretValue) == "function" and WR_IsSecretValue(topId)
+            if not idSecret then
+                idReadable = true
+                if topId == 25780 then
+                    WR_PaladinForever_FuryTooltipCache = true
+                    return true
+                end
+            end
+        end
+        -- 证据二：提示行「法术ID: N」（顶层 id 被 secret 挡住时的替代证据）
+        local sidReadable = false
+        if type(spellIDFromLines) == "function" then
+            local sid = spellIDFromLines(data)
+            if sid ~= nil then
+                sidReadable = true
+                if sid == 25780 then
+                    WR_PaladinForever_FuryTooltipCache = true
+                    return true
+                end
+            end
+        end
+        -- 两条证据都读不到这一格 → 无法排除它就是正义之怒 → 整轮记未知。
+        -- 只要有一格读得懂，就说明本客户端对 HELPFUL 提示是可读的，
+        -- 空槽位才是「列表结束」的可信信号（绝不因 lines 缺失就判未知，
+        -- 那会让每一格都变未知 → 永远判不出缺失 → 又不补了）。
+        if not idReadable and not sidReadable then
+            sawUnknown = true
+        end
+    end
+    -- 40 个槽位全非空（异常/超多 buff）：无法确认列表结束 → 未知
+    return nil
+end
+
 function WR_PaladinForever_FuryUp()
     local now = GetTime()
+    local inCombat = false
+    local okC, inC = pcall(UnitAffectingCombat, "player")
+    if okC and inC == true then inCombat = true end
     -- ① 直接扫玩家 HELPFUL 光环（脱战/可读时最准）
     local remain, scanOK = WR_PaladinForever_PlayerAuraRemain(25780, "正义之怒")
     if scanOK then
@@ -2429,11 +2602,68 @@ function WR_PaladinForever_FuryUp()
             WR_PaladinForever_FuryLastUpRemain = remain
             return true
         end
+        -- ★ 明确扫过且没有 → 连同 30 分钟记账与观测投影一起清掉：
+        --   否则下面的 ④ 兜底会把「已消失」重新判成「仍在」，Buff 再也补不上。
+        WR_PaladinForever_FuryCastAt = nil
+        WR_PaladinForever_FuryLastUpAt = nil
+        WR_PaladinForever_FuryLastUpRemain = nil
         return false
     end
 
-    -- ② 光环缓存里的剩余时间
-    local cached = WR_GetUnitBuffTime("player", "正义之怒")
+    -- ② GetPlayerAuraBySpellID 直查（战斗中可读时无需遍历光环，也不受字段 secret 影响）
+    local byID, furyAura = WR_PaladinForever_FuryByIDAura(inCombat)
+    if byID == true then
+        WR_PaladinForever_FuryLastUpAt = now
+        local exp = furyAura and furyAura.expirationTime
+        local expOK = type(exp) == "number"
+            and not (type(WR_IsSecretValue) == "function" and WR_IsSecretValue(exp))
+        if expOK and (exp - now) > 0 then
+            WR_PaladinForever_FuryLastUpRemain = exp - now
+        end
+        return true
+    elseif byID == false then
+        -- 明确不在身上：清空 30 分钟记账与观测投影 → 本次返回 false，下一 tick 立刻补
+        WR_PaladinForever_FuryCastAt = nil
+        WR_PaladinForever_FuryLastUpAt = nil
+        WR_PaladinForever_FuryLastUpRemain = nil
+        return false
+    end
+
+    -- ②b ★★★ 2026-11-19：C_TooltipInfo 提示数据流直查（免读回、免秘密旗）。
+    --   战斗中 ① 光环扫描与 ② GetPlayerAuraBySpellID 双双返回未知时，
+    --   这是唯一还能给出「明确不在」的证据来源。明确不在 → 清空 30 分钟记账
+    --   与观测投影，本 tick 立即点亮（用户口径「buff 一消失第一时间补」）。
+    local tipState = WR_PaladinForever_FuryByTooltip()
+    if tipState == true then
+        WR_PaladinForever_FuryLastUpAt = now
+        return true
+    elseif tipState == false then
+        -- ★ 施放宽限窗口：刚成功施放 3 秒内，光环可能还没同步到客户端，
+        --   tooltip 这时读到「不在」不代表没打上。直接判缺失会让色块反复点亮
+        --   → AHK 连按（老的「反复施放正义之怒」bug）。宽限内按未知处理，
+        --   交回 ④「施放成功记录」兜底。
+        local castAt = WR_PaladinForever_FuryCastAt
+        if castAt and (now - castAt) < 3.0 then
+            tipState = nil
+        end
+    end
+    if tipState == false then
+        WR_PaladinForever_FuryCastAt = nil
+        WR_PaladinForever_FuryLastUpAt = nil
+        WR_PaladinForever_FuryLastUpRemain = nil
+        return false
+    end
+
+    -- ③ 光环缓存里的剩余时间
+    --   ★ 2026-11-19：加 type 守卫 —— 该函数由 Core/Core_Functions.lua 提供，
+    --   加载顺序/裁剪夹具里可能不存在；裸调会抛错并被防骑看门狗吞掉，
+    --   表现为整条循环这一 tick 什么都不提示（「循环失效」）。
+    --   ★ 用 ~= nil 而不是 type=="function"：离线夹具与部分客户端把 C API
+    --   暴露成可调用 userdata，type() 不一定是 "function"（本文件既有约定）。
+    local cached
+    if WR_GetUnitBuffTime ~= nil then
+        cached = WR_GetUnitBuffTime("player", "正义之怒")
+    end
     if cached and cached > 0 then
         WR_PaladinForever_FuryLastUpAt = now
         WR_PaladinForever_FuryLastUpRemain = cached
@@ -3161,6 +3391,41 @@ local function WR_PaladinForever_AuraDataDispelState(data)
         local secretKind = WR_PaladinForever_ProbeDispelFromAura(data)
         if secretKind == "poison" or secretKind == "disease" or secretKind == "magic" then return true end
         if secretKind == "curse" or secretKind == "bleed" then return false end
+
+        -- ★★★ 2026-11-19 八次修复：名称白名单（名字行通常不是 secret，见截图）。
+        do
+            local okName, auraName = pcall(function() return data.name end)
+            if okName then
+                local nameKind = WR_PaladinForever_KindFromAuraName(auraName)
+                if nameKind == "poison" or nameKind == "disease" or nameKind == "magic" then
+                    return true
+                end
+            end
+        end
+
+        -- ★★★ 2026-11-19 新增 fallback（烈焰震击 23038 截图实锤：图集探针返回 unknown
+        -- → ProbeDispellableByFilter 整体返回 nil → UnitHasDispel 全 unknown →
+        -- AurasRestricted() 直接 return false）。此处 data.spellId 不一定是 secret
+        -- （EllesmereUIAuraBuffReminders NON_SECRET_SPELL_IDS 实证：即使 dispelName
+        -- 是 secret，spellId 仍可作为白名单/静态分类入口）：
+        --   · spellId 可读 → 先查 CLEANSE_KNOWN_AURA_IDS 白名单，再查 C_TooltipInfo
+        --     静态提示，命中则按 kind 判定（poison/disease/magic=true，curse/bleed=false）；
+        --   · spellId secret → 无新证据，保留图集探针返回的 unknown。
+        local okS, sid = pcall(function() return data.spellId end)
+        if okS and type(sid) == "number" and not WR_PaladinForever_IsSecretValue(sid) then
+            if WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS then
+                local known = WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS[sid]
+                if known == "poison" or known == "disease" or known == "magic" then return true end
+                if known == "curse" or known == "bleed" then return false end
+            end
+            -- DispKindBySpellID 依赖 C_TooltipInfo.GetSpellByID 静态提示（无 miss 缓存的白名单直查）
+            if type(WR_PaladinForever_DispelKindBySpellID) == "function" then
+                local kind = WR_PaladinForever_DispelKindBySpellID(sid)
+                if kind == "poison" or kind == "disease" or kind == "magic" then return true end
+                if kind == "curse" or kind == "bleed" then return false end
+            end
+        end
+
         return nil
     end
     local okC, can = pcall(function() return data.canActivePlayerDispel end)
@@ -3176,6 +3441,165 @@ end
 --   实测某些客户端该过滤器会包含诅咒（或至少无法保证排除），导致中诅咒后
 --   清洁术不断点亮。现在改为：只有真正读到 AuraData 的 dispelName / canActivePlayerDispel
 --   并明确是可驱散类型时才返回 true；全部读不到则返回 nil（未知），绝不猜「可驱散」。
+-- ★★★ 2026-11-19 九次修复：GameTooltip 直读通道（最强的一条）。
+--   用户连续多张截图的共同点：**鼠标悬停时 GameTooltip 能完整显示
+--   「烈焰震击 / 魔法 / 法术ID：23038 / 剩余6秒」**。这证明本客户端在战斗中
+--   GameTooltip 的数据流是可读的 —— 它由引擎 C 侧填充，不走
+--   DenyTaintedAccessWhenAurasAreSecret。
+--   与 C_TooltipInfo 的区别：C_TooltipInfo 返回的是「数据表」，受限内容里可能整条
+--   被拒或字段 secret；而 GameTooltip:SetUnitDebuff(unit, i) 之后读
+--   GameTooltipTextLeftN/RightN 的 **GetText() 字符串** 是引擎写进字体串的普通文本，
+--   本仓库 PartyMemberFrame.lua 366 就是这么用的（GX.lua 已有实证记录）。
+--   EUI 禁止的是「用 Lua 创建 GameTooltipTemplate 帧」，**复用已存在的 GameTooltip
+--   完全合法**（不 CreateFrame、不 SetOwner 到自定义帧）。
+--
+--   安全约束（必须全部满足才动手）：
+--     · 节流 0.5 秒（SetUnitDebuff 会重排 tooltip，不能每 tick 砸）；
+--     · 玩家自己正开着 tooltip（GameTooltip:IsOwned/IsShown 且 owner 不是我们）→ 直接跳过，
+--       绝不打断玩家正在看的信息；
+--     · 只在脱战/战斗都试，但被拒就记 3 秒冷却；
+--     · 读完必须恢复：把 GameTooltip 隐藏并清空，避免残留在屏幕上。
+WR_PaladinForever_GameTooltipScanAt = {}
+WR_PaladinForever_GameTooltipScanCache = {}
+WR_PaladinForever_GameTooltipScanDenied = {}
+
+function WR_PaladinForever_ProbeByGameTooltip(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    local tip = _G.GameTooltip
+    if tip == nil then return nil end
+    local now = GetTime()
+    local atMap = WR_PaladinForever_GameTooltipScanAt
+    local cacheMap = WR_PaladinForever_GameTooltipScanCache
+    local deniedMap = WR_PaladinForever_GameTooltipScanDenied
+    local lastAt = atMap[unit] or 0
+    if now - lastAt < 0.5 then return cacheMap[unit] end
+    -- 玩家自己正在看 tooltip：本帧完全不动它
+    local okShown, shown = pcall(function() return tip:IsShown() end)
+    if okShown and shown == true then
+        local okOwned, owned = pcall(function()
+            local fn = tip.IsOwned
+            if fn == nil then return false end
+            return tip:IsOwned(UIParent)
+        end)
+        -- owner 是 UIParent（= 我们上次扫描残留）才允许接管；否则视为玩家在用
+        if not (okOwned and owned == true) then return cacheMap[unit] end
+    end
+    local deniedUntil = deniedMap[unit] or 0
+    if now < deniedUntil then return cacheMap[unit] end
+    atMap[unit] = now
+    local hasDebuffSetter = (tip.SetUnitDebuff ~= nil)
+    if not hasDebuffSetter and tip.SetUnitAura == nil then return nil end
+    -- 接管前必须先设 owner，否则 SetUnitDebuff 在多数客户端直接报错。
+    -- 只用 UIParent + ANCHOR_NONE（不锚到任何可见位置），读完立刻 Hide。
+    if tip.SetOwner ~= nil then
+        pcall(function() tip:SetOwner(UIParent, "ANCHOR_NONE") end)
+    end
+    local function readLines()
+        local out = {}
+        -- 冒号语义：NumLines / GetText 都是方法，必须带 self 调用
+        local okN, n = pcall(function() return tip:NumLines() end)
+        if not okN or type(n) ~= "number" then return out end
+        for j = 1, math.min(n, 20) do
+            local lt = _G["GameTooltipTextLeft" .. j]
+            local rt = _G["GameTooltipTextRight" .. j]
+            local ls, rs = nil, nil
+            if lt ~= nil then
+                local okL, v = pcall(function() return lt:GetText() end)
+                if okL and type(v) == "string" and not WR_PaladinForever_IsSecretValue(v) then ls = v end
+            end
+            if rt ~= nil then
+                local okR, v = pcall(function() return rt:GetText() end)
+                if okR and type(v) == "string" and not WR_PaladinForever_IsSecretValue(v) then rs = v end
+            end
+            if ls ~= nil or rs ~= nil then
+                out[#out + 1] = { left = ls or "", right = rs or "" }
+            end
+        end
+        return out
+    end
+    local function classify(lines)
+        -- 顺序：类型短词 → 名称白名单 → 「法术ID: N」行
+        for i = 1, #lines do
+            local k = WR_PaladinForever_KindFromShortText(lines[i].left)
+            if k == nil then k = WR_PaladinForever_KindFromShortText(lines[i].right) end
+            if k == "poison" or k == "disease" or k == "magic" then return k end
+            if k == "curse" or k == "bleed" then return k end
+        end
+        for i = 1, #lines do
+            local k = WR_PaladinForever_KindFromAuraName(lines[i].left)
+            if k == nil then k = WR_PaladinForever_KindFromAuraName(lines[i].right) end
+            if k ~= nil then return k end
+        end
+        for i = 1, #lines do
+            local joined = lines[i].left .. " " .. lines[i].right
+            local okLow, low = pcall(string.lower, joined)
+            if okLow and type(low) == "string"
+                and (string.find(low, "法术id", 1, true) or string.find(low, "spell id", 1, true)) then
+                local okM, digits = pcall(string.match, joined, "(%d+)")
+                if okM and type(digits) == "string" then
+                    local okNum, num = pcall(tonumber, digits)
+                    if okNum and type(num) == "number" and num > 0 then
+                        local known = WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS[num]
+                        if known ~= nil then return known end
+                        local d = WR_PaladinForever_CLEANSE_DISCOVERED_IDS[num]
+                        if d ~= nil then return d end
+                        local st = WR_PaladinForever_StaticSpellDispelKind(num)
+                        if st ~= nil then
+                            WR_PaladinForever_RememberCleansableID(num, st)
+                            return st
+                        end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+    local sawUnknown = false
+    local sawKnownNon = false
+    for i = 1, 40 do
+        local okSet = pcall(function()
+            if hasDebuffSetter then
+                tip:SetUnitDebuff(unit, i)
+            else
+                tip:SetUnitAura(unit, i)
+            end
+        end)
+        if not okSet then
+            -- 被拒 / 签名不符：3 秒内不再打扰
+            deniedMap[unit] = now + 3
+            pcall(function() tip:Hide() end)
+            return cacheMap[unit]
+        end
+        local lines = readLines()
+        if #lines == 0 then break end
+        local kind = classify(lines)
+        if kind == "poison" or kind == "disease" or kind == "magic" then
+            pcall(function() tip:Hide() end)
+            cacheMap[unit] = true
+            return true
+        end
+        if kind == "curse" or kind == "bleed" then sawKnownNon = true else sawUnknown = true end
+    end
+    pcall(function() tip:Hide() end)
+    if sawKnownNon and not sawUnknown then
+        cacheMap[unit] = false
+        return false
+    end
+    cacheMap[unit] = nil
+    return nil
+end
+_G.WR_PaladinForever_ProbeByGameTooltip = WR_PaladinForever_ProbeByGameTooltip
+
+-- ★★★ 2026-11-19 八次修复（审计结论）：曾尝试用
+--   C_UnitAuras.GetAuraDataByIndex(unit, 1, "HARMFUL|Magic") 这类「驱散类型令牌」
+--   做免读回存在性探针，但**已回退**：
+--   本服 / 经典客户端的 GetAuraDataByIndex filter 只认 HARMFUL / HELPFUL / RAID /
+--   PLAYER 等标准令牌，Magic/Poison 这类不是它的合法取值。令牌不被识别时引擎
+--   会**忽略**类型部分，等价于裸 "HARMFUL" → 返回第一条任意 debuff →
+--   「中诅咒也点亮清洁术」。GX.lua 已记录过同款事故（旧探针只数槽位 → 诅咒误驱）。
+--   结论：类型判定只能走「能读出类型」或「名字/ID 命中白名单」的通道，
+--   绝不能用「引擎返回了某条数据」当作「是某种可驱散类型」的证据。
+
 function WR_PaladinForever_ProbeDispellableByFilter(unit)
     if type(unit) ~= "string" or unit == "" then return nil end
     if C_UnitAuras == nil then return nil end
@@ -3315,7 +3739,10 @@ local function WR_PaladinForever_ScanUnitDebuffTypes(unit)
     if unit == "player" then
         local euiHit = WR_PaladinForever_ScanEUIAuraButtons()
         if euiHit == true then return true end
-        if euiHit == false then return false end
+        -- ★★★ 2026-11-19：受限战斗里 EUI 的 DebuffBorder 图集可能整段不刷新，
+        --   此时 false 是「读不到」而不是「确定没有可驱散」；只有非受限上下文
+        --   才采信 false，否则放行给后面的白名单 / 静态分类 / tooltip 通道。
+        if euiHit == false and not WR_PaladinForever_AurasRestricted() then return false end
     end
     local sawAny = false
     local sawUnknown = false
@@ -3335,6 +3762,14 @@ local function WR_PaladinForever_ScanUnitDebuffTypes(unit)
                 and (string.find(nameLower, "诅咒", 1, true) or string.find(nameLower, "curse", 1, true)) then
                 sawKnownNonCleansable = true
                 return nil
+            end
+        end
+        -- ★★★ 2026-11-19 八次修复：名称白名单（名字通常不是 secret，见用户截图）。
+        --   名字命中 CLEANSE_KNOWN_AURA_NAMES 即按类型判定；诅咒名已在上面排除。
+        if type(name) == "string" and not WR_PaladinForever_IsSecretValue(name) then
+            local nameKind = WR_PaladinForever_KindFromAuraName(name)
+            if nameKind == "poison" or nameKind == "disease" or nameKind == "magic" then
+                return true
             end
         end
         if spellId ~= nil and not WR_PaladinForever_IsSecretValue(spellId) then
@@ -3453,6 +3888,12 @@ end
 -- ============================================================
 WR_PaladinForever_EUI_DebuffContainer = nil
 WR_PaladinForever_EUI_Buttons = WR_PaladinForever_EUI_Buttons or setmetatable({}, { __mode = "k" })
+-- ★★★ 2026-11-19 十四次修复：给每枚 EUI 光环按钮打上「容器 / 单位 / 是否减益组」。
+--   AddGroupToContainer → MakeInitializer 是同步调用，用这个字段把组信息带进按钮初始化闭包；
+--   按钮可能是延迟创建的（池化），所以必须在 MakeInitializer 的闭包里捕获，而不是创建时读取。
+WR_PaladinForever_EUI_PendingGroup = nil
+-- 诊断：最近一次「减益按钮存在性」扫描结果（shown / scanned / at）
+WR_PaladinForever_EUI_PresenceLast = nil
 
 local function WR_PaladinForever_EUI_Install()
     local EUI = _G and _G.EllesmereUI or nil
@@ -3484,34 +3925,79 @@ local function WR_PaladinForever_EUI_Install()
         end
     end
 
-    -- 再挂 AK.AddGroupToContainer，在按钮创建窗口缓存 dispelHolder（子纹理可读性
-    -- 比 button 本体更好；战斗中 button 本体常被 DenyTaintedAccessWhenAurasAreSecret 拒绝）。
+    -- ★★★ 2026-11-19 十四次修复：挂 AK.MakeInitializer + AK.AddGroupToContainer。
+    --   旧实现只包 group.extraInit —— 但 unit frame 的光环组（DeclareElementGroup）
+    --   根本不传 extraInit，整个容器一枚按钮都记录不到，真机 EUI减益容器=true 却扫不到按钮
+    --   就是这个原因。改挂 MakeInitializer 后，每一组的每枚按钮（含延迟池化创建的）都能拿到。
+    --   同时记录：容器、单位（container.unit）、是否减益组（filter 含 HARMFUL / debuffOnly）。
+    --   用途：战斗内光环数据被 secret 拒绝时，用「减益按钮是否处于显示状态」判存在性。
     local AK = rawget(EUI, "AuraKit")
     if type(AK) == "table" and type(AK.AddGroupToContainer) == "function"
         and not rawget(AK, "__WR_PaladinCleanseHooked") then
         rawset(AK, "__WR_PaladinCleanseHooked", true)
-        local origAdd = AK.AddGroupToContainer
-        AK.AddGroupToContainer = function(container, group)
-            if type(group) == "table" and type(group.extraInit) == "function" then
-                local oldExtra = group.extraInit
-                group.extraInit = function(button, d, style)
-                    -- ★ 2026-11-16：不只 dispelBorder；EUI 的 dispelTypeIcon 通道
-                    -- 也会在 d.dispelHolder 下创建引擎图标纹理，必须一并缓存。
-                    if type(d) == "table" and d.dispelHolder ~= nil
-                        and type(style) == "table"
-                        and (style.dispelBorder == true or style.dispelTypeIcon ~= nil) then
-                        -- iconTex / strips 在 extraInit 时已存在（ApplyStyleToRegions
-                        -- 先于 extra 执行）；战斗内 holder:GetRegions 可能被拒，
-                        -- 缓存好的引用仍能读 atlas/颜色。
-                        WR_PaladinForever_EUI_Buttons[button] = {
-                            holder = d.dispelHolder, style = style,
-                            iconTex = d.dispelIconTex, strips = d.dispelStrips,
-                        }
+        local origMake = rawget(AK, "MakeInitializer")
+        if type(origMake) == "function" then
+            AK.MakeInitializer = function(styleKey, extra, rec)
+                local pending = WR_PaladinForever_EUI_PendingGroup
+                local Init = origMake(styleKey, extra, rec)
+                if type(Init) ~= "function" then return Init end
+                return function(button, d, style)
+                    if pending ~= nil and button ~= nil then
+                        local info = WR_PaladinForever_EUI_Buttons[button]
+                        if info == nil then
+                            info = {}
+                            WR_PaladinForever_EUI_Buttons[button] = info
+                        end
+                        info.container = pending.container
+                        info.unit = pending.unit
+                        if pending.harmful then info.harmful = true end
+                        -- 缓存 dispel 纹理引用（战斗内 holder:GetRegions 可能被拒，
+                        -- 缓存好的引用仍能读 atlas/颜色）。
+                        if type(d) == "table" and d.dispelHolder ~= nil
+                            and type(style) == "table"
+                            and (style.dispelBorder == true or style.dispelTypeIcon ~= nil) then
+                            info.holder = d.dispelHolder
+                            info.style = style
+                            info.iconTex = d.dispelIconTex
+                            info.strips = d.dispelStrips
+                        end
                     end
-                    return oldExtra(button, d, style)
+                    return Init(button, d, style)
                 end
             end
-            return origAdd(container, group)
+        end
+        local origAdd = AK.AddGroupToContainer
+        AK.AddGroupToContainer = function(container, group)
+            local harmful = false
+            if type(group) == "table" then
+                local f = group.filter
+                if type(f) == "table" then
+                    for fi = 1, #f do
+                        local tok = f[fi]
+                        if type(tok) == "string"
+                            and string.find(string.upper(tok), "HARMFUL", 1, true) then
+                            harmful = true
+                            break
+                        end
+                    end
+                end
+                if not harmful and group.debuffOnly == true then harmful = true end
+            end
+            local u = nil
+            pcall(function()
+                u = container.unit
+                if type(u) ~= "string" and type(container.GetUnit) == "function" then
+                    u = container:GetUnit()
+                end
+            end)
+            if type(u) ~= "string" then u = nil end
+            WR_PaladinForever_EUI_PendingGroup = {
+                container = container, harmful = harmful, unit = u,
+            }
+            local okA, ret = pcall(origAdd, container, group)
+            WR_PaladinForever_EUI_PendingGroup = nil
+            if not okA then error(ret, 0) end
+            return ret
         end
     end
 end
@@ -3696,6 +4182,55 @@ WR_PaladinForever_ScanEUIAuraButtons = function()
     if sawKnownNon and not sawUnknownButton then return false end
     -- 只有所有可见按钮都读到明确类型、且至少一个明确不可驱散时才返回 false；
     -- 任何未知按钮都返回 nil，交给引擎探测器与后续通道。
+    return nil
+end
+
+-- ★★★ 2026-11-19 十四次修复：EUI 减益按钮「存在性」探测（不读任何光环字段）。
+--   战斗内 C_UnitAuras 对 tainted 插件直接拒绝，UNIT_AURA 数据拿不到；
+--   但 EUI 的光环按钮由引擎侧 AuraContainer 驱动，显示状态是普通布尔，
+--   所以「有显示中的减益按钮」= 该单位身上有减益。
+--   返回：true=有显示中的减益按钮 / false=减益组存在但全部隐藏 / nil=没有减益组按钮信息。
+--   ★ 2026-11-19 十五次修复：12.x 里光环按钮的显示状态是 secret，受限战斗中
+--     `button:IsShown()` 会被整棵子树拒绝（EUI 源码注释原话："its shown state is secret
+--     even out of restriction"）。实机 740 枚减益按钮全部读失败。这里加 5 秒熔断，
+--     避免每 tick 对几百枚按钮做无意义的 pcall。
+function WR_PaladinForever_EUI_HarmfulPresence(unit)
+    local now = GetTime()
+    if WR_PaladinForever_EUI_PresenceBlockedUntil
+        and now < WR_PaladinForever_EUI_PresenceBlockedUntil then
+        WR_PaladinForever_EUI_PresenceLast = {
+            shown = false, scanned = 0, tried = 0, blocked = true, unit = unit, at = now,
+        }
+        return nil
+    end
+    local shown, scanned, tried = false, 0, 0
+    if type(WR_PaladinForever_EUI_Buttons) == "table" then
+        for b, info in pairs(WR_PaladinForever_EUI_Buttons) do
+            if type(info) == "table" and info.harmful then
+                local u = info.unit
+                if u == nil or u == unit then
+                    tried = tried + 1
+                    local okS, s = pcall(function() return b:IsShown() end)
+                    if okS and type(s) == "boolean" then
+                        scanned = scanned + 1
+                        if s then
+                            shown = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    WR_PaladinForever_EUI_PresenceLast = {
+        shown = shown, scanned = scanned, tried = tried, unit = unit, at = now,
+    }
+    if shown then return true end
+    if scanned > 0 then return false end
+    if tried > 0 then
+        -- 全部读失败 = 该客户端禁止读按钮状态 → 熔断 5 秒
+        WR_PaladinForever_EUI_PresenceBlockedUntil = now + 5
+    end
     return nil
 end
 
@@ -3919,6 +4454,19 @@ WR_PaladinForever_CLEANSE_PROBE_DISPEL_TYPES = {
 --     nil 一律当未知（秘密旗 ID 返回 nil ≠ 不存在），绝不判无。
 --   ③ includeDispelTypes 组保留（脱战 / 非受限内容仍由它精确判型）。
 WR_PaladinForever_CLEANSE_PROBE_YOU_FILTER = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+-- ★★★ 2026-11-19 八次修复：按【驱散类型】过滤的免读回存在性组。
+--   用户连续五次截图实锤（毒药 744 / 暗言术：痛 15654 / 毒药 13298 / 毒性钉刺 5416 /
+--   毒性唾液 7125 / 脆弱 12530 / 减速术 11436 / 烈焰震击 23038）：战斗里
+--   auraData.dispelName / spellId 是 secret，candidateFilters 读 dispelName 也被
+--   REDACTED —— 之前所有「读回类型」的通道在真机战斗中全部落空。
+--   但**过滤器令牌是引擎侧求值**的：引擎自己知道每条光环的驱散类型，
+--   "HARMFUL|Magic" 这类令牌由引擎筛选，插件只数帧数 —— 零读回、零比较、不吃 secret。
+--   组内帧数 > 0 即「明确存在该类型的 debuff」，直接对应清洁术可驱散。
+WR_PaladinForever_CLEANSE_TYPE_FILTERS = {
+    { key = "magic",   filter = "HARMFUL|Magic",   group = "WR_CLEANSE_TYPE_MAGIC" },
+    { key = "disease", filter = "HARMFUL|Disease", group = "WR_CLEANSE_TYPE_DISEASE" },
+    { key = "poison",  filter = "HARMFUL|Poison",  group = "WR_CLEANSE_TYPE_POISON" },
+}
 -- ★ 已知可驱散 debuff ID → 类型（服务端截图实锤 + 经典常见；实测命中后追加）：
 --   ★★★ 2026-11-18 四次修复：用户三张截图实锤 744 / 13298 / 15654 全不在
 --   第三版白名单内——免读回、免容器的 ID 直查通道（真机唯一不依赖探测容器的
@@ -3930,6 +4478,12 @@ WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS = {
     [5416] = "poison",   -- 毒性钉刺（2026-11-18 截图实锤）
     [744] = "poison",    -- 毒药（蜘蛛/野兽类，2026-11-18 截图实锤）
     [13298] = "poison",  -- 毒药（蛇虫类，2026-11-18 截图实锤）
+    -- ★★★ 2026-11-19 七次修复：用户截图实锤「毒性唾液 · 法术ID 7125 · 中毒 · 剩余2分钟」
+    --   每6秒造成17点自然伤害 + 每6秒吸取20点法力值。该 ID 此前完全没进白名单，
+    --   而本服的「毒」家族 ID 极其分散（744/13298/5416/7125 各不相关），
+    --   靠逐条截图补录永远补不完 —— 同批修复还给静态提示分类（GetSpellByID）
+    --   补了「法术ID」行与顶层 id 两条证据，让未录入的 ID 也能自动判型。
+    [7125] = "poison",   -- 毒性唾液（2026-11-19 用户截图实锤）
     -- 疾病（disease）
     [3427] = "disease",  -- 感染之伤（2026-11-17 截图实锤）
     -- 魔法（magic）：暗言术：痛全 rank（15654 为 2026-11-18 截图实锤）
@@ -3944,9 +4498,84 @@ WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS = {
     [118] = "magic",     -- 变形术
     [13710] = "magic",   -- 缓速
     [8122] = "magic",    -- 心灵控制
+    -- ★ 2026-11-19 新增：减速术全 rank（11436=Rank1/13173=Rank2/23100=Rank3，用户截图实锤 11436）
+    [11436] = "magic",   -- 减速术 Rank 1（2026-11-19 用户截图实锤）
+    [13173] = "magic",   -- 减速术 Rank 2
+    [23100] = "magic",   -- 减速术 Rank 3
+    -- ★ 寒冰箭自带减速（无独立 debuff ID，但寒冰箭本体是魔法 debuff）
+    [7322] = "magic",    -- 寒冰箭 Rank 1（减速 debuff 本体）
+    [8376] = "magic",    -- 寒冰箭 Rank 2
+    -- ★ 奥术减速（奥术飞弹/奥术射击附带）
+    [3604] = "magic",    -- 奥术射击 Rank 1（减速 debuff 本体）
+    -- ★ 羊/冰环/恐惧类（都是魔法类型，但持续时间短且常免疫，清洁术能驱）
+    [118] = "magic",     -- 变形术（之前已收录）
+    [28271] = "magic",   -- 变形术：乌龟
+    [3355] = "magic",    -- 冰冻陷阱（猎人）
+    [12654] = "magic",   -- 冰霜新星（法师冰环）
+    -- ★ 2026-11-19 截图实锤：烈焰震击（萨满，全 rank），C_TooltipInfo 静态提示能读到但
+    --   战斗里 spellId 也可能是 secret（EllesmereUIAuraBuffReminders NON_SECRET 策略），
+    --   直接白名单兜底，让 UnitAuraIDHasDispellable 这条 spellID 通道在任何上下文
+    --   下都命中；同时 PlayerAuraIDHasDispellable 也能扫到。
+    [23038] = "magic",   -- 烈焰震击 Rank 1（2026-11-19 用户截图实锤）
+    [23062] = "magic",   -- 烈焰震击 Rank 2
+    [23063] = "magic",   -- 烈焰震击 Rank 3
+    -- ★ 2026-11-19 六次修复：用户截图实锤「脆弱 · 法术ID 12530 · 魔法 · 剩余57秒」。
+    --   该 debuff 由副本怪物对玩家施加（所有属性降低10点），类型=魔法，
+    --   清洁术能驱；但白名单此前完全没收录 12530 → ID 直查/ID 分类两条通道全 miss，
+    --   战斗内 spellId 又是 secret → tooltip 顶层 id 也读不到 → 全链 unknown → 不亮。
+    [12530] = "magic",   -- 脆弱（2026-11-19 用户截图实锤，所有属性降低10点）
+    -- ★★★ 2026-11-19 十八次修复：用户截图实锤「投石 · 法术ID 23380 · 魔法 · 剩余5秒」，
+    --   每 3 秒造成一次奥术伤害。战斗中所有读光环字段的通道都被拒，唯一免读回的
+    --   GetPlayerAuraBySpellID 只认白名单/已发现表 —— 23380 此前两条都没有 → 不亮。
+    [23380] = "magic",   -- 投石（2026-11-19 用户截图实锤，每3秒奥术伤害）
+    -- 魔法：诅咒类（注意：清洁术**驱不了诅咒**！以下不收录，别误加 rank 家族）
 }
+-- ★★★ 2026-11-19 八次修复：debuff 名称 → 驱散类型白名单。
+--   受限内容里 auraData.dispelName / spellId 都可能是 secret，但服务端把 debuff
+--   名字原样交给 UI（用户截图「烈焰震击 · 法术ID 23038 · 魔法」里的名字就是可读的）。
+--   只要名字可读，就能按本表判型 —— 这是第四条不依赖任何秘密字段的通道。
+--   只收录清洁术**确实能驱散**的类型（中毒/疾病/魔法）；诅咒类绝不收录。
+WR_PaladinForever_CLEANSE_KNOWN_AURA_NAMES = {
+    -- 魔法
+    ["烈焰震击"] = "magic",
+    ["脆弱"] = "magic",
+    ["投石"] = "magic",
+    ["减速术"] = "magic",
+    ["缓速"] = "magic",
+    ["暗言术：痛"] = "magic",
+    ["暗言术:痛"] = "magic",
+    ["腐蚀术"] = "magic",
+    ["献祭"] = "magic",
+    ["变形术"] = "magic",
+    ["冰霜新星"] = "magic",
+    ["冰冻陷阱"] = "magic",
+    ["寒冰箭"] = "magic",
+    ["奥术射击"] = "magic",
+    ["心灵控制"] = "magic",
+    -- 中毒
+    ["毒性唾液"] = "poison",
+    ["毒性钉刺"] = "poison",
+    ["毒药"] = "poison",
+    -- 疾病
+    ["感染之伤"] = "disease",
+}
+
+-- 名称 → 类型（只认肯定证据：secret / 空 / 不在表内一律 nil）
+function WR_PaladinForever_KindFromAuraName(name)
+    if type(name) ~= "string" then return nil end
+    if WR_PaladinForever_IsSecretValue(name) then return nil end
+    local okTrim, s = pcall(string.match, name, "^%s*(.-)%s*$")
+    if not okTrim or type(s) ~= "string" or s == "" then return nil end
+    local kind = WR_PaladinForever_CLEANSE_KNOWN_AURA_NAMES[s]
+    if kind ~= nil then return kind end
+    return nil
+end
+_G.WR_PaladinForever_KindFromAuraName = WR_PaladinForever_KindFromAuraName
+
 WR_PaladinForever_CleanseProbe = WR_PaladinForever_CleanseProbe or {}
 WR_PaladinForever_CleanseProbeRetryAt = WR_PaladinForever_CleanseProbeRetryAt or {}
+-- 按类型过滤的存在性组缓存（rec.typeGroups[key] = group）
+WR_PaladinForever_CleanseTypeGroups = WR_PaladinForever_CleanseTypeGroups or {}
 
 -- ★★★ 2026-11-18 二次修复：探测按钮注册引擎「驱散类型图标」纹理。
 --   EUI AuraKit 源码实证（EllesmereUI_AuraKit.lua 251-261 / 690-706 / 940-1002）：
@@ -4051,6 +4680,21 @@ local function WR_PaladinForever_CleanseProbeEnsure(unit)
                 })
             end)
         end
+        -- ★★★ 2026-11-19 八次修复：幂等补挂「按驱散类型过滤」的存在性组
+        --   （magic / disease / poison 各一组，引擎侧求值、插件只数帧）。
+        if rec.typeGroups == nil then rec.typeGroups = {} end
+        if rec.frame ~= nil then
+            local specs = WR_PaladinForever_CLEANSE_TYPE_FILTERS
+            for si = 1, #specs do
+                local spec = specs[si]
+                if rec.typeGroups[spec.key] == nil then
+                    pcall(function()
+                        rec.typeGroups[spec.key] = rec.frame:AddAuraGroup(
+                            spec.group, spec.filter, { maxFrameCount = 10 })
+                    end)
+                end
+            end
+        end
         return rec
     end
     local retryAt = WR_PaladinForever_CleanseProbeRetryAt[unit]
@@ -4135,6 +4779,17 @@ local function WR_PaladinForever_CleanseProbeEnsure(unit)
         })
     end)
     if not okYouGroup then youGroup = nil end
+    -- ★★★ 2026-11-19 八次修复：按驱散类型过滤的存在性组（引擎侧求值、零读回）。
+    local typeGroups = {}
+    do
+        local specs = WR_PaladinForever_CLEANSE_TYPE_FILTERS
+        for si = 1, #specs do
+            local spec = specs[si]
+            pcall(function()
+                typeGroups[spec.key] = frame:AddAuraGroup(spec.group, spec.filter, { maxFrameCount = 10 })
+            end)
+        end
+    end
     -- ★★★ 2026-11-17 复查：对齐 EllesmereUI AuraKit 的装配顺序——先加组，
     -- 再 SetUnit + UpdateAllAuras（AK.CreateContainerShell / Stage 3 同款）。
     -- 旧顺序 SetUnit 在 AddAuraGroup 之前：AuraContainer 的 UNIT_AURA 数据管线
@@ -4154,7 +4809,8 @@ local function WR_PaladinForever_CleanseProbeEnsure(unit)
         frame:Show()
         if type(frame.UpdateAllAuras) == "function" then frame:UpdateAllAuras() end
     end)
-    rec = { frame = frame, unit = unit, group = group, rawGroup = rawGroup, youGroup = youGroup, setUnitOK = true }
+    rec = { frame = frame, unit = unit, group = group, rawGroup = rawGroup, youGroup = youGroup,
+            typeGroups = typeGroups, setUnitOK = true }
     probes[unit] = rec
     WR_PaladinForever_CleanseProbeRetryAt[unit] = nil
     return rec
@@ -4265,15 +4921,217 @@ function WR_PaladinForever_PlayerAuraIDHasDispellable(unit)
     -- 可调用 userdata，type() 不一定是 "function"（ProbeDispellableByFilter 同款约定）。
     local byIdFn = C_UnitAuras.GetPlayerAuraBySpellID
     if byIdFn == nil then return nil end
-    for sid, kind in pairs(WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS) do
-        if kind == "poison" or kind == "disease" or kind == "magic" then
-            local ok, aura = pcall(byIdFn, sid)
-            if ok and aura ~= nil then return true end
+    local function probeTable(t)
+        if type(t) ~= "table" then return nil end
+        for sid, kind in pairs(t) do
+            if kind == "poison" or kind == "disease" or kind == "magic" then
+                local ok, aura = pcall(byIdFn, sid)
+                if ok and aura ~= nil then return true end
+            end
+        end
+        return nil
+    end
+    -- ① 白名单（截图/实测已确认的 ID）
+    if probeTable(WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS) == true then return true end
+    -- ② ★★★ 2026-11-19 七次修复：运行时「已发现 ID」表。
+    --   白名单外的 ID（如毒性唾液 7125）此前永远轮不到这条免读回通道；
+    --   现在只要该 ID 曾在任何时刻被判过型（脱战可读 / 静态数据 / tooltip），
+    --   就会进表，之后战斗里的 ID 直查自动覆盖它。
+    if probeTable(WR_PaladinForever_CLEANSE_DISCOVERED_IDS) == true then return true end
+    return nil
+end
+_G.WR_PaladinForever_PlayerAuraIDHasDispellable = WR_PaladinForever_PlayerAuraIDHasDispellable
+
+-- ============================================================
+-- ★★★ 2026-11-19 六次修复：tooltip 数据通用分类（短词类型 + 「法术ID」行反查）
+--   用户截图实锤（脆弱 12530 · 魔法 · 剩余 57 秒）：本客户端 aura tooltip 的
+--   数据流可用，但旧实现有三处结构性缺口：
+--     ① 只认 leftText/rightText **精确等于**「中毒/疾病/魔法」——服务端把类型
+--        与名称并排或带空白/颜色码时永远匹配不到；
+--     ② 顶层 data.id 在受限内容里可能是 secret（EUI AuraBuffReminders 的
+--        NON_SECRET_SPELL_IDS 策略实证）→ 白名单直查这条路整条落空；
+--     ③ 截图里明明白白有「法术ID: 12530」这一行，旧实现完全没利用。
+--   这里统一成三条可证明证据（读不到一律 nil，绝不猜）：
+--     · 短行（≤ 8 字）包含类型词 → 按类型判（长描述行不参与，防「魔法伤害」误判）；
+--     · 「法术ID / Spell ID」行取数字 → 白名单 + 静态提示分类；
+--     · 顶层 id 可读 → 白名单。
+-- ============================================================
+-- 顺序敏感：诅咒 / 流血先判（清洁术驱不了，必须能明确排除）。
+WR_PaladinForever_TOOLTIP_KIND_WORDS = {
+    { "诅咒", "curse" }, { "流血", "bleed" },
+    { "中毒", "poison" }, { "疾病", "disease" }, { "魔法", "magic" },
+}
+
+-- 短文本 → 类型。只接受「短行」（≤ 8 字）：tooltip 的类型行就是「魔法」这种两字，
+-- 而法术描述行（「造成 X 点魔法伤害」）长度远超，不会误判。
+-- ★★★ 2026-11-19 七次修复：先剥离颜色码再判长度。
+--   tooltip 行文本可能带 |cffXXXXXX ... |r 转义（类型行被染色是常态），
+--   旧实现拿**带转义的原串**判「≤8 字」——「|cff1eff00中毒|r」有 15 个字符，
+--   直接被长度门挡掉 → 类型行明明可读却判不出类型 → 整条通道落空。
+--   长度门同步放宽到 12（颜色码剥掉后仍允许「中毒(自然)」这类短标注），
+--   长描述行（「每6秒造成17点自然伤害。」）依旧远超，不会误判。
+function WR_PaladinForever_KindFromShortText(v)
+    if type(v) ~= "string" then return nil end
+    if WR_PaladinForever_IsSecretValue(v) then return nil end
+    local okL, s = pcall(string.lower, v)
+    if not okL or type(s) ~= "string" or s == "" then return nil end
+    -- 剥离颜色/贴图转义：|cAARRGGBB ... |r（AARRGGBB 为 8 位十六进制）
+    local okS, stripped = pcall(string.gsub, s, "|c%x%x%x%x%x%x%x%x", "")
+    if okS and type(stripped) == "string" then s = stripped end
+    local okR, noReset = pcall(string.gsub, s, "|r", "")
+    if okR and type(noReset) == "string" then s = noReset end
+    local okT, noTex = pcall(string.gsub, s, "|t", "")
+    if okT and type(noTex) == "string" then s = noTex end
+    -- 去掉首尾空白（服务端会在类型行前后塞空格）
+    local okTrim, trimmed = pcall(string.match, s, "^%s*(.-)%s*$")
+    if okTrim and type(trimmed) == "string" then s = trimmed end
+    if s == "" then return nil end
+    if #s > 12 then return nil end
+    local words = WR_PaladinForever_TOOLTIP_KIND_WORDS
+    for i = 1, #words do
+        local pair = words[i]
+        if string.find(s, pair[1], 1, true) or string.find(s, pair[2], 1, true) then
+            return pair[2]
         end
     end
     return nil
 end
-_G.WR_PaladinForever_PlayerAuraIDHasDispellable = WR_PaladinForever_PlayerAuraIDHasDispellable
+
+-- 从 tooltip 行里抽「法术ID: N」的数字（截图实证行形态）。
+--   leftText / rightText 两段都可能承载标签，拼接后再抓数字。
+function WR_PaladinForever_SpellIDFromTooltipLines(data)
+    if type(data) ~= "table" and type(data) ~= "userdata" then return nil end
+    local okL, lines = pcall(function() return data.lines end)
+    if not okL or type(lines) ~= "table" then return nil end
+    local okN, n = pcall(function() return #lines end)
+    if not okN or type(n) ~= "number" or WR_PaladinForever_IsSecretValue(n) then return nil end
+    for j = 1, n do
+        local line = lines[j]
+        if type(line) == "table" then
+            local okA, left = pcall(function() return line.leftText end)
+            local okB, right = pcall(function() return line.rightText end)
+            local ls, rs = "", ""
+            if okA and type(left) == "string" and not WR_PaladinForever_IsSecretValue(left) then ls = left end
+            if okB and type(right) == "string" and not WR_PaladinForever_IsSecretValue(right) then rs = right end
+            local joined = ls .. " " .. rs
+            local okLow, low = pcall(string.lower, joined)
+            if okLow and type(low) == "string" and low ~= ""
+                and (string.find(low, "法术id", 1, true) or string.find(low, "spell id", 1, true)) then
+                local okM, digits = pcall(string.match, joined, "(%d+)")
+                if okM and type(digits) == "string" then
+                    local okNum, num = pcall(tonumber, digits)
+                    if okNum and type(num) == "number" and num > 0 then return num end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- tooltip 数据 → 类型（poison/disease/magic/curse/bleed）或 nil（未知）。
+--   ★ 调用顺序：短词 → 「法术ID」行 → 顶层 id。
+--   注意：这里会调用 DispKindBySpellID（静态提示），而 DispKindBySpellID 内部
+--   的 KindFromSpellTooltip **只做短词判定、绝不回调本函数**，不会递归。
+function WR_PaladinForever_KindFromTooltipData(data)
+    if type(data) ~= "table" and type(data) ~= "userdata" then return nil end
+    local okL, lines = pcall(function() return data.lines end)
+    if okL and type(lines) == "table" then
+        local okN, n = pcall(function() return #lines end)
+        if okN and type(n) == "number" and not WR_PaladinForever_IsSecretValue(n) then
+            for j = 1, n do
+                local line = lines[j]
+                if type(line) == "table" then
+                    local okA, left = pcall(function() return line.leftText end)
+                    if okA then
+                        local k = WR_PaladinForever_KindFromShortText(left)
+                        if k ~= nil then
+                            -- ★★★ 2026-11-19 七次修复：短词行是最常见的命中路径，
+                            --   必须在这里也把 spellID 记进发现表 —— 否则
+                            --   「类型行可读但 ID 没入库」→ 下一场战斗 ID 直查仍然漏。
+                            WR_PaladinForever_RememberCleansableID(
+                                WR_PaladinForever_SpellIDFromTooltipLines(data), k)
+                            return k
+                        end
+                    end
+                    local okB, right = pcall(function() return line.rightText end)
+                    if okB then
+                        local k = WR_PaladinForever_KindFromShortText(right)
+                        if k ~= nil then
+                            WR_PaladinForever_RememberCleansableID(
+                                WR_PaladinForever_SpellIDFromTooltipLines(data), k)
+                            return k
+                        end
+                    end
+                    -- ★★★ 2026-11-19 八次修复：名称白名单证据。
+                    --   用户截图「烈焰震击 · 法术ID 23038 · 魔法」里名字行是可读的，
+                    --   而类型行「魔法」可能因为颜色码 / 并排布局读不出来。
+                    --   名字命中 CLEANSE_KNOWN_AURA_NAMES 即可判型（只认肯定证据）。
+                    local kName = WR_PaladinForever_KindFromAuraName(left)
+                    if kName == nil and okB then
+                        local okR2, r2 = pcall(function() return line.rightText end)
+                        if okR2 then kName = WR_PaladinForever_KindFromAuraName(r2) end
+                    end
+                    if kName ~= nil then
+                        WR_PaladinForever_RememberCleansableID(
+                            WR_PaladinForever_SpellIDFromTooltipLines(data), kName)
+                        return kName
+                    end
+                    -- ★★★ 2026-11-19 八次修复：名称白名单证据。
+                    --   用户截图「烈焰震击 · 法术ID 23038 · 魔法」里名字行是可读的，
+                    --   而类型行「魔法」可能因为颜色码/并排布局读不出来。
+                    --   名字命中 CLEANSE_KNOWN_AURA_NAMES 即可判型（只认肯定证据）。
+                    local kName = WR_PaladinForever_KindFromAuraName(left)
+                    if kName == nil and okB then
+                        local okR2, r2 = pcall(function() return line.rightText end)
+                        if okR2 then kName = WR_PaladinForever_KindFromAuraName(r2) end
+                    end
+                    if kName ~= nil then
+                        WR_PaladinForever_RememberCleansableID(
+                            WR_PaladinForever_SpellIDFromTooltipLines(data), kName)
+                        return kName
+                    end
+                end
+            end
+        end
+    end
+    local sid = WR_PaladinForever_SpellIDFromTooltipLines(data)
+    if sid ~= nil then
+        local known = WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS[sid]
+        if known ~= nil then return known end
+        local discovered = WR_PaladinForever_CLEANSE_DISCOVERED_IDS
+        if type(discovered) == "table" then
+            local d = discovered[sid]
+            if d ~= nil then return d end
+        end
+        if type(WR_PaladinForever_DispelKindBySpellID) == "function" then
+            local k = WR_PaladinForever_DispelKindBySpellID(sid)
+            if k ~= nil then return k end
+        end
+        -- ★★★ 2026-11-19 七次修复：静态法术数据兜底。
+        --   截图里的「法术ID: 7125」行可读时，即使这个 ID 从没进过白名单，
+        --   也能靠客户端静态数据判出「中毒」→ 当场点亮，并记住这个 ID，
+        --   下一场战斗的 ID 直查通道自动覆盖它。这是「不再靠截图补 ID」的闭环。
+        local staticKind = WR_PaladinForever_StaticSpellDispelKind(sid)
+        if staticKind ~= nil then
+            WR_PaladinForever_RememberCleansableID(sid, staticKind)
+            return staticKind
+        end
+    end
+    local okId, topId = pcall(function() return data.id end)
+    if okId and type(topId) == "number" and not WR_PaladinForever_IsSecretValue(topId) then
+        local known = WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS[topId]
+        if known ~= nil then
+            WR_PaladinForever_RememberCleansableID(topId, known)
+            return known
+        end
+        local staticTop = WR_PaladinForever_StaticSpellDispelKind(topId)
+        if staticTop ~= nil then
+            WR_PaladinForever_RememberCleansableID(topId, staticTop)
+            return staticTop
+        end
+    end
+    return nil
+end
 
 -- ★★★ 2026-11-18 四次修复④：C_TooltipInfo 驱散提示扫描（免读回、免容器）。
 --   实证：!Pig Tooltip.lua 321（TooltipDataProcessor.UnitAura 读 data.id）+
@@ -4285,67 +5143,128 @@ _G.WR_PaladinForever_PlayerAuraIDHasDispellable = WR_PaladinForever_PlayerAuraID
 --   因此只走 C_TooltipInfo（GetUnitDebuffByIndex / GetUnitDebuff 兼容序）。
 --   全部 pcall + secret 过滤，只认肯定证据：读不到一律 nil（未知），绝不判无。
 --   0.5 秒节流；调用被拒记 2.5 秒冷却（受限拒绝不会在半秒内解除）。
-WR_PaladinForever_CleanseTooltipScanAt = 0
-WR_PaladinForever_CleanseTooltipScanCache = nil
-WR_PaladinForever_CleanseTooltipScanDenied = false
-WR_PaladinForever_CleanseTooltipScanRetryAt = 0
+WR_PaladinForever_CleanseTooltipScanAt = {}       -- per-unit 节流时间
+WR_PaladinForever_CleanseTooltipScanCache = {}     -- per-unit 缓存
+WR_PaladinForever_CleanseTooltipScanDenied = {}    -- per-unit 是否被拒
+WR_PaladinForever_CleanseTooltipScanRetryAt = {}   -- per-unit 重试时间
+WR_PaladinForever_CleanseTooltipScanHoldAt = {}    -- per-unit「已确认 true」保持起点
 function WR_PaladinForever_CleanseTooltipScan(unit)
-    if unit ~= "player" then return nil end
+    if type(unit) ~= "string" or unit == "" then return nil end
     local now = GetTime()
-    if now - WR_PaladinForever_CleanseTooltipScanAt < 0.5 then
-        return WR_PaladinForever_CleanseTooltipScanCache
+    local atMap = WR_PaladinForever_CleanseTooltipScanAt
+    local cacheMap = WR_PaladinForever_CleanseTooltipScanCache
+    local deniedMap = WR_PaladinForever_CleanseTooltipScanDenied
+    local retryMap = WR_PaladinForever_CleanseTooltipScanRetryAt
+    -- ★★★ 2026-11-19 八次修复：节流 0.5 → 0.2 秒，并给「已确认 true」加保持期。
+    --   真机上 tooltip 数据流可能间歇性被拒（受限内容下引擎逐帧放行/拒绝）；
+    --   旧实现每次重扫都先 cacheMap[unit] = nil，一旦这一帧读不到，
+    --   上一帧刚确认的 true 立刻丢失 → 清洁术色块灭掉 → AHK 不按 → 玩家看到
+    --   「明明身上有魔法 debuff 却一直不驱」。现在 true 结果保持 1.5 秒
+    --   （与色块保持窗口同量级），期间即使重扫被拒也继续判可驱散。
+    local lastAt = atMap[unit] or 0
+    if now - lastAt < 0.2 then
+        return cacheMap[unit]
     end
-    WR_PaladinForever_CleanseTooltipScanAt = now
-    if WR_PaladinForever_CleanseTooltipScanDenied then
-        if now < WR_PaladinForever_CleanseTooltipScanRetryAt then
-            return WR_PaladinForever_CleanseTooltipScanCache
-        end
-        WR_PaladinForever_CleanseTooltipScanDenied = false
+    atMap[unit] = now
+    local denied = deniedMap[unit]
+    if denied and now < (retryMap[unit] or 0) then
+        return cacheMap[unit]
     end
-    WR_PaladinForever_CleanseTooltipScanCache = nil
+    deniedMap[unit] = false
+    -- ★ 保持期：上一次明确读到可驱散 → 1.5 秒内继续按「有」处理
+    local holdMap = WR_PaladinForever_CleanseTooltipScanHoldAt
+    local holdAt = holdMap[unit] or 0
+    local prevTrue = cacheMap[unit] == true
+    if not (prevTrue and (now - holdAt) < 1.5) then
+        cacheMap[unit] = nil
+    end
     local C_TI = C_TooltipInfo
-    if type(C_TI) ~= "table" then return nil end
-    local scanFn = C_TI.GetUnitDebuffByIndex or C_TI.GetUnitDebuff
-    if scanFn == nil then return nil end
-    for i = 1, 20 do
-        local ok, data = pcall(scanFn, unit, i)
+    if type(C_TI) ~= "table" then return cacheMap[unit] end
+    -- ★★★ 2026-11-19 七次修复：
+    --   ① 槽位上限 20 → 40。中毒/魔法类 debuff 在一场 boss 战里很容易超过 20 条，
+    --      旧上限会把排在后面的毒整条截断（用户看到的「明明中了毒却不驱」）。
+    --   ② 兼容序补 GetUnitAuraByIndex（部分客户端只暴露通用版本，
+    --      与 FuryByTooltip 的兼容序一致）。
+    -- ★★★ 2026-11-19 八次修复：候选函数改为「全部收集 + 逐个尝试」。
+    --   旧写法 A or B or C 只取第一个**存在**的函数：只要该函数存在但签名 / 上下文
+    --   不对（返回 nil 或直接抛错），整条 tooltip 通道就永久哑火，后面的候选
+    --   （GetUnitAura / GetUnitAuraByIndex）根本没机会跑。用户截图「烈焰震击
+    --   23038 · 魔法 · 剩余6秒」正是这条通道本该命中的形态。
+    --   现在：把存在的候选全部列出来，逐条扫；某条抛错只跳过它自己，
+    --   全部候选都被拒才记 denied。
+    local scanFns = {}
+    local function addFn(fn, extra)
+        if fn == nil then return end
+        scanFns[#scanFns + 1] = { fn = fn, extra = extra }
+    end
+    addFn(C_TI.GetUnitDebuffByIndex)
+    addFn(C_TI.GetUnitDebuff)
+    addFn(C_TI.GetUnitAuraByIndex)
+    addFn(C_TI.GetUnitAura)
+    addFn(C_TI.GetUnitAura, "HARMFUL")
+    addFn(C_TI.GetUnitAuraByIndex, "HARMFUL")
+    if #scanFns == 0 then return nil end
+    local sawKnownNon, sawUnknown, sawDenied = false, false, false
+    local anyCallOK = false
+    for fi = 1, #scanFns do
+      local cand = scanFns[fi]
+      local scanFn = cand.fn
+      local extra = cand.extra
+      for i = 1, 40 do
+        local ok, data
+        if extra ~= nil then
+            ok, data = pcall(scanFn, unit, i, extra)
+        else
+            ok, data = pcall(scanFn, unit, i)
+        end
         if not ok then
-            -- 调用被拒（受限拒绝/实现差异）：本轮未知，2.5 秒内不再打扰引擎。
-            WR_PaladinForever_CleanseTooltipScanDenied = true
-            WR_PaladinForever_CleanseTooltipScanRetryAt = now + 2.5
-            return nil
+            -- 该候选被拒 / 签名不符：只跳过它自己，继续试下一个候选。
+            sawDenied = true
+            break
         end
+        anyCallOK = true
         if data == nil then break end
-        -- ① 顶层 id（!Pig 同款字段）→ 已知白名单
-        local okId, sid = pcall(function() return data.id end)
-        if okId and type(sid) == "number" and not WR_PaladinForever_IsSecretValue(sid) then
-            local kind = WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS[sid]
-            if kind == "poison" or kind == "disease" or kind == "magic" then
-                WR_PaladinForever_CleanseTooltipScanCache = true
-                return true
-            end
+        -- ★★★ 2026-11-19 六次修复：统一走 KindFromTooltipData。
+        --   旧版只认 leftText/rightText **精确等于**「中毒/疾病/魔法」，并且只查
+        --   顶层 data.id 白名单；用户截图「脆弱 12530 · 魔法」里既不是精确等值行、
+        --   顶层 id 在受限内容里又是 secret → 整条通道落空 → 清洁术不亮。
+        --   新顺序（全部只认肯定证据）：短词类型行 → 「法术ID: N」行反查 → 顶层 id。
+        --   诅咒 / 流血必须能明确排除，否则中诅咒时会误放清洁术。
+        local kind = WR_PaladinForever_KindFromTooltipData(data)
+        if kind == "poison" or kind == "disease" or kind == "magic" then
+            cacheMap[unit] = true
+            WR_PaladinForever_CleanseTooltipScanHoldAt[unit] = now
+            return true
         end
-        -- ② 行文本：引擎自绘驱散类型行「中毒/疾病/魔法」（截图实证行形态）
-        local okLines, lines = pcall(function() return data.lines end)
-        if okLines and type(lines) == "table" then
-            local okN, n = pcall(function() return #lines end)
-            if okN and type(n) == "number" and not WR_PaladinForever_IsSecretValue(n) then
-                for j = 1, n do
-                    local okL, left = pcall(function() return lines[j].leftText end)
-                    if okL and type(left) == "string" and not WR_PaladinForever_IsSecretValue(left)
-                        and (left == "中毒" or left == "疾病" or left == "魔法") then
-                        WR_PaladinForever_CleanseTooltipScanCache = true
-                        return true
-                    end
-                    local okR, right = pcall(function() return lines[j].rightText end)
-                    if okR and type(right) == "string" and not WR_PaladinForever_IsSecretValue(right)
-                        and (right == "中毒" or right == "疾病" or right == "魔法") then
-                        WR_PaladinForever_CleanseTooltipScanCache = true
-                        return true
-                    end
-                end
-            end
+        -- ★ 诅咒 / 流血只记账，**绝不能提前 return false**：
+        --   同一单位身上可能「诅咒 + 魔法」并存，第一条是诅咒就停会把后面的
+        --   脆弱/烈焰震击整条漏掉（正是「有诅咒在身时魔法 debuff 不驱」的老毛病）。
+        if kind == "curse" or kind == "bleed" then
+            sawKnownNon = true
+        else
+            sawUnknown = true
         end
+      end
+    end
+    -- 所有候选都被拒（受限拒绝 / 签名全不符）：本轮未知，2.5 秒内不再打扰引擎。
+    -- ★ 2026-11-19 九次修复：保持期内的 true 不能被这里清掉 —— 受限内容下
+    --   tooltip 数据流经常「一帧能读、下一帧被拒」，旧写法在被拒分支直接
+    --   cacheMap[unit] = nil，导致刚确认的可驱散结论立刻丢失、色块灭掉、
+    --   AHK 不按，玩家看到的就是「明明有魔法 debuff 却一直不驱」。
+    if not anyCallOK then
+        deniedMap[unit] = true
+        retryMap[unit] = now + 2.5
+        if prevTrue and (now - holdAt) < 1.5 then
+            cacheMap[unit] = true
+            return true
+        end
+        cacheMap[unit] = nil
+        return nil
+    end
+    -- 只有「每条都读得懂且全不可清洁」才允许判无；含未知一律返回 nil。
+    if sawKnownNon and not sawUnknown and not sawDenied then
+        cacheMap[unit] = false
+        return false
     end
     return nil
 end
@@ -4372,22 +5291,107 @@ local function WR_PaladinForever_KindFromSpellTooltip(data)
     if not okL or type(lines) ~= "table" then return nil end
     local okN, n = pcall(function() return #lines end)
     if not okN or type(n) ~= "number" or WR_PaladinForever_IsSecretValue(n) then return nil end
+    -- ★ 2026-11-19 六次修复：精确等值 → 短词包含。
+    --   静态法术提示里的类型行形态不稳定（「魔法」/「魔法 debuff」/带颜色码），
+    --   NormalizeDispelType 的精确比较会全部落空。KindFromShortText 只接受
+    --   长度 ≤ 8 的类型行，长描述行不参与，不会把「造成魔法伤害」误判成 debuff 类型。
     for j = 1, n do
         local line = lines[j]
         if type(line) == "table" then
             local okA, left = pcall(function() return line.leftText end)
-            if okA and type(left) == "string" then
-                local k = WR_PaladinForever_NormalizeDispelType(left)
+            if okA then
+                local k = WR_PaladinForever_KindFromShortText(left)
+                if k == nil then k = WR_PaladinForever_NormalizeDispelType(left) end
                 if k ~= nil then return k end
             end
             local okB, right = pcall(function() return line.rightText end)
-            if okB and type(right) == "string" then
-                local k = WR_PaladinForever_NormalizeDispelType(right)
+            if okB then
+                local k = WR_PaladinForever_KindFromShortText(right)
+                if k == nil then k = WR_PaladinForever_NormalizeDispelType(right) end
                 if k ~= nil then return k end
             end
         end
     end
     return nil
+end
+
+-- ★★★ 2026-11-19 七次修复：静态法术驱散类型（纯服务端静态数据，不吃光环权限）。
+--   用户截图「毒性唾液 7125 · 中毒」暴露的是结构性问题：本服的 debuff ID
+--   极其分散（744 / 13298 / 5416 / 7125 彼此毫无关联），靠逐张截图往白名单里
+--   补 ID 永远补不完 —— 每次新副本/新怪就再漏一次。
+--   这里改用客户端自带的**静态法术数据**判型：C_Spell.GetSpellDispelType 与
+--   C_Spell.GetSpellInfo().dispelType 都是按 spellID 查的静态字段，
+--   与「单位光环是否 secret / 是否在战斗」完全无关。
+--   两个 API 任一存在且能读 → 直接得到类型；都不存在 → nil（不猜，交后续通道）。
+--   Enum.DispelType：0=None 1=Magic 2=Curse 3=Disease 4=Poison 5=Bleed。
+WR_PaladinForever_DISPEL_ENUM_MAP = {
+    [1] = "magic", [2] = "curse", [3] = "disease", [4] = "poison", [5] = "bleed",
+}
+
+function WR_PaladinForever_StaticSpellDispelKind(spellId)
+    local sid = spellId
+    if type(sid) ~= "number" then
+        local okN, n = pcall(tonumber, sid)
+        if not okN or type(n) ~= "number" then return nil end
+        sid = n
+    end
+    if sid <= 0 then return nil end
+
+    local function mapVal(v)
+        if v == nil or WR_PaladinForever_IsSecretValue(v) then return nil end
+        if type(v) == "number" then
+            return WR_PaladinForever_DISPEL_ENUM_MAP[v]
+        end
+        return WR_PaladinForever_NormalizeDispelType(v)
+    end
+
+    -- ① C_Spell.GetSpellDispelType(spellID)（新客户端直给枚举）
+    if type(C_Spell) == "table" then
+        local fn = C_Spell.GetSpellDispelType
+        if fn ~= nil then
+            local ok, v = pcall(fn, sid)
+            if ok then
+                local k = mapVal(v)
+                if k ~= nil then return k end
+            end
+        end
+        -- ② C_Spell.GetSpellInfo(spellID).dispelType（结构体字段）
+        local infoFn = C_Spell.GetSpellInfo
+        if infoFn ~= nil then
+            local ok2, info = pcall(infoFn, sid)
+            if ok2 and (type(info) == "table" or type(info) == "userdata") then
+                local okD, dt = pcall(function() return info.dispelType end)
+                if okD then
+                    local k = mapVal(dt)
+                    if k ~= nil then return k end
+                end
+            end
+        end
+    end
+    return nil
+end
+_G.WR_PaladinForever_StaticSpellDispelKind = WR_PaladinForever_StaticSpellDispelKind
+
+-- ★★★ 2026-11-19 七次修复：运行时「已发现可驱散 ID」记忆表。
+--   战斗中 auraData.spellId 是 secret，唯一能用的免读回通道是
+--   C_UnitAuras.GetPlayerAuraBySpellID(sid) 逐 ID 直查 —— 但它只遍历白名单，
+--   白名单外的 ID（如 7125）永远轮不到。
+--   这里把「任何时刻被判定为 poison/disease/magic 的 spellID」记进本表
+--   （脱战/可读时由 UnitAuraIDHasDispellable 与 ScanUnitDebuffTypes 自动喂），
+--   下一场战斗 ID 直查通道就能覆盖它 —— 不需要再靠截图补录。
+--   上限 200 条防无限增长（超出后不再新增，白名单仍优先）。
+WR_PaladinForever_CLEANSE_DISCOVERED_IDS = WR_PaladinForever_CLEANSE_DISCOVERED_IDS or {}
+WR_PaladinForever_CLEANSE_DISCOVERED_COUNT = WR_PaladinForever_CLEANSE_DISCOVERED_COUNT or 0
+WR_PaladinForever_CLEANSE_DISCOVERED_MAX = 200
+
+function WR_PaladinForever_RememberCleansableID(spellId, kind)
+    if type(spellId) ~= "number" or spellId <= 0 then return end
+    if kind ~= "poison" and kind ~= "disease" and kind ~= "magic" then return end
+    local t = WR_PaladinForever_CLEANSE_DISCOVERED_IDS
+    if t[spellId] ~= nil then return end
+    if WR_PaladinForever_CLEANSE_DISCOVERED_COUNT >= WR_PaladinForever_CLEANSE_DISCOVERED_MAX then return end
+    t[spellId] = kind
+    WR_PaladinForever_CLEANSE_DISCOVERED_COUNT = WR_PaladinForever_CLEANSE_DISCOVERED_COUNT + 1
 end
 
 -- 返回 "poison"/"disease"/"magic"/"curse"/"bleed" 或 nil（未知/无驱散类型）
@@ -4409,6 +5413,19 @@ function WR_PaladinForever_DispelKindBySpellID(spellId)
         return known
     end
 
+    -- ①b ★★★ 2026-11-19 七次修复：客户端静态法术数据（GetSpellDispelType /
+    --   GetSpellInfo().dispelType）。不吃光环权限、不看战斗状态，
+    --   未录入白名单的 ID（例如新副本的中毒/魔法）也能自动判型。
+    local staticKind = WR_PaladinForever_StaticSpellDispelKind(sid)
+    if staticKind ~= nil then
+        if WR_PaladinForever_DispelKindByIDCount < 600 then
+            cache[sid] = staticKind
+            WR_PaladinForever_DispelKindByIDCount = WR_PaladinForever_DispelKindByIDCount + 1
+        end
+        WR_PaladinForever_RememberCleansableID(sid, staticKind)
+        return staticKind
+    end
+
     -- ② 静态法术提示：失败/被拒不缓存，10 秒后重试（避免每 tick 砸引擎）
     local missAt = WR_PaladinForever_DispelKindByIDMissAt
     local now = GetTime()
@@ -4425,6 +5442,7 @@ function WR_PaladinForever_DispelKindBySpellID(spellId)
                         cache[sid] = kind
                         WR_PaladinForever_DispelKindByIDCount = WR_PaladinForever_DispelKindByIDCount + 1
                     end
+                    WR_PaladinForever_RememberCleansableID(sid, kind)
                     return kind
                 end
             end
@@ -4437,26 +5455,50 @@ end
 -- 逐条 aura 的 spellId 分类（任意单位通用；完全不读 dispelName/dispelType）
 --   true  = 明确存在可驱散（毒/病/魔法）
 --   false = 全部读得懂且都不需要清洁术（含只有诅咒/流血）
---   nil   = 未知（API 缺失、spellId secret、类型读不到）
+--   nil   = 未知（API 缺失、spellId 双来源都 secret、类型读不到）
+--
+-- ★★★ 2026-11-19 双来源 spellId：auraData.spellId 在战斗里可能是 secret（用户截图
+--   减速术 11436 / 烈焰震击 23038 的实证），但 C_TooltipInfo.GetUnitDebuffByIndex
+--   返回的 data.id 是 tooltip 引擎组装的数据，不受 DenyTaintedAccessWhenAurasAreSecret
+--   限制（EllesmereUIAuraBuffReminders data.id 同源）。两个来源**同索引位**（C_UnitAuras
+--   GetAuraDataByIndex 的 i 就是第 i 个 HARMFUL，C_TooltipInfo.GetUnitDebuffByIndex 的
+--   i 也是第 i 个 debuff），所以 auraData.spellId secret 时并行扫 tooltip data.id。
 function WR_PaladinForever_UnitAuraIDHasDispellable(unit)
     if type(unit) ~= "string" or unit == "" then return nil end
     if type(C_UnitAuras) ~= "table" then return nil end
     local byIdx = C_UnitAuras.GetAuraDataByIndex
     if byIdx == nil then return nil end
+    -- tooltip 引擎第二来源（不强制存在，缺失时直接跳过）
+    local C_TI_Tip = C_TooltipInfo
+    local tipScan = nil
+    if type(C_TI_Tip) == "table" then
+        tipScan = C_TI_Tip.GetUnitDebuffByIndex or C_TI_Tip.GetUnitDebuff
+    end
     local sawAny, sawUnknown = false, false
     for i = 1, 40 do
         local ok, data = pcall(byIdx, unit, i, "HARMFUL")
         if not ok then return nil end
         if data == nil then break end
         sawAny = true
+        local kind = nil
+        -- ① 首选：auraData.spellId（非 secret 时最快）
         local okS, sid = pcall(function() return data.spellId end)
         if okS and type(sid) == "number" and not WR_PaladinForever_IsSecretValue(sid) then
-            local kind = WR_PaladinForever_DispelKindBySpellID(sid)
-            if kind == "poison" or kind == "disease" or kind == "magic" then return true end
-            if kind ~= "curse" and kind ~= "bleed" then sawUnknown = true end
-        else
-            sawUnknown = true
+            kind = WR_PaladinForever_DispelKindBySpellID(sid)
         end
+        -- ② 并行：tooltip data.id（auraData.spellId secret 时可能可读）
+        if kind == nil and tipScan ~= nil then
+            local okT, tdata = pcall(tipScan, unit, i)
+            if okT and tdata ~= nil then
+                -- ★★★ 2026-11-19 六次修复：不再只看顶层 data.id。
+                --   受限内容里 data.id 可能是 secret，但 tooltip 行文本
+                --   （类型行 / 「法术ID: N」行）由引擎 C 侧组装，仍可读；
+                --   用户截图「脆弱 12530 · 魔法」正是这条数据流。
+                kind = WR_PaladinForever_KindFromTooltipData(tdata)
+            end
+        end
+        if kind == "poison" or kind == "disease" or kind == "magic" then return true end
+        if kind ~= "curse" and kind ~= "bleed" then sawUnknown = true end
     end
     if sawAny and not sawUnknown then return false end
     return nil
@@ -4483,6 +5525,47 @@ local function WR_PaladinForever_CleanseProbeHasDispellable(unit)
     _G.WR_PaladinForever_CleanseProbeDebug = _G.WR_PaladinForever_CleanseProbeDebug or {}
     _G.WR_PaladinForever_CleanseProbeDebug[unit] = { at = GetTime(), frames = count, setUnitOK = rec.setUnitOK, ttHit = WR_PaladinForever_CleanseTooltipScanCache }
     if count > 0 then return true end
+    -- ★★★ 2026-11-19 八次修复：按驱散类型过滤的存在性组（引擎侧求值、零读回）。
+    --   这是真机战斗里唯一不受 secret 影响的判据：
+    --     · filter 令牌由引擎求值，插件只读组内帧数；
+    --     · 不读 name / dispelName / spellId / 图集 / 顶点色，一个字段都不碰；
+    --     · magic / disease / poison 三组任一有帧 → 明确存在清洁术可驱散的 debuff。
+    --   用户截图「烈焰震击 23038 · 魔法」就是 magic 组该有帧的形态。
+    local typeGroups = rec.typeGroups
+    if type(typeGroups) == "table" then
+        local specs = WR_PaladinForever_CLEANSE_TYPE_FILTERS
+        local typeSeen = {}
+        for si = 1, #specs do
+            local spec = specs[si]
+            local grp = typeGroups[spec.key]
+            if grp == nil then
+                local okG, g = pcall(function()
+                    return rec.frame:GetAuraGroup(spec.group)
+                end)
+                if okG then grp = g end
+                if grp ~= nil then typeGroups[spec.key] = grp end
+            end
+            if grp ~= nil then
+                local frames2
+                local ok2 = pcall(function() frames2 = grp:GetFramesByIndex() end)
+                if ok2 and type(frames2) == "table" then
+                    local okCnt, cnt = pcall(function() return #frames2 end)
+                    if okCnt and type(cnt) == "number"
+                        and not WR_PaladinForever_IsSecretValue(cnt) then
+                        typeSeen[#typeSeen + 1] = spec.key .. "=" .. tostring(cnt)
+                        if cnt > 0 then
+                            _G.WR_PaladinForever_CleanseProbeDebug[unit].typeGroups =
+                                table.concat(typeSeen, ",")
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+        if #typeSeen > 0 then
+            _G.WR_PaladinForever_CleanseProbeDebug[unit].typeGroups = table.concat(typeSeen, ",")
+        end
+    end
     -- ★★★ 2026-11-18 三次修复①：YOU 组命中 = 引擎判定「有我本人可驱散 debuff」
     --   （免读回：组内有帧就是答案，类型字段一个都不读）。
     local youFrames
@@ -4595,6 +5678,297 @@ if type(CreateFrame) == "function" then
     end)
 end
 
+-- ============================================================
+-- ★★★ 2026-11-19 十一次修复：受限战斗「纯存在性」通道
+-- ------------------------------------------------------------
+-- 真机诊断实证（/FH_QJS_DEBUG，战斗内 secret=true）：所有读字段的通道
+--   （dispelName/spellId/name/tooltip/静态分类/容器/EUI 图集）全部 nil。
+-- 但客户端仍知道「你身上有一条自己能驱散的 debuff」——这正是暴雪团队框架
+-- 用来画驱散高亮的信息，走的是 UnitAura 的 **RAID 过滤令牌**：
+--   RAID = 「我能施放的增益 + 我能驱散的减益」。
+-- 因此 `UnitAura(unit, 1, "HARMFUL|RAID")`（或 `UnitDebuff(unit, 1, "RAID")`）
+--   只要返回非 nil，就说明存在一条职业可驱散的减益（圣骑士 = 中毒/疾病/魔法）。
+-- 本通道**只判存在性、不读任何字段**，也不做比较/算术，符合 secret 约束。
+-- 返回：true=存在可驱散 / false=明确没有 / nil=API 不可用或调用被拒。
+-- ★ 当前状态：**仅用于诊断**，不参与 UnitHasDispel 判定。
+--   原因：本服 RAID 过滤是否真的排除诅咒/流血尚未在真机验证；
+--   一旦滤镜被忽略，按存在性放行就会把诅咒也点亮（历史事故 H4/J28）。
+--   验证方法：战斗中只中诅咒时执行 /FH_QJS_DEBUG，看
+--     「UnitDebuff存在=1」而「驱散过滤器存在=0」→ 滤镜有效，接线可放行；
+--     两者都=1 → 滤镜被忽略，本通道必须保持只读诊断。
+-- ============================================================
+function WR_PaladinForever_UnitDispelPresence(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    -- 注意两条 API 的过滤令牌写法不同：
+    --   UnitAura 需要完整的 "HARMFUL|RAID"；
+    --   UnitDebuff 是兼容包装，内部会自己加 "HARMFUL|"，这里只能给 "RAID"。
+    --   照抄 "HARMFUL|RAID" 给 UnitDebuff 会变成非法过滤串 → 恒 nil。
+    local probes = {
+        { UnitAura, "HARMFUL|RAID" },
+        { UnitDebuff, "RAID" },
+    }
+    local sawAPI = false
+    for f = 1, #probes do
+        local fn = probes[f][1]
+        if fn ~= nil then
+            sawAPI = true
+            local ok1, a1 = pcall(fn, unit, 1, probes[f][2])
+            if ok1 then
+                local okN, isNil = pcall(function() return a1 == nil end)
+                if okN then
+                    if not isNil then return true end
+                    return false
+                end
+            end
+        end
+    end
+    if sawAPI then return nil end
+    return nil
+end
+
+-- ★★★ 2026-11-19 十三次修复（用户口径：战斗中退化为「有减益就提示」）
+-- ------------------------------------------------------------
+-- 真机实证（02:01）：战斗内所有光环字段全 nil——UnitAura 不存在（noAPI）、
+--   UnitDebuff=0、C_UnitAuras.GetAuraDataByIndex 全 nil、tooltip/静态/图集通道全 nil。
+--   也就是说插件在战斗内根本无法区分中毒/疾病/魔法/诅咒。
+-- 用户明确选择：此时只要「有任意减益」就点亮清洁术（宁可能驱就驱，接受诅咒空按）。
+-- 本函数只判存在性、不读任何字段：
+--   ① AuraUtil.ForEachAura("HARMFUL") —— 引擎侧遍历，回调被调用即视为有减益
+--      （secret 字段原样传回，我们不读、只记「来过」）；
+--   ② EUI 减益按钮里有处于显示状态的按钮（player/target 及所有 EUI 光环容器）；
+--   ③ UnitDebuff(unit,1,"HARMFUL") 存在性（本服战斗中通常 =0，留作脱战兜底）。
+-- 返回：true=有减益 / false=确认没有 / nil=完全读不到。
+-- ★ 2026-11-19：每次结果都写进 WR_PaladinForever_AnyHarmfulLast，供 /FH_QJS_DEBUG
+--   区分「循环路径读不到」与「诊断（斜杠命令）路径读不到」——两者 taint 上下文不同。
+WR_PaladinForever_AnyHarmfulLast = WR_PaladinForever_AnyHarmfulLast or {}
+
+-- ★★★ 2026-11-19 十五次修复：战斗内唯一可用的「存在性」信号 —— UNIT_AURA 事件。
+--   02:41 实机实证：EUI 记录了 740 枚减益按钮，但 IsShown 全部被拒（EUI 源码注释：
+--   "its shown state is secret even out of restriction"），C_UnitAuras 三条接口全 ERR，
+--   GameTooltip 也读不出 —— 本服战斗内不把任何光环字段交给插件，连「按钮是否显示」都不行。
+--   因此退化为：该单位 3 秒内发生过光环变化 → 视为「可能有减益」→ 允许点亮清洁术。
+--   代价（用户已确认接受「有减益就提示」口径）：增益刷新也会触发一次，由 8 秒 CD 限流；
+--   好处是战斗中真的能驱散，而不是完全哑火。
+WR_PaladinForever_AuraEventAt = WR_PaladinForever_AuraEventAt or {}
+WR_PaladinForever_AuraEventSeq = WR_PaladinForever_AuraEventSeq or {}
+-- 「确认与清洁术相关」的减益变化时刻（区分增益 / 不可驱散减益）
+WR_PaladinForever_AuraHarmfulAt = WR_PaladinForever_AuraHarmfulAt or {}
+-- 诊断：每个单位最近一次 UNIT_AURA 负载的判定结果（按单位分开，避免被别的单位覆盖）
+WR_PaladinForever_AuraPayloadLast = WR_PaladinForever_AuraPayloadLast or {}
+-- 诊断：保留最近一次 UNIT_AURA 的 updateInfo 原始表（延迟探针用，不参与判定）
+WR_PaladinForever_AuraUpdateInfoLast = WR_PaladinForever_AuraUpdateInfoLast or {}
+-- 该单位的负载是否曾经可读（可读后就不再退回「任意变化」口径）
+WR_PaladinForever_AuraPayloadKnown = WR_PaladinForever_AuraPayloadKnown or {}
+-- 有效窗口：覆盖一次 1.5 秒色块保持 + 一次重试（ShowSkillCD 的 guard）
+WR_PaladinForever_AURA_EVENT_WINDOW = 3.0
+
+-- 读 UNIT_AURA 负载字段：secret / 异常 / 非基础类型 一律返回 nil（= 未知，绝不猜）
+local function wrAuraField(data, key)
+    local ok, v = pcall(function() return data[key] end)
+    if not ok or v == nil then return nil end
+    if type(WR_PaladinForever_IsSecretValue) == "function"
+        and WR_PaladinForever_IsSecretValue(v) then
+        return nil
+    end
+    local t = type(v)
+    if t == "string" or t == "boolean" or t == "number" then return v end
+    return nil
+end
+
+-- 判定一次 UNIT_AURA 的新增光环是否「值得点亮清洁术」。
+-- 返回：true=有可驱散减益（魔法/中毒/疾病）/ false=明确无关（增益、诅咒、流血、不可驱散）
+--       / nil=负载整体不可读（退回「任意变化」口径）
+-- ★ 2026-11-19 十六次修复（用户截图：发霉的书籍陷阱 17134，不可驱散，却亮了清洁术）：
+--   负载里能读到 isHelpful / dispelName 时就不再「见变化就亮」。
+-- ★ 十七次修复：旧版「负载不可读 → 退回任意变化」在真机上是错的（玩家没中可驱散减益
+--   也一直亮），已删掉该兜底；同时返回第二值 shape（诊断用，直接显示本服负载长什么样）。
+function WR_PaladinForever_ClassifyUnitAuraPayload(updateInfo)
+    local okType, isTbl = pcall(function()
+        return type(updateInfo) == "table" or type(updateInfo) == "userdata"
+    end)
+    if not okType or not isTbl then return nil, "nil" end
+    local okA, added = pcall(function() return updateInfo.addedAuras end)
+    if not okA then return nil, "add=ERR" end
+    if added == nil then
+        -- 只有全量刷新、没有新增列表 → 不据此点亮（否则每次开战必然空按一次）
+        if wrAuraField(updateInfo, "isFullUpdate") == true then return false, "full" end
+        return nil, "add=nil"
+    end
+    if type(added) ~= "table" then return nil, "add=" .. type(added) end
+    local okN, n = pcall(function() return #added end)
+    if not okN or type(n) ~= "number" then return nil, "n=ERR" end
+    if type(WR_PaladinForever_IsSecretValue) == "function"
+        and WR_PaladinForever_IsSecretValue(n) then
+        return nil, "n=secret"
+    end
+    local shapePrefix = "n=" .. tostring(n)
+    local sampled = false
+    if n == 0 then
+        -- 全量刷新（含空的新增列表）：不据此点亮，避免每次开战/切换场景空按一次
+        if wrAuraField(updateInfo, "isFullUpdate") == true then return false, shapePrefix .. "/full" end
+        return nil, shapePrefix
+    end
+    local shape = shapePrefix
+    for i = 1, n do
+        local okI, aura = pcall(function() return added[i] end)
+        if okI and (type(aura) == "table" or type(aura) == "userdata") then
+            local helpful = wrAuraField(aura, "isHelpful")
+            if helpful == nil then
+                local harmful = wrAuraField(aura, "isHarmful")
+                if harmful == true then helpful = false end
+            end
+            local dispel = wrAuraField(aura, "dispelName")
+            if helpful ~= nil or dispel ~= nil then sampled = true end
+            if i == 1 then
+                shape = shape .. "/h=" .. (helpful == nil and "nil" or tostring(helpful))
+                    .. "/d=" .. (dispel == nil and "nil" or tostring(dispel))
+            end
+            if helpful ~= true then
+                if dispel ~= nil then
+                    local kind = WR_PaladinForever_KindFromShortText(dispel)
+                    if kind == "magic" or kind == "poison" or kind == "disease" then
+                        return true, shape
+                    end
+                    -- 诅咒 / 流血 / 其它：清洁术驱不掉，明确无关
+                elseif helpful == false then
+                    -- 明确是减益但没有驱散类型（如「发霉的书籍陷阱」）→ 清洁术无效
+                end
+            end
+        end
+    end
+    if sampled then return false, shape end
+    return nil, shape
+end
+
+-- ★★★ 2026-11-19 十八次修复③：负载里「到底有没有新增光环」的免读探针。
+--   真机实证：addedAuras 为 nil 的事件（全量刷新/仅更新）没有新增光环；
+--   为 table 的事件则一定有，只是长度/字段是 secret 读不到。
+--   这条信息不含任何光环内容，不会被 secret 拦截，是本服唯一可用的战斗内信号。
+--   语义：true=确有新增（类型未知）；false=确认无新增或字段读不到（不可据此判无）。
+function WR_PaladinForever_PayloadHasAddedAura(updateInfo)
+    if updateInfo == nil then return false end
+    local okA, added = pcall(function() return updateInfo.addedAuras end)
+    if not okA then return false end
+    if added == nil then return false end
+    local t = type(added)
+    return t == "table" or t == "userdata"
+end
+
+local wrAuraEventFrame = CreateFrame("Frame")
+wrAuraEventFrame:RegisterEvent("UNIT_AURA")
+wrAuraEventFrame:SetScript("OnEvent", function(_, _, unit, updateInfo)
+    if type(unit) ~= "string" then return end
+    local now = GetTime()
+    WR_PaladinForever_AuraEventAt[unit] = now
+    WR_PaladinForever_AuraEventSeq[unit] = (WR_PaladinForever_AuraEventSeq[unit] or 0) + 1
+    local verdict, shape = WR_PaladinForever_ClassifyUnitAuraPayload(updateInfo)
+    WR_PaladinForever_AuraPayloadLast[unit] = { v = verdict, shape = shape, at = now }
+    WR_PaladinForever_AuraUpdateInfoLast[unit] = updateInfo
+    if verdict ~= nil then
+        WR_PaladinForever_AuraPayloadKnown[unit] = true
+    end
+    local hasAdded = WR_PaladinForever_PayloadHasAddedAura(updateInfo)
+    if verdict == true then
+        WR_PaladinForever_AuraHarmfulAt[unit] = now
+    elseif verdict == nil and hasAdded then
+        -- ★ 用户口径（2026-11-19 05:57 确认）：本服战斗内无法判定驱散类型，
+        --   但「有新增光环」是真实信号 → 战斗内按它可以点亮清洁术（8 秒限流）。
+        --   只排除两类明确无关的事件：全量刷新（addedAuras=nil）与已判定为
+        --   增益/诅咒/无驱散类型的负载（verdict=false）。这是「能驱」与「少误亮」
+        --   之间的最终取舍：宁可偶发空按，也不能漏掉魔法/中毒/疾病。
+        WR_PaladinForever_AuraHarmfulAt[unit] = now
+    end
+    -- 注意：verdict=nil 且没有新增光环（全量刷新/更新事件）仍然不点亮 ——
+    -- 真机 03:38 的误亮正是「任意事件都算」，这里只认「确实新增了光环」。
+end)
+
+-- ★★★ 2026-11-19 十八次修复②：按「驱散类型名」直查（经典 UnitDebuff 的字符串 index）。
+--   经典 API 的 UnitDebuff(unit, index, filter) 里 index 允许传字符串：
+--     · 驱散类型名（"Magic"/"Poison"/"Disease"/"Curse"）；
+--     · 光环名（"投石"）。
+--   本服 UnitDebuff 是兼容包装（数字 index 恒返回 0/nil），但字符串形态未必同款实现。
+--   一旦支持，这就是「不读任何光环字段」的精确存在性通道：
+--   想判魔法就看 UnitDebuff(unit,"Magic") 是否非 nil —— 完全绕开 secret 读数。
+--   只认肯定证据：nil → 未知（返回 nil），绝不当「没有」。
+function WR_PaladinForever_UnitDebuffByDispelKind(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    if UnitDebuff == nil then return nil end
+    -- 中英双写：本服客户端可能是中文服，包装层可能按本地化名查
+    local keys = { "Magic", "Poison", "Disease", "魔法", "中毒", "疾病" }
+    local sawAny = false
+    for i = 1, #keys do
+        local ok, d = pcall(UnitDebuff, unit, keys[i])
+        if ok then
+            sawAny = true
+            local okN, isNil = pcall(function() return d == nil end)
+            -- 比较抛错 = 返回值是 secret ⇒ 非 nil ⇒ 该类型减益存在
+            if not okN then return true end
+            -- 只认「真的返回了亏 aura 对象」：兼容包装对未知 index 可能返回
+            -- 0/false 之类的占位值，绝不能当成「有减益」，否则战斗中恒亮。
+            if not isNil then
+                local t = type(d)
+                if t == "table" or t == "userdata" then return true end
+            end
+        end
+    end
+    if sawAny then return false end
+    return nil
+end
+_G.WR_PaladinForever_UnitDebuffByDispelKind = WR_PaladinForever_UnitDebuffByDispelKind
+
+function WR_PaladinForever_UnitAuraChangedRecently(unit, window)
+    -- 只认「负载明确判定为与清洁术相关」的时刻；不再用「任意光环变化」兜底。
+    local at = WR_PaladinForever_AuraHarmfulAt[unit]
+    if type(at) ~= "number" then return false end
+    return (GetTime() - at) <= (window or WR_PaladinForever_AURA_EVENT_WINDOW)
+end
+
+function WR_PaladinForever_UnitHasAnyHarmful(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    local function fin(v)
+        WR_PaladinForever_AnyHarmfulLast[unit] = { v = v, at = GetTime() }
+        return v
+    end
+    -- ⓪ 只有受限战斗才采信事件信号；脱战仍走类型精确判定（诅咒/流血不误放）
+    if WR_PaladinForever_AurasRestricted() and WR_PaladinForever_UnitAuraChangedRecently(unit) then
+        return fin(true)
+    end
+    local known = false
+    -- ① 引擎侧遍历（unit 可以是 player/target/party1…）
+    if type(AuraUtil) == "table" and type(AuraUtil.ForEachAura) == "function" then
+        local found = false
+        local ok = pcall(AuraUtil.ForEachAura, unit, "HARMFUL", nil, function()
+            found = true
+            return true
+        end, true)
+        if ok then
+            if found then return fin(true) end
+            known = true
+        end
+    end
+    -- ② EUI 减益按钮（player/target 等所有挂在 EUI 光环容器上的减益组）
+    if type(WR_PaladinForever_EUI_HarmfulPresence) == "function" then
+        local okP, v = pcall(WR_PaladinForever_EUI_HarmfulPresence, unit)
+        if okP then
+            if v == true then return fin(true) end
+            if v == false then known = true end
+        end
+    end
+    -- ③ 经典 UnitDebuff 存在性
+    if UnitDebuff ~= nil then
+        local okD, d = pcall(UnitDebuff, unit, 1, "HARMFUL")
+        if okD then
+            local okN, isNil = pcall(function() return d == nil end)
+            if okN then
+                if not isNil then return fin(true) end
+                known = true
+            end
+        end
+    end
+    if known then return fin(false) end
+    return fin(nil)
+end
+
 function WR_PaladinForever_UnitHasDispel(unit)
     if type(unit) ~= "string" or unit == "" then return false end
     local okE, exists = pcall(UnitExists, unit)
@@ -4608,13 +5982,32 @@ function WR_PaladinForever_UnitHasDispel(unit)
     if engineProbe == true then return true end
     -- ★★★ 2026-11-18 三次修复②：已知 debuff ID 存在性直查（不依赖探测容器，
     --   容器装配失败/受限战斗下也能命中；非 nil 即存在，nil 当未知绝不判无）。
+    --   PlayerAuraIDHasDispellable 内部只扫玩家自身光环 → 保持 player only。
     if unit == "player" then
         local okID, idHit = pcall(WR_PaladinForever_PlayerAuraIDHasDispellable, unit)
         if okID and idHit == true then return true end
-        -- ★★★ 2026-11-18 四次修复④：C_TooltipInfo 提示扫描（免读回、免容器）。
-        local okTT, ttHit = pcall(WR_PaladinForever_CleanseTooltipScan, unit)
-        if okTT and ttHit == true then return true end
     end
+    -- ★★★ 2026-11-19 十八次修复②：经典 UnitDebuff 的「驱散类型名」直查。
+    --   真机 05:37 实证：本服战斗内 C_UnitAuras 三条接口全 ERR（连独立执行帧的
+    --   C_Timer 延迟探针都一样），EUI 按钮 IsShown 全拒，GameTooltip/提示扫描全 nil，
+    --   GetPlayerAuraBySpellID(23380) 也返回 nil —— 任何「读光环」的通道都没了。
+    --   唯一没试过的是 UnitDebuff 的字符串 index（经典 API 允许传 "Magic"/"Poison"…），
+    --   它不返回光环数据，只回答「有没有这类减益」，正好绕开 secret 读数。
+    local okDK, dkHit = pcall(WR_PaladinForever_UnitDebuffByDispelKind, unit)
+    if okDK and dkHit == true then return true end
+    -- ★★★ 2026-11-18 四次修复④：C_TooltipInfo 提示扫描（免读回、免容器、
+    --   绕开 dispelName/spellId 双 secret）。2026-11-19 扩展到所有单位
+    --   （原来只对 player，target/party/mouseover 的 debuff 也可能是魔法/毒/病）。
+    --   调用被拒在受限战斗里是常态，内部有 2.5 秒冷却自动恢复。
+    local okTT, ttHit = pcall(WR_PaladinForever_CleanseTooltipScan, unit)
+    if okTT and ttHit == true then return true end
+    -- ★★★ 2026-11-19 九次修复：GameTooltip 直读（用户截图就是鼠标悬停 tooltip）。
+    --   C_TooltipInfo 数据表在受限内容里可能整条被拒 / 字段 secret；
+    --   而 GameTooltip:SetUnitDebuff 之后读字体串 GetText() 是引擎写的普通文本，
+    --   本仓库 PartyMemberFrame.lua 366 同款用法。玩家正在看 tooltip 时本函数
+    --   自动让路（见函数内守卫），绝不打断玩家操作。
+    local okGT, gtHit = pcall(WR_PaladinForever_ProbeByGameTooltip, unit)
+    if okGT and gtHit == true then return true end
     -- ★★★ 2026-11-18 五次修复：全单位 spellID 静态分类（不依赖容器/类型字段）。
     --   只要 auraData.spellId 可读，就能靠静态提示判定中毒/疾病/魔法；
     --   target/party/mouseover 与 player 走同一条通道，战斗中同样有效。
@@ -4660,6 +6053,14 @@ function WR_PaladinForever_UnitHasDispel(unit)
     -- ★ 2026-11-16：严格探针返回 false 表示「明确没有可驱散类型」（含只有诅咒），
     --   直接判无；不再只在 AurasRestricted() 时相信，避免后续缓存/旧名字兜底翻案。
     if filterHit == false then return false end
+
+    -- ★★★ 2026-11-19 十三次修复（用户口径：战斗中退化为「有减益就提示」）。
+    --   受限战斗里类型字段一律读不到，此时只要能确认「该单位有减益」就放行；
+    --   非受限上下文不启用（脱战仍按类型精确判定，诅咒/流血绝不误放）。
+    if WR_PaladinForever_AurasRestricted() then
+        local anyHarmful = WR_PaladinForever_UnitHasAnyHarmful(unit)
+        if anyHarmful == true then return true end
+    end
 
     -- ★ 2026-11-16：secret 状态下 WR_ScanAurasForUnit 失败会保留战斗前的旧缓存
     --   （例如之前的毒），绝不能拿它当当前是否可驱散的证据；到此仍未拿到
@@ -4732,6 +6133,16 @@ function WR_PaladinForever_DebugAuraKinds(unit)
     return table.concat(out, " ")
 end
 
+-- ★ 诊断格式化：区分「返回 nil（未知）」与「调用抛错（带错误原文）」
+local function WR_PaladinForever_DbgFmt(ok, v)
+    local okS, s = pcall(tostring, v)
+    if not okS then s = "?" end
+    if ok then return s end
+    if type(s) == "string" and #s > 70 then s = string.sub(s, 1, 70) .. "…" end
+    return "ERR[" .. tostring(s) .. "]"
+end
+_G.WR_PaladinForever_DbgFmt = WR_PaladinForever_DbgFmt
+
 function WR_PaladinForever_CleanseDebugReport()
     local function report(unit)
         local parts = {}
@@ -4757,34 +6168,310 @@ function WR_PaladinForever_CleanseDebugReport()
             end
         end
         local okP, probeHit = pcall(WR_PaladinForever_CleanseProbeHasDispellable, unit)
-        parts[#parts + 1] = "probe判定=" .. tostring(okP and probeHit or "err")
+        parts[#parts + 1] = "probe判定=" .. WR_PaladinForever_DbgFmt(okP, probeHit)
         if unit == "player" and type(WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame) == "function" then
             local okUI, ui = pcall(WR_PaladinForever_PlayerDebuffDispelByBlizzardFrame)
-            parts[#parts + 1] = "暴雪DebuffFrame=" .. tostring(okUI and ui or "err")
+            parts[#parts + 1] = "暴雪DebuffFrame=" .. WR_PaladinForever_DbgFmt(okUI, ui)
         end
         local okD, directHit = pcall(WR_PaladinForever_ScanUnitDebuffTypes, unit)
-        parts[#parts + 1] = "多API扫描=" .. tostring(okD and directHit or "err")
+        parts[#parts + 1] = "多API扫描=" .. WR_PaladinForever_DbgFmt(okD, directHit)
         local okSID, sidHit = pcall(WR_PaladinForever_UnitAuraIDHasDispellable, unit)
-        parts[#parts + 1] = "ID分类=" .. tostring(okSID and sidHit or "err")
+        parts[#parts + 1] = "ID分类=" .. WR_PaladinForever_DbgFmt(okSID, sidHit)
         parts[#parts + 1] = "aura列表=" .. WR_PaladinForever_DebugAuraKinds(unit)
         if unit == "player" and type(WR_PaladinForever_PlayerAuraIDHasDispellable) == "function" then
             local okI, idHit = pcall(WR_PaladinForever_PlayerAuraIDHasDispellable, unit)
-            parts[#parts + 1] = "ID直查=" .. tostring(okI and idHit or "err")
+            parts[#parts + 1] = "ID直查=" .. WR_PaladinForever_DbgFmt(okI, idHit)
+        end
+        -- ★ 2026-11-19 十八次修复②：UnitDebuff 字符串 index（"Magic"/"Poison"/"Disease"）。
+        --   ID直查=nil 无法区分「API 不存在」与「ID 是 secret」，这里一起打出来。
+        do
+            local byIdFn = nil
+            if type(C_UnitAuras) == "table" then byIdFn = C_UnitAuras.GetPlayerAuraBySpellID end
+            parts[#parts + 1] = "ID直查API=" .. tostring(byIdFn ~= nil)
+            local okDK, dkHit = pcall(WR_PaladinForever_UnitDebuffByDispelKind, unit)
+            parts[#parts + 1] = "类型直查=" .. WR_PaladinForever_DbgFmt(okDK, dkHit)
         end
         local okF, filterHit = pcall(WR_PaladinForever_ProbeDispellableByFilter, unit)
-        parts[#parts + 1] = "严格探针=" .. tostring(okF and filterHit or "err")
+        parts[#parts + 1] = "严格探针=" .. WR_PaladinForever_DbgFmt(okF, filterHit)
+        -- ★ 2026-11-19 九次修复：新增两条通道的诊断（真机排查靠这两行）
+        local okTTH, ttHit2 = pcall(WR_PaladinForever_CleanseTooltipScan, unit)
+        parts[#parts + 1] = "提示扫描=" .. WR_PaladinForever_DbgFmt(okTTH, ttHit2)
+        local okGT, gtHit = pcall(WR_PaladinForever_ProbeByGameTooltip, unit)
+        parts[#parts + 1] = "悬停提示=" .. WR_PaladinForever_DbgFmt(okGT, gtHit)
+        -- ★★★ 2026-11-19 十一次修复：纯存在性探针（只判 ~= nil，不读任何字段）。
+        --   用于回答「受限战斗里光环到底还能不能看到」：
+        --     · 数字 = 能看到的 HARMFUL 光环条数；
+        --     · SECRET[n] = 第 n 条非 nil 但无法判断是否 nil（secret）；
+        --     · ERR[...] = 调用本身抛错（带原文）；
+        --     · noAPI = 客户端没有该函数。
+        local function presence(fn, filter)
+            if fn == nil then return "noAPI" end
+            local n = 0
+            for i = 1, 40 do
+                local okA, a = pcall(fn, unit, i, filter)
+                if not okA then
+                    local okS2, s2 = pcall(tostring, a)
+                    return "ERR[" .. (okS2 and tostring(s2) or "?") .. "]"
+                end
+                local okN, isNil = pcall(function() return a == nil end)
+                if not okN then return "SECRET[" .. tostring(i) .. "]" end
+                if isNil then break end
+                n = n + 1
+            end
+            return tostring(n)
+        end
+        parts[#parts + 1] = "UnitDebuff存在=" .. presence(UnitDebuff, "HARMFUL")
+        parts[#parts + 1] = "UnitAura存在=" .. presence(UnitAura, "HARMFUL")
+        -- 注意令牌写法：UnitAura 用 "HARMFUL|RAID"；UnitDebuff 兼容包装只给 "RAID"
+        parts[#parts + 1] = "驱散过滤器存在=" .. presence(UnitDebuff, "RAID")
+        parts[#parts + 1] = "驱散过滤Aura=" .. presence(UnitAura, "HARMFUL|RAID")
+        local okPr, pr = pcall(WR_PaladinForever_UnitDispelPresence, unit)
+        parts[#parts + 1] = "presence判定=" .. WR_PaladinForever_DbgFmt(okPr, pr)
+        -- ★ 十三次修复：退化通道——战斗内只要有任意减益就放行
+        -- ★ 十四次修复：先取「循环路径」上一次结果（诊断本身会覆盖缓存）
+        local anyPrev = WR_PaladinForever_AnyHarmfulLast and WR_PaladinForever_AnyHarmfulLast[unit]
+        local okAny, anyH = pcall(WR_PaladinForever_UnitHasAnyHarmful, unit)
+        parts[#parts + 1] = "任意减益=" .. WR_PaladinForever_DbgFmt(okAny, anyH)
+        parts[#parts + 1] = "ForEachAura=" .. tostring(type(AuraUtil) == "table" and type(AuraUtil.ForEachAura) == "function")
+        parts[#parts + 1] = "EUI减益容器=" .. tostring(WR_PaladinForever_EUI_DebuffContainer ~= nil)
+        -- ★ 2026-11-19 十四次修复：EUI 减益按钮记录情况 + 最近一次「存在性」扫描
+        do
+            local harmfulBtns, allBtns = 0, 0
+            if type(WR_PaladinForever_EUI_Buttons) == "table" then
+                for _, info in pairs(WR_PaladinForever_EUI_Buttons) do
+                    allBtns = allBtns + 1
+                    if type(info) == "table" and info.harmful then harmfulBtns = harmfulBtns + 1 end
+                end
+            end
+            parts[#parts + 1] = "EUI按钮=减益" .. tostring(harmfulBtns) .. "/全" .. tostring(allBtns)
+            local last = WR_PaladinForever_EUI_PresenceLast
+            if type(last) == "table" then
+                parts[#parts + 1] = "EUI可见=" .. tostring(last.shown)
+                    .. "(" .. tostring(last.scanned) .. "/" .. tostring(last.tried) .. "枚)"
+            else
+                parts[#parts + 1] = "EUI可见=无记录"
+            end
+            -- ★ 十五次修复：UNIT_AURA 事件计数 —— 战斗内唯一剩下的存在性信号
+            do
+                local seq = WR_PaladinForever_AuraEventSeq and WR_PaladinForever_AuraEventSeq[unit] or 0
+                local atA = WR_PaladinForever_AuraEventAt and WR_PaladinForever_AuraEventAt[unit]
+                parts[#parts + 1] = "光环事件=" .. tostring(seq)
+                    .. (type(atA) == "number"
+                        and ("@" .. string.format("%.1f", GetTime() - atA) .. "s")
+                        or "@无")
+                -- ★ 十七次修复：负载判定已改为按单位存储 { v, shape, at }，且 shape
+                --   直接暴露「本服负载长什么样」（add=nil / n=1/h=false/d=Poison 等），
+                --   是下一步能否做精确过滤的唯一依据。
+                local pl = WR_PaladinForever_AuraPayloadLast
+                    and WR_PaladinForever_AuraPayloadLast[unit]
+                if type(pl) == "table" then
+                    parts[#parts + 1] = "光环负载=" .. tostring(pl.v)
+                        .. "/" .. tostring(pl.shape)
+                        .. "@" .. string.format("%.1f", GetTime() - (pl.at or GetTime())) .. "s"
+                else
+                    parts[#parts + 1] = "光环负载=无记录"
+                end
+                -- 十八次修复③：当前单位的最近一次事件是否「确有新增光环」
+                -- （战斗内唯一可用的信号；全量刷新事件为 false）
+                local uiLast = WR_PaladinForever_AuraUpdateInfoLast
+                    and WR_PaladinForever_AuraUpdateInfoLast[unit]
+                parts[#parts + 1] = "负载新增="
+                    .. tostring(WR_PaladinForever_PayloadHasAddedAura(uiLast) == true)
+            end
+            local anyLast = anyPrev
+            if type(anyLast) == "table" then
+                parts[#parts + 1] = "任意减益(循环)=" .. tostring(anyLast.v)
+                    .. "@" .. string.format("%.1f", GetTime() - anyLast.at) .. "s"
+            else
+                parts[#parts + 1] = "任意减益(循环)=无记录"
+            end
+        end
+        -- ★ 2026-11-19 十二次修复：UnitAura 在本服不存在（noAPI），只剩 C_UnitAuras，
+        --   这里把「引擎侧带 RAID 过滤能否看到光环」也测出来（只判存在性，不读字段）。
+        local function auraDataPresence(filter)
+            if type(C_UnitAuras) ~= "table" or C_UnitAuras.GetAuraDataByIndex == nil then
+                return "noAPI"
+            end
+            local okA, a = pcall(C_UnitAuras.GetAuraDataByIndex, unit, 1, filter)
+            if not okA then
+                local okS2, s2 = pcall(tostring, a)
+                return "ERR[" .. (okS2 and tostring(s2) or "?") .. "]"
+            end
+            local okN, isNil = pcall(function() return a == nil end)
+            if not okN then return "SECRET" end
+            if isNil then return "nil" end
+            return "hit"
+        end
+        parts[#parts + 1] = "AuraData(HARMFUL)=" .. auraDataPresence("HARMFUL")
+        parts[#parts + 1] = "AuraData(RAID)=" .. auraDataPresence("HARMFUL|RAID")
+        if type(C_UnitAuras) == "table" and C_UnitAuras.GetAuraSlots ~= nil then
+            local okSl, cont = pcall(C_UnitAuras.GetAuraSlots, unit, "HARMFUL|RAID")
+            parts[#parts + 1] = "AuraSlots(RAID)=" .. WR_PaladinForever_DbgFmt(okSl, cont)
+        else
+            parts[#parts + 1] = "AuraSlots(RAID)=noAPI"
+        end
+        parts[#parts + 1] = "战斗中=" .. tostring((function()
+            local okC, inC = pcall(UnitAffectingCombat, "player")
+            return okC and inC or false
+        end)())
+        parts[#parts + 1] = "GameTooltip=" .. tostring(_G.GameTooltip ~= nil)
+        -- ★ 2026-11-19 十次修复：保护窗口 + 可用性（区分「判定不出来」与「亮了被顶掉」）
+        local wAlias = WR_PaladinForever_CleansePromptAlias
+        local wUntil = WR_PaladinForever_CleansePromptUntil
+        if wAlias and type(wUntil) == "number" then
+            parts[#parts + 1] = "提示窗口=" .. tostring(wAlias)
+                .. "/槽" .. tostring(WR_PaladinForever_CleansePromptSlot)
+                .. "/单位" .. tostring(WR_PaladinForever_CleansePromptUnit)
+                .. "/剩" .. string.format("%.1f", math.max(0, wUntil - GetTime())) .. "s"
+        else
+            parts[#parts + 1] = "提示窗口=无"
+        end
+        local okCC, cc = pcall(WR_PaladinForever_CanCleanseCast)
+        parts[#parts + 1] = "可用=" .. tostring(okCC and cc or "err")
+        local okCD, cdHit = pcall(WR_PaladinForever_OnCooldown, "清洁术", 8)
+        parts[#parts + 1] = "本地CD中=" .. WR_PaladinForever_DbgFmt(okCD, cdHit)
         parts[#parts + 1] = "最终=" .. tostring(WR_PaladinForever_UnitHasDispel(unit))
         print("|cff00adf0[清洁术诊断]|r " .. unit .. ":  " .. table.concat(parts, "  "))
     end
     report("player")
     report("target")
+    -- ★★★ 2026-11-19 十七次修复：延迟探针。
+    --   本服报错原文是「Auras cannot be accessed when secret while tainted by
+    --   'MKHelperForever'」—— 关键在 tainted：secret 只在「被本插件污染的执行路径」
+    --   生效。C_Timer.After 的回调仍属于本插件，但它是独立执行帧，用来验证
+    --   「换一个执行时机能否读到 slot 数」。若能读到 → 存在性判定可以做成精确定时轮询；
+    --   若依旧被拒 → 战斗内光环对插件彻底封闭，只能靠 UNIT_AURA 负载（当前策略）。
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            local out = {}
+            -- ★ 2026-11-19 十八次修复③：secret 值参与 .. 拼接会产出 secret 字符串，
+            --   随后 table.concat 直接抛「invalid value (secret)」。真机已实证
+            --   updateInfo.isFullUpdate 是 secret（探针第 5 项炸掉）。所有值先过 ss()。
+            local function ss(v)
+                if type(WR_PaladinForever_IsSecretValue) == "function"
+                    and WR_PaladinForever_IsSecretValue(v) then
+                    return "SECRET"
+                end
+                local okS, s = pcall(tostring, v)
+                if not okS then return "ERR" end
+                if type(WR_PaladinForever_IsSecretValue) == "function"
+                    and WR_PaladinForever_IsSecretValue(s) then
+                    return "SECRET"
+                end
+                return s
+            end
+            local function probe(name, fn)
+                local ok, v = pcall(fn)
+                if not ok then
+                    local okS, s = pcall(tostring, v)
+                    out[#out + 1] = name .. "=ERR[" .. (okS and ss(s) or "?") .. "]"
+                    return
+                end
+                local okN, isNil = pcall(function() return v == nil end)
+                if not okN then
+                    out[#out + 1] = name .. "=SECRET"
+                elseif type(v) == "table" then
+                    local okL, len = pcall(function() return #v end)
+                    out[#out + 1] = name .. "=table(" .. (okL and ss(len) or "?") .. ")"
+                else
+                    out[#out + 1] = name .. "=" .. ss(v)
+                end
+            end
+            probe("slotsRAID", function()
+                return C_UnitAuras and C_UnitAuras.GetAuraSlots
+                    and C_UnitAuras.GetAuraSlots("player", "HARMFUL|RAID", 50)
+            end)
+            probe("dataHARMFUL", function()
+                return C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+                    and C_UnitAuras.GetAuraDataByIndex("player", 1, "HARMFUL")
+            end)
+            do
+                local n = 0
+                local ok = pcall(function()
+                    if AuraUtil and AuraUtil.ForEachAura then
+                        AuraUtil.ForEachAura("player", "HARMFUL", nil, function()
+                            n = n + 1
+                            return true
+                        end, true)
+                    end
+                end)
+                out[#out + 1] = "forEach=" .. (ok and tostring(n) or "ERR")
+            end
+            -- ★ 十八次修复②：UNIT_AURA 负载本身还能读到什么（决定能否做精确过滤）
+            do
+                local ui = WR_PaladinForever_AuraUpdateInfoLast
+                    and WR_PaladinForever_AuraUpdateInfoLast["player"]
+                if ui == nil then
+                    out[#out + 1] = "payload=无记录"
+                else
+                    local okA, added = pcall(function() return ui.addedAuras end)
+                    if not okA then
+                        out[#out + 1] = "payload.add=ERR"
+                    elseif added == nil then
+                        out[#out + 1] = "payload.add=nil"
+                    else
+                        -- ① 用 next 枚举（绕开 # 的 secret 长度保护）
+                        local cnt, okNext = 0, false
+                        local okP = pcall(function()
+                            for _ in next, added do cnt = cnt + 1 end
+                            okNext = true
+                        end)
+                        out[#out + 1] = "payload.next=" .. (okNext and ss(cnt) or "ERR")
+                        -- ② 单条读取
+                        local ok1, a1 = pcall(function() return added[1] end)
+                        if not ok1 then
+                            out[#out + 1] = "payload[1]=ERR"
+                        elseif a1 == nil then
+                            out[#out + 1] = "payload[1]=nil"
+                        else
+                            local okH, h = pcall(function() return a1.isHelpful end)
+                            local okD2, d2 = pcall(function() return a1.dispelName end)
+                            out[#out + 1] = "payload[1]=h:" .. (okH and ss(h) or "ERR")
+                                .. "/d:" .. (okD2 and ss(d2) or "ERR")
+                        end
+                    end
+                    -- ③ 全量刷新标记（真机实证：本服是 secret）
+                    local okF, f = pcall(function() return ui.isFullUpdate end)
+                    out[#out + 1] = "payload.full=" .. (okF and ss(f) or "ERR")
+                end
+            end
+            -- ★ 十八次修复②：经典 UnitDebuff 字符串 index（类型名 / 光环名）
+            do
+                local function udb(k)
+                    if UnitDebuff == nil then return "noAPI" end
+                    local ok, d = pcall(UnitDebuff, "player", k)
+                    if not ok then return "ERR" end
+                    local okN, isNil = pcall(function() return d == nil end)
+                    if not okN then return "SECRET" end
+                    if isNil then return "nil" end
+                    return "hit"
+                end
+                out[#out + 1] = "UD(Magic)=" .. udb("Magic")
+                out[#out + 1] = "UD(Poison)=" .. udb("Poison")
+                out[#out + 1] = "UD(Disease)=" .. udb("Disease")
+                out[#out + 1] = "UD(魔法)=" .. udb("魔法")
+            end
+            -- 兜底：即使还有漏网的 secret，也不能让整次探测无声丢掉
+            local okC, line = pcall(table.concat, out, "  ")
+            if okC and type(line) == "string" then
+                pcall(print, "|cffff8800[清洁术延迟探针]|r " .. line)
+            else
+                for i = 1, #out do pcall(print, "|cffff8800[清洁术延迟探针]|r " .. ss(out[i])) end
+            end
+        end)
+    end
     local mode = tonumber(PigSet and PigSet.FH_QJS) or 5
     print("|cff00adf0[清洁术诊断]|r 面板: 下拉FH_QJS=" .. mode
         .. "  自己=" .. tostring(PigSet and PigSet.FH_QJS_Player)
         .. "  目标=" .. tostring(PigSet and PigSet.FH_QJS_Target))
     print("|cff00adf0[清洁术诊断]|r 下拉档位: 1=常规 2=优先 3=目标 4=指向 5=不使用；「自己/目标」复选框独立生效（当前档位5时只走复选框）")
 end
-SLASH_FHQJSDBG1 = "/FH_QJS_DEBUG"
+-- ★★★ 2026-11-19 修复（命令一直无效）：SlashCmdList 的键必须与 SLASH_<KEY><N>
+--   完全一致。旧写法 SLASH_FHQJSDBG1 定义的键是 "FHQJSDBG"，
+--   而处理函数注册在 "FH_QJS_DEBUG" 下 —— 两边键名不相等，客户端认为
+--   该斜杠命令从未注册，输入 /FH_QJS_DEBUG 只会得到「输入 '/help' 以获得
+--   命令列表」，11-17 加进来后一直没生效。现统一为 FH_QJS_DEBUG。
+SLASH_FH_QJS_DEBUG1 = "/FH_QJS_DEBUG"
 SlashCmdList["FH_QJS_DEBUG"] = function()
     pcall(WR_PaladinForever_CleanseDebugReport)
 end
@@ -4805,7 +6492,15 @@ end
 -- 清洁术可用性（兼容「需要友方目标」的客户端：IsUsableSpell 在敌方/无目标时
 -- 可能返回 false，但技能本身已学会且不在本地冷却 —— 仍允许点亮，蓝量交给色块总闸）。
 function WR_PaladinForever_CanCleanseCast()
-    if WR_SpellUsable("清洁术", true) then return true end
+    -- ★★★ 2026-11-19 九次修复：去掉 GlobalCooldown=true 的严格 GCD 门。
+    --   WR_SpellUsable(spell, true) 的第三道门是 (GCD or 0.4) <= (ShiFaSuDu or 0.4)，
+    --   而防骑每 tick 把 ShiFaSuDu 设为 0.3、GCD 设为 WR_GetGCD("审判")（= 审判自身
+    --   剩余冷却 0~10 秒）→ 该判定 ≈「审判剩余 CD ≤ 0.3 秒」，审判一好就打 →
+    --   约 90% 时间恒 false。GX.lua 已记录同源事故（打断滑条 / 全局保护 /
+    --   圣疗 / 圣佑四处），本处是第五处残留：清洁术的可用性主通道长期空转，
+    --   只能靠后面几条兜底，任何一条兜底在战斗中失效就直接不驱散。
+    --   公共冷却由 ShowSkillCD 的提示防抖 + 本地 8 秒施放记账兜住。
+    if WR_SpellUsable("清洁术") then return true end
     -- 蓝量不足时不放行（资源可读时）；资源不可读交给色块总闸与客户端回执兜底
     if WR_Forever_NotEnoughPower ~= nil then
         local okN, low = pcall(WR_Forever_NotEnoughPower, "清洁术")
@@ -4836,6 +6531,72 @@ function WR_PaladinForever_CanCleanseCast()
     return false
 end
 
+-- ============================================================
+-- ★★★ 2026-11-19 十次修复：清洁术提示保护窗口（战斗中「亮了但被顶掉」）
+-- ------------------------------------------------------------
+-- 用户口径：脱战能正常驱散中毒/疾病/魔法，战斗里一次都不驱。
+-- 根因（与 11-14「圣印经常被顶」同一类，第三处遗漏）：
+--   WR_ColorFrame_ShowSkill 每次点亮前会先隐藏【所有】色块；而 ShowSkillCD
+--   点亮一次后 cd=8 走 guard=PROMPT_HOLD(1.5s)，这 1.5 秒内后续调用直接
+--   return false（不再重亮）。战斗里几乎每 tick 都有 审判/神圣打击/奉献/
+--   圣印/打断 的色块点亮，把 43/44/59 在不到 0.1 秒内顶掉 → AHK（约 60ms
+--   一扫）读不到 → 永不按键。脱战没有提示竞争，色块一直亮 → 正常驱散。
+-- 修法（与圣印/正义之怒同一套保护窗口）：点亮后记 1.2 秒窗口，窗口内
+--   每 tick 重亮同一色块并让调用方 return true；施放成功（本地 8 秒记账
+--   生效）/ 单位已无可驱散 / 可用性失效 / 窗口到期 立即熄灭收窗口。
+-- ============================================================
+WR_PaladinForever_CLEANSE_PROMPT_HOLD = 1.2
+WR_PaladinForever_CleansePromptAlias = nil
+WR_PaladinForever_CleansePromptSlot = nil
+WR_PaladinForever_CleansePromptUnit = nil
+WR_PaladinForever_CleansePromptUntil = nil
+WR_PaladinForever_CleansePromptRecheckAt = nil
+
+-- 点亮成功后开启窗口（CleanseStep.tryUnit 调用）
+function WR_PaladinForever_ArmCleansePrompt(alias, slot, unit)
+    WR_PaladinForever_CleansePromptAlias = alias
+    WR_PaladinForever_CleansePromptSlot = slot
+    WR_PaladinForever_CleansePromptUnit = unit or "player"
+    WR_PaladinForever_CleansePromptUntil = GetTime() + (WR_PaladinForever_CLEANSE_PROMPT_HOLD or 1.2)
+    WR_PaladinForever_CleansePromptRecheckAt = GetTime() + 0.3
+end
+
+function WR_PaladinForever_ClearCleansePrompt()
+    WR_PaladinForever_CleansePromptAlias = nil
+    WR_PaladinForever_CleansePromptSlot = nil
+    WR_PaladinForever_CleansePromptUnit = nil
+    WR_PaladinForever_CleansePromptUntil = nil
+    WR_PaladinForever_CleansePromptRecheckAt = nil
+end
+
+-- 每 tick 由防骑循环最前调用：窗口内重亮并返回 true（本 tick 不再点亮其它技能）
+function WR_PaladinForever_RefreshCleansePrompt()
+    local alias = WR_PaladinForever_CleansePromptAlias
+    local untilAt = WR_PaladinForever_CleansePromptUntil
+    if not alias or type(untilAt) ~= "number" then return false end
+    local slot = WR_PaladinForever_CleansePromptSlot
+    local unit = WR_PaladinForever_CleansePromptUnit or "player"
+    local function stop()
+        WR_PaladinForever_HideNow(alias, slot)
+        WR_PaladinForever_ClearCleansePrompt()
+        return false
+    end
+    if GetTime() >= untilAt then return stop() end
+    -- 已经施放成功（本地 8 秒记账生效）→ 立刻收窗口，绝不再亮
+    if WR_PaladinForever_OnCooldown("清洁术", 8) then return stop() end
+    if not WR_PaladinForever_CanCleanseCast() then return stop() end
+    -- 每 0.3 秒复查一次「该单位此刻仍有可驱散 debuff」，掉了解散窗口
+    local now = GetTime()
+    if not WR_PaladinForever_CleansePromptRecheckAt
+       or now >= WR_PaladinForever_CleansePromptRecheckAt then
+        WR_PaladinForever_CleansePromptRecheckAt = now + 0.3
+        local ok, hit = pcall(WR_PaladinForever_UnitHasDispel, unit)
+        if not ok or hit ~= true then return stop() end
+    end
+    if not WR_ColorFrame_ShowSkill(alias, slot) then return stop() end
+    return true
+end
+
 -- 清洁术统一步骤（面板 5 模式 + 防护独立自己/目标复选框）
 --   phase = "priority"：只跑「优先」模式 + 防护独立复选框
 --   phase = "normal"  ：只跑「常规 / 目标 / 指向」模式
@@ -4849,7 +6610,11 @@ function WR_PaladinForever_CleanseStep(modeVar, phase, selfVar, targetVar)
     end
     local function tryUnit(unit, alias, slot)
         if not WR_PaladinForever_UnitHasDispel(unit) then return false end
-        return WR_PaladinForever_ShowSkillCD(alias, slot, 8) == true
+        if WR_PaladinForever_ShowSkillCD(alias, slot, 8) ~= true then return false end
+        -- ★★★ 2026-11-19：点亮后开启保护窗口，由循环最前每 tick 重亮，
+        --   避免战斗中立刻被 审判/神圣打击/圣印 的色块顶掉（见窗口函数注释）。
+        WR_PaladinForever_ArmCleansePrompt(alias, slot, unit)
+        return true
     end
 
     if phase == "priority" then
@@ -5091,6 +6856,30 @@ SlashCmdList["MKPAL"] = function()
         .. " 智慧圣印ID=" .. tostring(wisdomID)
         .. " 已学=" .. tostring(WR_PaladinForever_SpellKnown("智慧圣印"))
         .. " 审判已学=" .. tostring(WR_PaladinForever_SpellKnown("审判")))
+    -- ★★ 2026-11-19：打断滑块诊断（排查「设置了滑块但目标读条时不亮制裁之锤」）
+    --   统一引擎 WR_GetCastProgress 现在优先走 DurationObject（Forever 12.x 唯一安全通道），
+    --   再退原始时间戳；全部 secret safe。此处把每条闸门的实际值打出来，区分是
+    --   「阈值关了」「没学会制裁之锤」「不在施法」「进度没到」「技能不可用」还是「距离不够」。
+    local ddThr = WR_PaladinForever_InterruptThreshold and WR_PaladinForever_InterruptThreshold() or -1
+    local ddSpell = WR_PaladinForever_SpellKnown and WR_PaladinForever_SpellKnown("制裁之锤")
+    local ddCast = (function()
+        if type(WR_GetCastProgress) ~= "function" then return nil end
+        local ok, p = pcall(WR_GetCastProgress, "target")
+        if ok and type(p) == "number" then return p end
+        return nil
+    end)()
+    local ddUsable = (function()
+        if type(WR_SpellUsable) ~= "function" then return nil end
+        local ok, v = pcall(WR_SpellUsable, "制裁之锤")
+        if not ok then return nil end
+        return v
+    end)()
+    local ddHit = WR_PaladinForever_CanHitTarget and WR_PaladinForever_CanHitTarget("制裁之锤", "target") or nil
+    print("|cff00ff00[MKPAL]|r 打断：滑块阈值=" .. tostring(ddThr)
+        .. " 制裁已学=" .. tostring(ddSpell)
+        .. " 目标施法进度=" .. tostring(ddCast and string.format("%.0f%%", ddCast) or "无/读不到")
+        .. " 技能可用=" .. tostring(ddUsable)
+        .. " 目标可命中=" .. tostring(ddHit))
     -- ★ 2026-11-08：焦点异常诊断（排查「战斗中自动设焦点」）
     local focusName = UnitExists("focus") and (UnitName("focus") or "?") or "无"
     local focusIsPlayer = UnitExists("focus") and UnitIsPlayer("focus") or false

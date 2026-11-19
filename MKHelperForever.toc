@@ -53,12 +53,12 @@
 #   文件仍保留在 DeathKnight\ 目录下，待暴雪后续开放可直接恢复。
 # ============================================================
 
-## Title:|cffFF69B4MKHelperForever|r
-## Title-zhCN: |cffFF69B4 MKHelperForever|cff00ff00[魔兽世界：无限]v1.0
+## Title:|cffFF69B4 MKHelperForever|cff00ff00 2026-11-19
+## Title-zhCN: |cffFF69B4 MKHelperForever|cff00ff00 2026-11-19
 ## Notes: Rotation helper adapted for World of Warcraft: Forever (Classic+).
 ## Notes-zhCN: 面向《魔兽世界：无限》(Forever / Classic+) 的循环助手；含首发副本、种族特长与天赋技能数据层。
 ## Author: miao
-## Version: 1.0-forever.20260913
+## Version: 1.0-forever.20261119
 ## IconTexture: Interface\AddOns\MKHelperForever\MKHelperForever.tga
 ## SavedVariablesPerCharacter: PigSet
 ## SavedVariables: MyAddon_SaveData, MKHelperForeverBridgeGrid

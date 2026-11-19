@@ -2249,6 +2249,41 @@ end
 
 function WR_PaladinForeverProt()
     WR_PaladinForever_ClearStalePrompts(1.0)
+    -- ★★★ 2026-11-19 用户口径「防骑正义之怒要第一优先级，buff 一消失第一时间就要补」：
+    --   本条检查现在是全循环【第一条】——排在圣印提示保护窗口之前。
+    --   理由：正义之怒是 30 分钟 Buff，掉了就是全程没有仇恨姿态加成，
+    --   而圣印保护窗口（1.0 秒）每 tick 都会 return true，旧顺序下窗口一开
+    --   正义之怒就整段被吃掉，等窗口结束才轮到它 → 感知「buff 没了不补」。
+    --   点亮是【单次】的（不重亮）：现在没有分支能顶掉它，重亮反而等于
+    --   色块常亮 → AHK 每 60ms 连按（老的「反复施放正义之怒」）。
+    --   判定见 Paladin_Forever.lua 的 WR_PaladinForever_FuryUp：
+    --     光环扫描 → GetPlayerAuraBySpellID 直查 → C_TooltipInfo 提示数据流直查
+    --     → 缓存 → 观测投影到期 → 30 分钟施放记录兜底。死亡已在 PLAYER_DEAD 清账。
+    --   WR_SpellUsable 由 Core/Core_Functions.lua 提供；裁剪夹具/极端加载顺序下
+    --   可能不存在，裸调会抛错被看门狗吞掉（整 tick 无提示）。加类型守卫。
+    local furyUsable = true
+    if WR_SpellUsable ~= nil then
+        local okUse, use = pcall(WR_SpellUsable, "正义之怒")
+        furyUsable = okUse and (use == true) or false
+    end
+    if (type(PigSet) ~= "table" or PigSet.FH_ZYZN ~= false)
+       and not WR_PaladinForever_FuryUp()
+       and furyUsable
+       and WR_PaladinForever_CanPrompt("正义之怒", 3) then
+        if WR_PaladinForever_ShowFuryPrompt(31) then
+            WR_PaladinForever_MarkPrompt("正义之怒", 31)
+            WR_PaladinForever_HideSkillLater("正义之怒", 31, WR_PaladinForever_FURY_PROMPT_HOLD or 1.5)
+            return true
+        end
+    end
+
+    -- ★★★ 2026-11-19：清洁术提示保护窗口（战斗中不被其它色块顶掉）。
+    --   清洁术点亮后窗口内每 tick 重亮 43/44/59 并直接 return true；
+    --   施放成功 / 单位已无可驱散 / 窗口到期由函数内部熄灭收窗口。
+    --   排在正义之怒之后（用户口径：正义之怒第一优先级）、圣印保护之前
+    --   （驱散是战斗中的即时救场，优先级高于补圣印）。
+    if WR_PaladinForever_RefreshCleansePrompt() then return true end
+
     -- ★★ 2026-11-09 第十一次修正：圣印提示保护窗口。
     --   圣印色块亮起后的保护窗口内（WR_PaladinForever_SEAL_PROMPT_HOLD，
     --   2026-11-14 由 0.3 秒提高到 1.0 秒），本函数会每 tick 重亮同一个圣印并直接返回，
@@ -2256,6 +2291,7 @@ function WR_PaladinForeverProt()
     --   ★ 用户口径「上圣印经常被顶，将圣印优先级调高」：该窗口就是圣印的最高优先级闸门，
     --     窗口内任何其它技能分支都不会执行，AHK 必然读到圣印色块。
     if WR_PaladinForever_RefreshSealPrompt() then return true end
+
     -- ★ 进战斗标记（只作为「确实缺印时立刻补」的加速开关，见下方 sealState 判定）
     local inCombatNow = UnitAffectingCombat("player")
     if inCombatNow and not WR_PaladinForever_WasInCombat then
@@ -2568,28 +2604,10 @@ function WR_PaladinForeverProt()
     end
     -- （此段原 PigAlert 提示已按用户要求关闭）
     -- 正义之怒：30 分钟 Buff，缺失时补。
-    --   ★ 2026-11-16 用户口径：战斗/脱战，只要 Buff 消失了就要立马补——
-    --     可读光环缺失 / 观测投影到期都会立刻判缺失，30 分钟施放成功记录
-    --     只在完全读不到任何证据时兜底（判定见 Paladin_Forever.lua FuryUp）。
-    --   ★ 修复「反复使用正义之怒」：
-    --     · 判定改由 FuryUp() 负责（顺序：光环扫描 → 缓存 → 施放成功记录 30 分钟）；
-    --     · 提示时间不写进 FuryCastAt —— 提示不代表真的打出去了。
-    --   ★ 2026-11-09 用户反馈「补的时机太晚，脱战发现没了应第一时间补，补周期太长」：
-    --     旧防抖 60 秒 → 脱战缺 Buff 时第一次补完，若玩家/AHK 漏按，60 秒内不再提示，
-    --     感知就是「补得太慢、周期太长」。改为 3 秒防抖：
-    --       · 缺失即补（首 tick 立刻亮），漏按也能 3 秒后重试，不再久等；
-    --       · 一旦真的施放成功，FuryUp() 由「施放成功记录」判为已开启 → 立即停止提示；
-    --       · 成功施放事件里 HideNow("正义之怒") 会立刻灭色块，避免 AHK 连按。
-    if (PigSet.FH_ZYZN ~= false)
-       and not WR_PaladinForever_FuryUp()
-       and WR_SpellUsable("正义之怒")
-       and WR_PaladinForever_CanPrompt("正义之怒", 3) then
-        if WR_ColorFrame_ShowSkill("正义之怒", 31) then
-            WR_PaladinForever_MarkPrompt("正义之怒", 31)
-            WR_PaladinForever_HideSkillLater("正义之怒", 31, 1.0)
-            return true
-        end
-    end
+    --   ★★★ 2026-11-18 用户口径「Buff 如果不存在了，一定要第一时间补」：
+    --     本段检查已上移到 WR_PaladinForeverProt 最前（圣印提示保护窗口之后），
+    --     避免被清洁术 / 制裁 / 生存 / 祝福 / 圣印 / 审判 等分支 return true 抢占。
+    --     判定（FuryUp）与死亡清账见 Paladin_Forever.lua。
 
     -- 2.6 祝福（2026-11-11：下拉框已删除，改走独立祝福设置列表 + 脱战自动补）
     --   type 保护：离线夹具未加载 Paladin_Blessing.lua 时安全跳过，真实客户端该函数必存在

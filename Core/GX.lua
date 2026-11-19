@@ -3,7 +3,7 @@
 -- ==========================================
 
 -- 当前版本号（用于显示和哈希校验）
-local CurrentVersion = "2026-11-18"
+local CurrentVersion = "2026-11-19"
 
 -- 销售标识（防盗版标记）
 local _GxSaleTag = "9"
@@ -15,6 +15,303 @@ local FontSize = 16
 -- 更新日志正文（按时间倒序排列）
 -- ==========================================
 local UpdateContent = [[
+
+【全局】2026-11-19（插件列表标题改为「插件名 + 时间」）
+- 用户口径：插件列表里显示的标题应为 MK 插件名称 + 时间。
+- 旧值：`## Title:|cffFF69B4MKHelperForever|r` 与 `## Title-zhCN: |cffFF69B4 MKHelperForever|cff00ff00[魔兽世界：无限]v1.0`——
+  中文本地化条目把客户端名与写死的 v1.0 拼在标题里，版本永远不随发版变化。
+- 新值：两条都改为 `|cffFF69B4 MKHelperForever|cff00ff00 2026-11-19`（粉名 + 绿时间），
+  并把 `## Version` 同步为 `1.0-forever.20261119`，标题时间与版本号同源。
+- 新增夹具 test_toc_title_datetime.py（T1-T6），断言标题含插件名、含 YYYY-MM-DD、
+  不再含旧字样、zhCN 与英文条目同款、Version 与时间同源、颜色码保留。
+
+【防骑】2026-11-19（战斗内清洁术最终口径：确有新增光环即提示，全量刷新不再误亮）
+- 用户确认取舍（AskUserQuestion）：「有新增光环就亮」——能驱 > 少误亮。
+- 实现：新增 WR_PaladinForever_PayloadHasAddedAura(updateInfo)
+  · addedAuras == nil（全量刷新/仅更新事件）→ false，不点亮；
+  · addedAuras 是 table（哪怕长度/字段是 secret）→ true，点亮。
+  两者都只读「表是否存在」，不读任何光环内容，因此不会被 secret 拦截。
+- 事件处置：verdict==true（可读且明确可驱散）→ 记录；verdict==nil 且确有新增 →
+  记录（8 秒限流）；verdict==false（增益/诅咒/无驱散类型）→ 记录也不点亮。
+- 与 03:38 误亮的分界：那时「任何 UNIT_AURA 都算」，现在只认「确实新增了光环」；
+  开战、切场景、增益到期等全量刷新事件不再触发清洁术。
+- 脱战路径完全不变（仍然是逐条读 dispelName 的精确判定）。
+- 夹具：E24-E27（secret 长度仍判有新增 / n=ERR 判未知 / 无负载判无新增 /
+  增益 verdict=false 不亮）+ E8g/E8h 静态；圣骑士全量 0 失败，Lua 语法 215/215。
+
+【防骑】2026-11-19（修复清洁术延迟探针报错：secret 值不能参与字符串拼接）
+- 用户报错：Paladin_Forever.lua:6411 invalid value (secret) at index 5 for 'concat'。
+- 根因：本服 UNIT_AURA 的 updateInfo.isFullUpdate 本身就是 secret，`..` 拼接会把
+  secret 传染给整条字符串，table.concat 直接抛错，整次探针输出丢失。
+- 修复：探针内所有值先过 ss()（secret → "SECRET"，tostring 失败 → "ERR"）；
+  table.concat 再包一层 pcall，失败时逐条打印兜底。
+- 同批实测结论（用户 05:37 完整输出）：C_UnitAuras 三条接口全 ERR、C_Timer 独立帧
+  同样被拒、AuraUtil.ForEachAura 抛错、UnitDebuff 类型名直查全部 nil、负载
+  addedAuras 为 nil —— 战斗内光环数据对插件完全封闭，精确判定在技术上不可行。
+
+【防骑】2026-11-19（战斗中清洁术：新增「UnitDebuff 类型名直查」通道 + 延迟探针扩测）
+- 真机 05:37 实证（用户完整诊断）：player/target 两侧 C_UnitAuras 三条接口全 ERR，
+  连 C_Timer(0) 独立执行帧的延迟探针也同样被拒 —— 说明 taint 是**整个插件**级别的，
+  不存在「换个执行时机就能读」；EUI IsShown 全拒、tooltip 通道全 nil、
+  GetPlayerAuraBySpellID(23380) 返回 nil（ID 是秘密，白名单也没救）。
+- 结论：战斗内「读光环数据」这条路在本服彻底封死，只剩「不读数据的 API」可用。
+- 新增通道：WR_PaladinForever_UnitDebuffByDispelKind —— 经典的 UnitDebuff(unit, index)
+  允许 index 传字符串（"Magic"/"Poison"/"Disease"/"魔法"/"中毒"/"疾病"），
+  它只回答「有没有这类减益」，不返回光环字段，正好绕开 secret。
+  · 只认肯定证据：返回 table/userdata → 有；返回 nil → 未知（绝不判无）；
+  · 兼容包装返回 0/false 等占位值不算命中（防止战斗中恒亮误驱）。
+  已接入 UnitHasDispel，位于 ID 直查之后、tooltip 扫描之前。
+- 诊断①：新增「ID直查API=true/false」（区分 API 缺失与 ID 秘密）、「类型直查=true/false/nil」。
+- 诊断②：延迟探针扩测「UnitDebuff 类型名」与「UNIT_AURA 负载内部」
+  （payload.next 用 next 枚举绕开 secret 长度、payload[1] 的 isHelpful/dispelName、
+  payload.full），用来回答「负载到底能不能做精确过滤」。
+- 夹具：test_paladin_cleanse_eui_buttons.py 新增 D1-D5（英文/中文类型名命中 /
+  全 nil→false / 占位 0 不算 / 全被拒→nil）；全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（战斗中清洁术：补录「投石 23380」魔法 debuff）
+- 用户反馈+截图：「投石 · 法术ID 23380 · 魔法 · 剩余5秒」（每3秒一次奥术伤害），
+  战斗中防骑不驱散。
+- 根因：战斗内读光环字段的通道全部被 secret 拒绝，唯一免读回的
+  C_UnitAuras.GetPlayerAuraBySpellID 只遍历「已知ID白名单 + 运行时已发现表」，
+  而 23380 两处都没有 → ID 直查 miss → 全链 unknown → 不亮。
+- 修复：白名单补 [23380]="magic"；名称白名单补「投石」=magic
+  （脱战/可读时由名字通道喂进已发现表，之后战斗内也能自动覆盖）。
+- 夹具：test_paladin_cleanse_spellid_channel.py 新增 S9a-S9d（白名单值 / 名称判型 /
+  免读回 ID 直查命中 / UnitHasDispel 端到端）；全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（战斗中清洁术：负载不可读时不再瞎猜，宁可暂时不亮也不乱驱）
+- 用户反馈（03:38）：战斗中没有魔法/疾病/中毒等 debuff 时也会使用清洁术。
+  诊断给出关键一行：光环负载=nil/targettarget@0.2s —— 即 updateInfo.addedAuras
+  在本服可能整块不可读；而上一版对「负载不可读」保留了「退回任意光环变化」的兜底，
+  于是开战时的增益刷新、场景切换、以及 targettarget 的负载变化都会点亮清洁术。
+- 修复①：删除「负载不可读 → 视作有减益」的兜底。现在只有负载被明确判定为
+  魔法/中毒/疾病时才记录触发时刻（WR_PaladinForever_AuraHarmfulAt）；
+  增益、诅咒、流血、不可驱散减益、负载不可读，一律不点亮。
+- 修复②：WR_PaladinForever_AuraPayloadLast 改为按单位存储 { v, shape, at }，
+  避免最后一条事件（常在 targettarget 上）覆盖掉 player/target 的真实判定。
+- 诊断①：「光环负载=」改为按当前单位读取，并输出 shape（形如 n=1/h=false/d=Poison、
+  add=nil、n=0/full、add=ERR），可直接看出本服负载到底可不可读、读到什么形状。
+- 诊断②：新增「[清洁术延迟探针]」——用 C_Timer.After(0) 在独立执行帧里重试
+  GetAuraSlots / GetAuraDataByIndex / AuraUtil.ForEachAura。
+  本服报错原文含「while tainted by 'MKHelperForever'」，据此验证 taint 是否只作用于
+  当前执行路径：能读到 slot 数 → 后续可做精确定时轮询；仍被拒 → 只能靠负载判定。
+- 口径：宁可战斗内暂时不亮（用户当前症状是误亮），也不乱驱。
+- 夹具：test_paladin_cleanse_eui_buttons.py 更新为 E9/E10 只认 AuraHarmfulAt，
+  新增 E21（仅光环变化不点亮，03:38 回归）、E22/E23（shape 形态）、E8d/E8e/E8f 静态；
+  圣骑士 68 个夹具 0 失败，全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（战斗中清洁术：按 UNIT_AURA 负载过滤，增益/不可驱散减益不再点亮）
+- 用户反馈（02:45）：「发霉的书籍陷阱」17134（不可驱散，只减移动速度/延长攻击间隔）也亮了清洁术。
+  原因是上一版把「任何光环变化」都当成有减益——UNIT_AURA 增益刷新、不可驱散减益也会触发。
+- 修复：监听 UNIT_AURA 时解析新增光环负载（updateInfo.addedAuras）：
+  · isHelpful=true（增益）→ 无关；
+  · dispelName 为魔法/中毒/疾病 → 与清洁术相关，点亮；
+  · dispelName 为诅咒/流血或明确为空（如陷阱类无驱散类型）→ 无关，不点亮；
+  · 全量刷新（isFullUpdate）→ 不据此点亮，避免每次开战空按一次；
+  · 负载整体不可读（字段 secret/拿不到）→ 才退回上一版「任意变化」口径，保证战斗中不哑火。
+- 「负载可读」按单位记忆一次：一旦读过真实负载，该单位就不再退回「任意变化」。
+- 诊断：新增「光环负载=true/false/nil/单位/秒数」，可直接看到本轮事件被判成哪一类。
+- 夹具：test_paladin_cleanse_eui_buttons.py 扩到 E1-E20 共 22 条（中毒相关 / 魔法增益无关 /
+  陷阱类减益无关 / 诅咒无关 / 空列表未知 / 全量刷新无关 / 无负载未知 / 可读后不退回);
+  圣骑士 68 个夹具 0 失败，全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（战斗中清洁术：按钮可见性也是 secret → 改用 UNIT_AURA 事件作为存在性信号）
+- 真机证据（/FH_QJS_DEBUG，02:41）：EUI按钮=减益740/全1110（记录成功），但 EUI可见=false(0枚)，
+  IsShown 780 次全部被拒。EUI 源码注释原文：「its shown state is secret even out of restriction」
+  —— 12.x 里光环按钮的显示状态本身是 secret，插件读不到。C_UnitAuras 三条接口依旧全 ERR。
+  结论：本服战斗内任何「光环/按钮状态」都不可读，插件侧只剩事件。
+- 修复：新增 UNIT_AURA 监听（player/target/…按单位记录时刻与计数）。受限战斗里，
+  该单位 3 秒内发生过光环变化 → 视为「可能有减益」→ 允许点亮清洁术（8 秒 CD 限流）。
+  窗口 3 秒 = 覆盖一次 1.5 秒色块保持 + 一次重试，避免 AHK 漏看一次就整场不驱。
+- 边界：只在 WR_PaladinForever_AurasRestricted() 为真（受限战斗）时采信；脱战一律走类型精确判定，
+  诅咒/流血绝不误放。代价：战斗内增益刷新也会触发一次提示（用户已确认接受「有减益就提示」口径）。
+- 性能：EUI 按钮存在性探测加 5 秒熔断 —— 一旦发现所有 IsShown 都被拒，5 秒内不再对几百枚按钮做 pcall。
+- 诊断：新增「光环事件=N@Xs」+「EUI可见=false(读成功/尝试)」。
+  若真机「光环事件」计数一直为 0，说明本服连 UNIT_AURA 都不派发给插件，那就只能改为
+  「战斗中每 8 秒无条件提示一次」，届时按该口径再改。
+- 夹具：test_paladin_cleanse_eui_buttons.py 扩到 E1-E11 共 13 条（事件窗口采信 / 过期不采信 /
+  非受限不采信）；圣骑士 68 个夹具 0 失败，全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（战斗中清洁术：EUI 光环按钮存在性通道——旧钩子漏了 unit frame 的减益组）
+- 真机证据（/FH_QJS_DEBUG，02:29）：EUI减益容器=true，但「任意减益=false」「多API扫描=nil」；
+  C_UnitAuras 三条读接口全部 ERR[Auras cannot be accessed when secret while tainted by 'MKHelperForever']，
+  UnitAura=noAPI、UnitDebuff存在=0。结论：战斗内读光环字段这条路在本服对本插件是关闭的。
+- 根因（本轮定位）：旧 EUI 桥接只包 group.extraInit。但 EUI 的 unit frame 光环组
+  （EUI_UnitFrames_AuraContainers.lua 的 DeclareElementGroup）根本不传 extraInit，
+  于是整组按钮一枚都没被记录 → 存在性扫描永远扫不到 → 退化通道恒 false。
+- 修复：改挂 EllesmereUI.AuraKit.MakeInitializer（每组每枚按钮、包括延迟池化创建的都会经过它），
+  并在 AddGroupToContainer 里给按钮打上「容器 / 单位（container.unit）/ 是否减益组（filter 含 HARMFUL）」；
+  新增 WR_PaladinForever_EUI_HarmfulPresence(unit)：只读按钮 IsShown 布尔（非 secret），
+  有显示中的减益按钮 = 该单位有减益；只有增益组按钮时不参与（绝不把 Buff 当减益）。
+- 接线：WR_PaladinForever_UnitHasAnyHarmful 的 EUI 分支改用上面的按钮记录（player/target 都覆盖），
+  仍然只在 WR_PaladinForever_AurasRestricted() 为真（受限战斗）时由 UnitHasDispel 采信；
+  脱战仍走类型精确判定，诅咒/流血不会误放。
+- 诊断：新增「EUI按钮=减益N/全N」「EUI可见=true(N枚)」「任意减益(循环)=v@Xs」，
+  可区分「循环路径读不到」与「斜杠命令（taint 上下文）读不到」——这是本轮最关键的新证据点。
+- 夹具：新增 test_paladin_cleanse_eui_buttons.py（E1-E8 共 10 条：两组按钮记录 / 可见即 true /
+  全隐藏 false / 增益组不算 / player-target 单位隔离 / 受限战斗端到端 true+false / 静态接线）；
+  圣骑士夹具 68 个文件 0 失败，全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（战斗中清洁术：确认本服光环不可读 → 按用户口径「有减益就提示」）
+- 真机实证（/FH_QJS_DEBUG，02:01，战斗中有 debuff 时执行）：player/target 两侧
+  probe判定 / 暴雪DebuffFrame / 多API扫描 / ID分类 / ID直查 / 严格探针 / 提示扫描 / 悬停提示 全 = nil；
+  UnitAura=noAPI、UnitDebuff存在=0、C_UnitAuras.GetAuraDataByIndex 无数据、GameTooltip 存在但读不出。
+  结论：本服战斗内光环数据对插件完全不可见，任何「读类型」的通道都不可能工作。
+- 用户选择：战斗中退化为「有减益就提示」。
+- 修复：新增 WR_PaladinForever_UnitHasAnyHarmful(unit) —— 只判存在性、不读任何字段：
+  ① AuraUtil.ForEachAura("HARMFUL") 回调被调用即视为有减益（secret 字段原样传回但不读）；
+  ② EUI 减益按钮容器里存在显示中的按钮（仅 player）；
+  ③ UnitDebuff(unit,1,"HARMFUL") 存在性（脱战兜底）。
+  在 UnitHasDispel 的「严格探针判无」之后、AurasRestricted 兜底之前接入，且只在
+  WR_PaladinForever_AurasRestricted() 为真时启用 —— 脱战仍按类型精确判定，诅咒/流血不误放。
+- 代价（用户已确认接受）：战斗中中诅咒/流血时也会点亮清洁术空按一次（8 秒 CD 限流）。
+- 诊断新增：任意减益= / ForEachAura= / EUI减益容器= / AuraData(HARMFUL|RAID)= / AuraSlots(RAID)= / 战斗中=；
+  并把「本地CD中」改用 DbgFmt（此前只显示 err，看不到错误原文）。
+- 夹具：扩展 test_paladin_cleanse_presence_filter.py（R1-R6：ForEachAura 三态 / 受限退化放行 / 非受限不污染 / 接线顺序）；
+  test_paladin_cleanse_combat.py 的 J28 按新口径更新为「受限战斗类型不可读 → 退化放行」，J29/J30 仍保证严格探针说无时不放行。
+  圣骑士夹具 67 个文件 0 失败，全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（诊断升级：区分「返回 nil」与「调用抛错」+ 新增纯存在性探针）
+- 用户实测（/FH_QJS_DEBUG）：player/target 两行所有通道全显示 err，secret=true，最终=false。
+  但旧诊断把 `pcall 成功且返回 nil` 与 `调用抛错` 都打成 "err"，看不出到底是「读不到（未知）」还是「接口炸了」。
+- 诊断①：新增 WR_PaladinForever_DbgFmt —— 返回 nil 直接显示 nil，抛错显示 ERR[错误原文]，两者不再混淆。
+- 诊断②：新增纯存在性探针（不读任何字段）：UnitDebuff存在 / UnitAura存在（HARMFUL）+ 驱散过滤器存在（RAID）
+  + presence判定。用途：确认受限战斗里光环到底还能不能看到，以及本服 RAID 过滤（= 我能驱散的减益）是否有效。
+- 诊断③：新增「提示窗口=/可用=/本地CD中=」，配合上一版保护窗口，可直接区分「根本没判定出来」与「亮了被顶掉」。
+- 说明：上一版清洁术保护窗口 + 今晚这次诊断都要求客户端重新加载（/reload 或重进游戏）才生效；
+  用户这次贴出的输出里没有「提示窗口=」字段，说明跑的还是旧版本。
+- 纯存在性探针**不参与判定**（历史事故 H4/J28：按存在性放行会把诅咒也点亮）。待真机确认
+  「只中诅咒时 驱散过滤器存在=0」后再决定是否接线；两条 UnitAura/UnitDebuff 的过滤令牌写法不同
+  （UnitAura 用 HARMFUL|RAID，UnitDebuff 兼容包装只给 RAID），诊断里已按此区分。
+- 夹具：新增 test_paladin_cleanse_presence_filter.py（Q1-Q7 共 10 条）；圣骑士夹具 67 个文件 0 失败，全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（战斗中清洁术不生效、脱战正常：色块被其它技能顶掉 → 新增清洁术提示保护窗口）
+- 用户口径：脱战能正常驱散中毒/疾病/魔法，战斗里一次都不驱（前面几轮全都在查「类型判定」，方向偏了）。
+- 根因（与类型判定无关，是色块竞争）：WR_ColorFrame_ShowSkill 每次点亮前会先隐藏【所有】色块；而 ShowSkillCD 点亮一次后按 cd=8 → guard=PROMPT_HOLD(1.5 秒)，
+  这 1.5 秒内后续调用直接 return false（不再重亮）。战斗中几乎每 tick 都有 审判/神圣打击/奉献/圣印/打断 的色块把 43/44/59 顶掉 →
+  清洁术色块只存在不到 0.1 秒，AHK（约 60ms 一扫）读不到 → 永不按键。脱战没有任何提示竞争，色块一直亮 → 三种类型都能正常驱散。
+  这与 11-14 用户提过的「圣印经常被顶」是同一类 bug（圣印/正义之怒已用保护窗口修好），清洁术是第三处遗漏。
+- 修复①（主）：新增清洁术提示保护窗口 WR_PaladinForever_CLEANSE_PROMPT_HOLD=1.2 秒。CleanseStep.tryUnit 点亮成功后 ArmCleansePrompt(alias, slot, unit)；
+  防骑循环最前（正义之怒之后、圣印保护之前）调用 WR_PaladinForever_RefreshCleansePrompt()：窗口内每 tick 重亮同一色块并 return true，
+  确保 AHK 必然读到；施放成功（本地 8 秒记账生效）/ 单位已无可驱散（每 0.3 秒复查）/ 可用性失效 / 窗口到期 → 立即 HideNow 收窗口。
+- 修复②（加固）：ScanUnitDebuffTypes 的 EUI 图集 false 只在非受限上下文采信——受限战斗里 EUI 的 DebuffBorder 可能整段不刷新，
+  旧写法一个假 false 就一票否决后面的白名单/静态分类/tooltip 通道。
+- 接线：防骑在正义之怒之后、圣印保护之前接入该窗口；惩戒 Ret 循环顶部同样调用（带 nil 守卫）；不改类型判定、白名单、CanCleanseCast，也不改 WR_ColorFrame_ShowSkill 本身。
+- 诊断：/FH_QJS_DEBUG 新增「提示窗口=/可用=/本地CD中=」，战斗中可直接区分「没判定出来」与「亮了被顶掉」。
+- 夹具：新增 test_paladin_cleanse_prompt_hold.py（P1-P8 共 15 条：窗口重亮 / 单位转不可驱散即收窗 / 已施放即收窗 / 到期收窗 / 诅咒不 arm / Prot 接线顺序 / 惩戒接线 / tryUnit 静态）；圣骑士夹具 66 个文件 0 失败，全量 Lua 语法 215/215。
+
+【防骑】2026-11-19（诊断命令 /FH_QJS_DEBUG 一直无效：SLASH_ 键名与 SlashCmdList 键名错配）
+- 用户口径：按提示输入 /FH_QJS_DEBUG，聊天框只回「输入 '/help' 以获得命令列表」，诊断一条都没打出来。
+- 根因（注册期就错，与清洁术判定链无关）：客户端注册斜杠命令的规则是 SlashCmdList 的键 K 必须与 SLASH_<K><N> 里的 K 完全一致。旧代码写的是
+  `SLASH_FHQJSDBG1 = "/FH_QJS_DEBUG"` 配 `SlashCmdList["FH_QJS_DEBUG"] = function() ... end`——
+  前者定义出的键是 "FHQJSDBG"，后者注册在 "FH_QJS_DEBUG" 下，两边键名不相等，客户端认为该命令从未注册，
+  于是 11-17 加进来到现在一直打不出任何东西（中间几轮真机排查全靠它，全都拿不到输出）。
+- 修复：改为 `SLASH_FH_QJS_DEBUG1 = "/FH_QJS_DEBUG"`，与 SlashCmdList["FH_QJS_DEBUG"] 严格对齐；命令体不变，仍 pcall 包住 WR_PaladinForever_CleanseDebugReport。
+- 顺带全仓审计：对全部 lua 文件做 SLASH_<K><N> ↔ SlashCmdList[K] 双向配对检查，修复后 0 错配（此前仅此一处单向孤儿）；/FH_QX_DEBUG、/mkpal、/FH_SEAL 等其它诊断命令均正常。
+- 夹具：新增 test_paladin_slash_cmd_registration.py（K0-K5 共 9 条：双向配对静态审计 / SLASH 变量值 / SlashCmdList 函数存在 / 调用后真的执行到诊断报告 / 其它诊断命令未受影响）。圣骑士夹具全绿，全量 Lua 语法 216/216。
+
+【防骑】2026-11-19（清洁术漏驱「烈焰震击」23038 六次修复：GameTooltip 直读 + 名称白名单 + 多候选扫描 + 保持期）
+- 用户口径：防骑战斗中依旧没有驱散烈焰震击（截图实锤：烈焰震击 · 法术ID 23038 · 魔法 · 每3秒受到一次火焰伤害 · 剩余6秒）。前几轮已把 23038 写进白名单，真机仍不驱。
+- 根因（六处结构性缺口，白名单从来不是瓶颈）：
+  ① CleanseTooltipScan 的候选函数写成 `A or B or C`——只取第一个**存在**的函数。该函数存在但签名/上下文不对时整条 tooltip 通道永久哑火，后面的 GetUnitAura/GetUnitAuraByIndex 根本没机会跑；
+  ② 每次重扫都先 `cacheMap[unit] = nil`——受限内容里 tooltip 数据流逐帧放行/拒绝，一旦这一帧被拒，上一帧刚确认的 true 立刻丢失 → 色块灭 → AHK 不按 → 玩家看到「一直不驱」；
+  ③ 类型判定只认「短词类型行 / 法术ID 行 / 顶层 id」，没有用**名称**——用户截图里「烈焰震击」这行名字是可读的，而「魔法」类型行常因颜色码/并排布局读不出；
+  ④ C_TooltipInfo 返回的是数据表，受限内容里可能整条被拒；而用户截图的形态本身就是 **GameTooltip 鼠标悬停提示**——引擎 C 侧写进字体串的普通文本，本仓库 PartyMemberFrame.lua 366 同款用法，此前完全没用；
+  ⑤ CanCleanseCast 用 `WR_SpellUsable("清洁术", true)`，第三道门 ≈「审判剩余 CD ≤ 0.3 秒」→ 约 90% 时间恒 false（GX 已记录同款四处：打断滑条/全局保护/圣疗/圣佑，这是第五处残留），可用性主通道长期空转；
+  ⑥ 曾尝试用 `GetAuraDataByIndex(unit, 1, "HARMFUL|Magic")` 做类型令牌探针——**已回退**：本服 filter 只认 HARMFUL/HELPFUL/RAID 等标准令牌，类型部分被忽略 → 等价裸 HARMFUL → 中诅咒也点亮清洁术（GX 已有同款事故记录）。
+- 修复①（GameTooltip 直读，最强通道）：新增 WR_PaladinForever_ProbeByGameTooltip——复用**已存在的 GameTooltip**（不 CreateFrame、不建模板帧，EUI 禁止的只是后者）：SetOwner(UIParent,"ANCHOR_NONE") → 逐槽 SetUnitDebuff(unit,i) → 读 GameTooltipTextLeftN/RightN 的 GetText() 普通字符串 → 短词类型行 / 名称白名单 / 「法术ID：N」行三条证据判型。读完立即 Hide。守卫：玩家自己正开着 tooltip（IsShown 且非我们 owner）→ 本帧完全不动它；被拒记 3 秒冷却；0.5 秒节流。
+- 修复②（名称白名单）：新增 CLEANSE_KNOWN_AURA_NAMES + WR_PaladinForever_KindFromAuraName——受限内容里 name 通常不是 secret（用户截图可证），名字命中即判型。只收录清洁术确实能驱散的毒/病/魔法，诅咒类绝不收录。三条 tooltip 通道（KindFromTooltipData / ScanUnitDebuffTypes / GameTooltip）全部接入。
+- 修复③（多候选扫描）：CleanseTooltipScan 候选改为「全部收集 + 逐个尝试」（GetUnitDebuffByIndex / GetUnitDebuff / GetUnitAuraByIndex / GetUnitAura + HARMFUL 变体），某条抛错只跳过它自己，全部候选都被拒才记 denied（2.5 秒）。
+- 修复④（true 保持期）：节流 0.5 → 0.2 秒，并新增 CleanseTooltipScanHoldAt——明确读到可驱散后 1.5 秒内即使重扫被拒也继续判 true（与色块保持窗口同量级），杜绝「一帧读不到就整段不驱」。
+- 修复⑤（可用性门）：CanCleanseCast 去掉 GlobalCooldown=true 的严格 GCD 门，只查技能自身冷却；公共冷却由 ShowSkillCD 防抖 + 本地 8 秒施放记账兜住。
+- 修复⑥（诊断）：/FH_QJS_DEBUG 新增「提示扫描=」「悬停提示=」两段，可直接看到这两条通道在真机上的返回值。
+- 夹具：新增 test_paladin_cleanse_flame_shock_e2e.py（N1-N8 共 10 条：名称白名单 / 只有名字行可读 / 多候选容错 / 保持期 / GameTooltip 直读 / 玩家占用让路 / 主循环端到端仅靠 GameTooltip 点亮 43 清洁术(自己) / 诅咒不误放）；同步 test_paladin_cleanse_fury_shock.py（诅咒用例名字改「痛苦诅咒」，与真机形态一致）、test_paladin_cleanse_fourth_channels.py（T15 节流 0.2 秒）、test_paladin_cleanse_saliva.py（T14 静态断言改为多候选形态）。圣骑士全部夹具 67 个文件 0 失败，全量 Lua 语法 216/216。
+
+【防骑】2026-11-19（清洁术漏驱「毒性唾液」7125：白名单补录 + 静态法术类型通道 + 已发现 ID 记忆闭环）
+- 用户口径：防骑战斗中这个中毒（毒性唾液 · 法术ID 7125 · 中毒 · 每6秒造成17点自然伤害、每6秒吸取20点法力值 · 剩余2分钟）没有使用清洁术驱散。
+- 根因（结构性，不是单点漏 ID）：
+  ① 白名单是「截图补录制」——本服中毒 ID 彼此毫无关联（744 / 13298 / 5416 / 7125），每遇到一个新怪就再漏一次；7125 从未进表 → ID 直查与 ID 分类两条免读回通道全 miss。
+  ② KindFromShortText 拿**带颜色码的原串**判「≤8 字」——「|cff1eff00中毒|r」有 15 个字符，直接被长度门挡掉 → 类型行明明可读却判不出类型。
+  ③ 静态法术提示分类（GetSpellByID）只看短词行，没有「法术ID: N」行与顶层 id 两条证据 → 静态数据这条路对未录入 ID 同样落空。
+  ④ 免读回的 ID 直查通道只遍历白名单——未录入的 ID 永远轮不到它，等于把「本场没录入 = 整场不驱」写死。
+  ⑤ CleanseTooltipScan 槽位上限只有 20——boss 战 debuff 超过 20 条时排在后面的毒被整条截断。
+- 修复①（白名单）：补 [7125] = "poison"（毒性唾液，2026-11-19 用户截图实锤）。
+- 修复②（短词分类加固）：KindFromShortText 先剥离 |cAARRGGBB 颜色码 / |r / |t 再判长度，长度门 8 → 12 并去首尾空白——带颜色码的类型行不再被长度门挡掉。
+- 修复③（静态法术类型通道）：新增 WR_PaladinForever_StaticSpellDispelKind —— C_Spell.GetSpellDispelType 与 C_Spell.GetSpellInfo().dispelType 都是按 spellID 查的**静态数据**，与「光环是否 secret / 是否在战斗」完全无关；任一可读即得类型，两个都缺则返回 nil（不猜）。DispKindBySpellID 在白名单之后先走它。
+- 修复④（已发现 ID 记忆闭环，终结「截图补 ID」）：新增 WR_PaladinForever_CLEANSE_DISCOVERED_IDS + RememberCleansableID（上限 200 条）。任何时刻被判过型（静态数据 / 静态提示 / tooltip 类型行 / tooltip 法术ID 行 / 顶层 id）的 ID 都会入库，PlayerAuraIDHasDispellable 的免读回直查同时遍历白名单与发现表——判过一次型的 ID，下一场战斗自动被覆盖，不必再等截图。
+- 修复⑤（tooltip 通道）：KindFromTooltipData 的「法术ID」分支加静态数据兜底并入库；短词行与顶层 id 命中点也补记忆（旧版短词命中直接返回，是最常见的断链点）；CleanseTooltipScan 槽位上限 20 → 40、兼容序补 GetUnitAuraByIndex。
+- 夹具：新增 .workbuddy/test_paladin_cleanse_saliva.py（T1-T14 共 19 条：白名单 / 静态通道两 API / 双 API 缺失不猜 / 抛错降级 / 颜色码剥离 / 未录入 ID 判型入库 / 发现表免读回直查 / tooltip 法术ID 行 / 槽位 25 不截断 / 全链 / 诅咒不误放 / 静态接线）与 .workbuddy/test_paladin_cleanse_saliva_loop.py（L1-L5 端到端：真跑 WR_PaladinForeverProt，在「光环全 secret + C_UnitAuras 抛错 + 探测容器为空」的战斗里仅靠提示数据流点亮 43 清洁术(自己)，并验证诅咒不亮、未录入 ID 仍亮、发现表闭环）。圣骑士全部夹具 64 个文件 0 失败，全量 Lua 语法 216/216。
+
+【防骑】2026-11-19（正义之怒提到第一优先级 + tooltip 通道确认缺失，buff 一消失立刻补）
+- 用户口径：防骑正义之怒要第一优先级，buff 一消失第一时间就要补。
+- 根因链（两层）：
+  ① 优先级：补 Buff 段虽在 11-18 提到「圣印提示保护窗口之后」，但该窗口每 tick 都会 return true，窗口一开正义之怒整段被吃掉，等窗口结束才轮到它 → 感知「buff 没了不补」。现整段移到循环【第一条】（ClearStalePrompts 之后、圣印窗口之前）。
+  ② 判定：战斗中 ① HELPFUL 光环扫描（name/spellId 是 secret → 整条未知）与 ② C_UnitAuras.GetPlayerAuraBySpellID（非白名单 ID 被秘密旗挡住返回 nil，只有「本场战斗曾读到过」之后 nil 才可信）双双返回未知时，只剩 ④「30 分钟施放成功记录」硬撑 → 被驱散 / 战复 / 竞技场重置 / 跨场景后 Buff 真没了却判「仍在」，整场不补。
+- 修复①（判定）：新增 WR_PaladinForever_FuryByTooltip —— C_TooltipInfo 提示数据流直查（GetUnitBuffByIndex → GetUnitBuff → GetUnitAuraByIndex 兼容序）。引擎 C 侧组装 tooltip 数据，不受 DenyTaintedAccessWhenAurasAreSecret 限制（与清洁术 GetUnitDebuffByIndex 同一实证：!Pig Tooltip.lua 321 / PartyMemberFrame.lua 366）。逐槽位读玩家 HELPFUL：顶层 data.id == 25780 或提示行「法术ID: 25780」→ 明确在身；扫到空槽位且全程无未知 → 明确不在；出现读不到的格子 / 调用被拒 → 未知。**绝不用未知判缺失**，否则每次点亮后都判「没打上」→ AHK 连按（老的「反复施放正义之怒」）。0.5 秒节流。
+- 修复②（防连按）：tooltip 判「不在」加 3 秒施放宽限 —— 刚成功施放 3 秒内光环可能还没同步，此时判缺失会让色块反复点亮。宽限内按未知处理，交回 30 分钟记录兜底。
+- 修复③（优先级）：整段移到 WR_PaladinForeverProt 最前；点亮改走新的 WR_PaladinForever_ShowFuryPrompt（单次点亮，不学圣印做「窗口内每 tick 重亮」—— 正义之怒现在没有任何分支能顶掉它，重亮等于色块常亮 = AHK 每 60ms 连按）。
+- 修复④（健壮性）：FuryUp 的 WR_GetUnitBuffTime、循环里的 WR_SpellUsable 都改为 nil 守卫（~= nil，不用 type=="function"——离线夹具/部分客户端把 C API 暴露成可调用 userdata）。裸调抛错会被防骑看门狗吞掉，表现为整 tick 无提示。
+- 修复⑤（缓存一致性）：施放成功事件（按名 / 按 spellID 25780）与 PLAYER_DEAD 都清空 FuryTooltipAt / FuryTooltipCache，避免施放前那一帧「明确不在」的缓存压住刚打上的 Buff。
+- 夹具：新增 .workbuddy/test_paladin_fury_priority.py（T1-T10 共 20 条：顶层 id 命中 / 明确不在清账 / 被拒不误判 / 未知不判缺失 / 「法术ID」行反查 / 施放宽限 / 0.5 秒节流 / 事件清缓存 / 循环第一条静态检查）；test_paladin_fury_reprompt.py 25/25、test_paladin_fury_refill.py 13/13；圣骑士全部夹具回归 0 失败，全量 Lua 语法 216/216。
+
+【防骑】2026-11-19（清洁术漏驱「脆弱」12530：白名单补录 + tooltip 三证据分类 + 诅咒不再提前否决）
+- 用户口径：防骑战斗中没有使用清洁术驱散「脆弱」这个 buff（截图实锤：脆弱 · 法术ID 12530 · 魔法 · 剩余 57 秒 · 所有属性降低10点）。
+- 根因链（三处叠加）：
+  ① CLEANSE_KNOWN_AURA_IDS 白名单没有 12530 → UnitAuraIDHasDispellable 与 PlayerAuraIDHasDispellable 两条 ID 通道全 miss；
+  ② 受限内容里 tooltip 顶层 data.id 也可能是 secret（EUI AuraBuffReminders NON_SECRET_SPELL_IDS 策略实证）→ CleanseTooltipScan 的「顶层 id 查白名单」整条落空；
+  ③ CleanseTooltipScan 只认 leftText/rightText **精确等于**「中毒/疾病/魔法」，且一旦在某个槽位读到诅咒就提前 return false —— 「诅咒 + 魔法」并存时，排在诅咒后面的魔法整条被漏掉。截图里的「法术ID：12530」行旧实现完全没利用。
+- 修复①：白名单补 [12530] = "magic"（脆弱，所有属性降低10点），ID 直查 / ID 分类两条通道立即命中。
+- 修复②：新增 WR_PaladinForever_KindFromShortText（只接受 ≤8 字的类型行，短行包含「中毒/疾病/魔法/诅咒/流血」即判定；长描述行「所有属性降低10点」不参与，杜绝「魔法伤害」误判）。
+- 修复③：新增 WR_PaladinForever_SpellIDFromTooltipLines —— 抓 tooltip 里的「法术ID / Spell ID」行取数字，再走白名单 + C_TooltipInfo.GetSpellByID 静态分类；顶层 data.id secret 时仍有证据。
+- 修复④：新增 WR_PaladinForever_KindFromTooltipData（短词 → 法术ID 行 → 顶层 id 三段证据，顺序敏感：诅咒/流血先判）。CleanseTooltipScan 与 UnitAuraIDHasDispellable 的 tooltip 源统一改走它。
+- 修复⑤：CleanseTooltipScan 的诅咒/流血改为只记账，**绝不提前 return false**；只有「每条都读得懂且全不可清洁」才判无，含未知一律 nil（与 UnitHasDispel 其余通道同口径）。
+- 修复⑥：KindFromSpellTooltip（静态法术提示分类）精确等值 → 短词包含，静态提示行的颜色码/空白不再导致分类 miss。
+- 夹具：新增 .workbuddy/test_paladin_cleanse_fragile.py（F1-F9 共 21 条，含白名单、短词分类边界、法术ID行反查、截图行形态、顶层 id secret、UnitHasDispel 全链、槽位1诅咒+槽位2魔法、只诅咒不误放、静态接线）；清洁术全套 10 个夹具全绿，全量 Lua 语法 216/216。
+
+【防骑】2026-11-19（减速术/烈焰震击连续漏驱：spellId 双来源 + CleanseTooltipScan 全单位化）
+- 用户口径：减速术 11436（截图实锤 11436·魔法·剩余6秒）、烈焰震击 23038 战斗里都不亮清洁术。
+- 根因链（三层叠加）：
+  ① CLEANSE_KNOWN_AURA_IDS 白名单没有 11436（减速术）/13173/23100（减速术全 rank）+ 23038/23062/23063（烈焰震击）/ 寒冰箭减速 7322/8376 / 奥术减速 3604 / 羊/冰环/恐惧类 → UnitAuraIDHasDispellable 里 auraData.spellId 可读时走白名单直接命中这条通道完全废掉；
+  ② auraData.spellId 在战斗里也被 secret 挡住（EllesmereUIAuraBuffReminders NON_SECRET_SPELL_IDS 实证）→ UnitAuraIDHasDispellable 里 `WR_PaladinForever_IsSecretValue(sid)` 过滤掉 → 走不到 DispKindBySpellID 的 C_TooltipInfo.GetSpellByID 静态提示分类 → sawUnknown=true → 返回 nil；
+  ③ CleanseTooltipScan 只对 player 开放（`if unit ~= "player" then return nil end`）→ target/party/mouseover 的 debuff 即使 C_TooltipInfo 能读到也被拒之门外；节流是全局一个 map，改多单位前也无法并行。
+- 修复① 白名单补全：减速术全 rank（11436/13173/23100）+ 寒冰箭减速（7322/8376）+ 奥术减速（3604）+ 羊/冰环/恐惧类（28271 变形乌龟 / 3355 冰冻陷阱 / 12654 冰霜新星）。让 auraData.spellId 非 secret 时直接命中白名单，不走静态提示。
+- 修复② spellId 双来源（UnitAuraIDHasDispellable）：auraData.spellId secret 时并行用 C_TooltipInfo.GetUnitDebuffByIndex(unit, i) 拿 data.id——tooltip 引擎组装的数据不受 DenyTaintedAccessWhenAurasAreSecret 限制（EllesmereUIAuraBuffReminders data.id 同源）。两个来源同索引位，一个 secret 另一个可能可读。
+- 修复③ CleanseTooltipScan 全单位化：去掉 `if unit ~= "player"` 限制，UnitHasDispel 里 CleanseTooltipScan 从 `if unit == "player"` 块里提到外面，所有单位都能走 tooltip data.id 白名单 + 行文本「中毒/疾病/魔法」扫描。节流从全局变量改成 per-unit map（CleanseTooltipScanAt/Cache/Denied/RetryAt 都是 `{[unit]=...}`），player/target/party 互不干扰。
+- 夹具：test_paladin_cleanse_fury_shock.py 9/9 + test_paladin_cleanse_spellid_channel.py 11/11；全量语法 215/215；圣骑士夹具全部回归。
+
+【防骑】2026-11-19（清洁术漏驱烈焰震击 23038：白名单 + AuraDataDispelState spellId fallback）
+- 用户口径：防骑在战斗中没有使用清洁术驱散烈焰震击（截图实锤：法术 ID 23038，类型=魔法，剩余 4 秒）。
+- 根因链：UnitHasDispel 所有通道在战斗里都返回 unknown → AurasRestricted() 检查直接 return false。拆解：
+  ① CLEANSE_KNOWN_AURA_IDS 白名单漏了 23038（烈焰震击全 rank 23038/23062/23063） → UnitAuraIDHasDispellable 这条 spellID 通道在 ② 静态提示 miss（C_TooltipInfo.GetSpellByID 10 秒冷却未过或受限）时只能返回 unknown；
+  ② 更关键：ProbeDispellableByFilter（UnitHasDispel 里排在受限检查之前的主通道）内部 AuraDataDispelState 只走 dispelName/dispelType → 图集探针，**完全没走 spellId 白名单/静态分类**；战斗里 dispelName 是 secret → 图集探针 unknown → ProbeDispellableByFilter 返回 nil → UnitHasDispel 全 unknown → AurasRestricted() 为 true → 直接 return false。
+- 修复①：白名单补 23038/23062/23063（烈焰震击全 rank，类型=魔法），让 UnitAuraIDHasDispellable 这条通道在任何上下文下都能命中。
+- 修复②：AuraDataDispelState 新增 spellId fallback（在图集探针返回 unknown 后）：如果 data.spellId 可读（EllesmereUIAuraBuffReminders NON_SECRET_SPELL_IDS 实证：即使 dispelName 是 secret，spellId 仍可作为入口），先查 CLEANSE_KNOWN_AURA_IDS 白名单，命中按 kind 判定；再走 C_TooltipInfo.GetSpellByID 静态提示分类。命中 poison/disease/magic → true，curse/bleed → false，都不命中 → 保留图集探针返回的 unknown。
+- 这样战斗里 dispelName secret 也能靠 spellId（烈焰震击 23038）命中白名单 → AuraDataDispelState 返回 true → ProbeDispellableByFilter 返回 true → UnitHasDispel 直接 return true → 清洁术点亮。
+- 夹具：新增 test_paladin_cleanse_fury_shock.py（C1-C8：白名单存在性 / ProbeDispellableByFilter dispelName secret+spellId 可读 / UnitHasDispel 全链 / 诅咒类不误报 / 静态检查），9/9 通过；全量语法 215/215，圣骑士夹具全部回归。
+
+【防骑】2026-11-19（打断滑块 FH_DD 无效修复：统一引擎 WR_GetCastProgress 先 DurationObject，再退原始时间戳；notInterruptible 位置修正）
+- 用户口径：防骑设置了打断滑条后，目标施法时没有按照设置打断使用制裁之锤。
+- 根因 ①（统一引擎全程用原始时间戳）：Core/InterruptController.lua WR_GetCastProgress 把 UnitCastingInfo / UnitChannelInfo 返回的 startTimeMS/endTimeMS 直接当普通 number 做算术（EllesmereUINameplates PlatePool.lua:568 同一实证注释：Forever 12.x 里这些时间戳是 secret value，C 侧拦截算术 → pcall 吞掉返回 nil → WR_ShouldInterrupt=false → InterruptStep 不亮；或直接抛 secret 比较被看门狗吞掉）。
+- 根因 ②（notInterruptible 位置解包错位）：UnitCastingInfo 返回 9 个值（notInterruptible 在第 8 位），UnitChannelInfo 返回 8 个值（notInterruptible 在第 7 位，没有 castID），但 RawProgress 里两个 API 都按 9 个值统一解包 → UnitChannelInfo 的 isTradeSkill(false) 被当成 notInterruptible（永远 false），真正的 notInterruptible 被丢掉 → 引导不可打断永远判成可打断；而 UnitCastingInfo 解出来的是 spellId，永远不是 boolean → 永远跳过检查。两个根因叠加：DurationObject 路径缺失 + 原始路径位置错位 → 两种施法类型都失效。
+- 修复①（统一引擎先 DurationObject）：把防骑本地 WR_PaladinForever_DurationCastPercent 的 DurationObject 路径（UnitCastingDuration/UnitChannelDuration + EvaluateElapsedPercent(CurveConstants.ScaleTo100)）下沉到 Core/InterruptController.lua，新增 WR_Interrupt_DurationProgress 优先调用；Forever 12.x 唯一安全的施法进度来源，所有职业共用。失败再退回 RawProgress（原始时间戳算术，全部 secret safe）。
+- 修复②（CastGate 前置闸门 + 位置修正）：新增 WR_Interrupt_CastGate 独立解包 UnitCastingInfo 与 UnitChannelInfo，按各自正确位置（CastingInfo 9 位 / ChannelInfo 8 位）取 notInterruptible；DurationObject 路径必须先通过 CastGate（明确 name 非空 + notInterruptible=false）才取进度——宁可不打断也不浪费制裁。RawProgress 同步按正确位置重写两个 API 的解包。
+- 修复③（/mkpal 打断诊断）：SlashCmdList["MKPAL"] 新增打断段，打印滑块阈值、制裁之锤是否学会、目标施法进度、技能可用、目标可命中。进游戏后 /mkpal 即可一眼看出哪条闸门拦掉了点亮。
+- 夹具：新增 test_interrupt_controller.py（I1-I12：DurationObject 优先 / 退回 raw / 时间戳 secret / notInterruptible=true / name secret / 阈值比较 / UnitExists=false / notInterruptible secret / channel DurationObject / 阈值关闭 / 旧布尔兼容 / DurationObject 抛错回退）；test_paladin_interrupt_slider.py 原有 24 条全通过（R10b 引导不可打断由「解包错位永远漏过」改为「正确拦截」）；全量语法 215/215，圣骑士夹具全部回归。
+
+
+【防骑】2026-11-18（正义之怒缺失「第一时间补」：判定加 GetPlayerAuraBySpellID 直查 + 提到循环最前 + 死亡清账）
+- 用户口径：防骑正义之怒 buff 如果不存在了，一定要第一时间补。
+- 根因①（判定误判为仍在）：FuryUp 只有「光环扫描可读」与「观测投影」两条路能确认缺失；战斗中光环字段是 secret 时整条扫描返回未知、观测投影又只在读到过剩余时间时才有效，最后只能靠 ④「30 分钟施放成功记录」硬撑。死亡/战复、被驱散、竞技场重置后 Buff 真的没了，却被判成仍在 → 整场战斗都不补。
+- 修复①：新增 WR_PaladinForever_FuryByIDAura（C_UnitAuras.GetPlayerAuraBySpellID(25780) 直查，与清洁术「已知 ID 直查」同一实证），插在光环扫描之后。nil 语义按客户端真实行为区分（EUI EllesmereUIAuraBuffReminders 同源：非白名单 ID 战斗中可能被秘密旗挡住返回 nil，哪怕 Buff 还在）：
+  · 非 nil → 明确在身上（到期时间可读时顺带刷新观测投影）；战斗中读到过就记下 WR_PaladinForever_FuryByIDCombatOK；
+  · 脱战 nil 或「本场战斗曾明确读到过该 ID」之后的 nil → 明确不在，清空 FuryCastAt / 观测投影并返回 false，下一 tick 立即点亮；
+  · 战斗中从未读到过该 ID 的 nil → 只当未知（避免满了还反复点亮连按），沿用 30 分钟兜底；
+  · 光环扫描「明确扫过且没有」时也一并清空 30 分钟记账，避免 ④ 兜底把它重新判成仍在。
+- 根因②（被抢占）：补 Buff 段原在 WR_PaladinForeverProt 靠后位置（清洁术/制裁/生存/祝福/圣印/审判之后），任何高优先级分支 return true 都会挤掉它。
+- 修复②：整段上移到循环最前（保留圣印提示保护窗口 RefreshSealPrompt 之后），缺失即本 tick 点亮；3 秒 CanPrompt 防抖 + 成功施放 HideNow 防连按不变。
+- 根因③（死亡不清账）：PLAYER_DEAD 分支只清圣印计时，FuryCastAt 仍留 30 分钟记账 → 战斗中战复后仍判「已开启」。
+- 修复③：PLAYER_DEAD 同时清空 FuryCastAt / FuryLastUpAt / FuryLastUpRemain，复活后第一时间补。
+- 夹具：新增 test_paladin_fury_reprompt.py（F1-F9：直查命中 / 脱战明确缺失 / 战斗中不可见不误报 / 曾可见后缺失 / 死亡清账 / API 缺失与被拒 / 扫描缺失清账 / 循环最前优先级静态检查）。
 
 【防骑】2026-11-18（清洁术战斗中不驱散中毒五次修复：spellID → 静态驱散类型分类通道）
 - 用户口径：前四次修复后，战斗中防骑依旧不会对中毒/疾病/魔法使用清洁术。

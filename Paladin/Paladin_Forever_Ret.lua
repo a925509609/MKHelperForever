@@ -29,6 +29,13 @@ function WR_PaladinForeverRet()
     TargetInCombat = WR_UnitInCombat("target")
     UnitCount8 = WR_GetRangeHarmUnitCount(8)
 
+    -- ★★★ 2026-11-19：清洁术提示保护窗口（与防骑同一套）。
+    --   窗口只会在 CleanseStep 成功点亮 43/44/59 后存在，且尊重 CJ_QJS_ON /
+    --   下拉档位与「自己/目标」开关；这里只负责窗口内每 tick 重亮，防被顶掉。
+    --   nil 守卫：裁剪夹具/极端加载顺序下 Paladin_Forever.lua 未加载时不抛错。
+    if WR_PaladinForever_RefreshCleansePrompt ~= nil
+       and WR_PaladinForever_RefreshCleansePrompt() then return true end
+
     -- 1. 祝福（脱战自动补；总开关在功能区「祝福」图标）
     if RT.On("CJ_BLESS_ON", true) and type(WR_PaladinBlessing_Auto) == "function" and WR_PaladinBlessing_Auto() then return true end
 
