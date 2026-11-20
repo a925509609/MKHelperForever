@@ -537,6 +537,10 @@ if PigSet.FH_QJS == nil then PigSet.FH_QJS = 5 end
 -- 旧版被下拉菜单完全替代删除，现恢复为独立开关；默认开启以还原旧行为
 if PigSet.FH_QJS_Player == nil then PigSet.FH_QJS_Player = true end
 if PigSet.FH_QJS_Target == nil then PigSet.FH_QJS_Target = true end
+-- ★★★ 2026-11-21 三十次修复（用户口径：「不要盲驱散」）：战斗盲驱已移除。
+--   旧存档里可能残留 FH_QJS_Blind=true，这里显式清成 false，
+--   确保没有任何历史配置能把「靠猜试驱」重新打开。
+PigSet.FH_QJS_Blind = false
 -- ★ 防护骑指向保护/牺牲（2026-08-09 新增）
 if PigSet.FH_ZZBH == nil then PigSet.FH_ZZBH = false end        -- 指向保护之手总开关（默认关）
 if PigSet.FH_ZZXS == nil then PigSet.FH_ZZXS = false end        -- 指向牺牲之手总开关（默认关）

@@ -86,11 +86,22 @@ local function WR_Forever_MakeAuraShim(auraFilter)
     end
 end
 
+-- ★★★ 2026-11-20：给包装层打标记。
+--   受限战斗里 GetAuraDataByIndex 会抛「Auras cannot be accessed when secret」，
+--   shim 只能返回 nil —— 但 nil 的语义是「读不到」，**不是**「没有这条光环」。
+--   业务层（Paladin 的 UnitDebuffByDispelKind / UnitHasAnyHarmful /
+--   UnitDispelPresence）若把 shim 的 nil 当成「明确没有」，就会在真机战斗中
+--   把「中了疾病」判成 false，清洁术永远不亮。
+--   标记出来，让业务层在受限上下文里不要采信 shim 的否定结论。
+WR_Forever_UnitBuffShim = false
+WR_Forever_UnitDebuffShim = false
 if type(UnitBuff) ~= "function" then
     UnitBuff = WR_Forever_MakeAuraShim("HELPFUL")
+    WR_Forever_UnitBuffShim = true
 end
 if type(UnitDebuff) ~= "function" then
     UnitDebuff = WR_Forever_MakeAuraShim("HARMFUL")
+    WR_Forever_UnitDebuffShim = true
 end
 
 -- ============================================================

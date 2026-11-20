@@ -982,7 +982,13 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
             end
             return false
         end
-        if not WR_PaladinForever_LightSealOnPlayer() then
+        -- ★★★ 2026-11-20 二十一次修复（与智慧审判同款）：常驻圣印本身就是光明圣印时，
+        --   「切光明圣印」是空操作，补印由主循环常驻圣印维持段负责。战斗中光环是 secret
+        --   读不到时不再反复点光明圣印等确认（那会让审判一直打不出去）。
+        local lightSealUp = WR_PaladinForever_LightSealOnPlayer()
+        local lightSealUnreadable = (WR_PaladinForever_SealBuffState() == "unknown")
+        if (not lightSealUp)
+           and not (mainSeal == lightName and lightSealUnreadable) then
             -- 需要切光明圣印：显式切印放行一次
             if WR_PaladinForever_CanApplySeal()
                and WR_PaladinForever_CanPrompt(lightName, 1.5) then
@@ -1011,7 +1017,11 @@ function WR_PaladinForever_LightSealToggleStep(mainSeal, mainSealSlot)
 
     if phase == 1 then
         local lightAt = WR_PaladinForever_LightSealAt or now
-        if not WR_PaladinForever_LightSealOnPlayer() then
+        -- ★★★ 2026-11-20 二十一次修复：常驻=光明 + 光环读不到 → 不当作「切印没生效」。
+        local lightSealUp2 = WR_PaladinForever_LightSealOnPlayer()
+        local lightSkipConfirm = (mainSeal == lightName)
+            and (WR_PaladinForever_SealBuffState() == "unknown")
+        if (not lightSealUp2) and not lightSkipConfirm then
             -- 切印还没生效：等 2 秒仍没有 → 回 phase 0 重新提示
             if (now - lightAt) >= 2.0 then
                 WR_PaladinForever_LightSealPhase = 0
@@ -1307,7 +1317,12 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
             end
             return false
         end
-        if not WR_PaladinForever_CrusaderSealOnPlayer() then
+        -- ★★★ 2026-11-20 二十一次修复（与智慧审判同款）：常驻=十字军圣印 + 光环读不到
+        --   时不再反复点十字军圣印等确认。
+        local crusaderSealUp = WR_PaladinForever_CrusaderSealOnPlayer()
+        local crusaderSealUnreadable = (WR_PaladinForever_SealBuffState() == "unknown")
+        if (not crusaderSealUp)
+           and not (mainSeal == crusaderName and crusaderSealUnreadable) then
             -- 需要切十字军圣印：显式切印放行一次
             if WR_PaladinForever_CanApplySeal()
                and WR_PaladinForever_CanPrompt(crusaderName, 1.5) then
@@ -1336,7 +1351,11 @@ function WR_PaladinForever_CrusaderSealToggleStep(mainSeal, mainSealSlot)
 
     if phase == 1 then
         local crusaderAt = WR_PaladinForever_CrusaderSealAt or now
-        if not WR_PaladinForever_CrusaderSealOnPlayer() then
+        -- ★★★ 2026-11-20 二十一次修复：常驻=十字军 + 光环读不到 → 不当作「切印没生效」。
+        local crusaderSealUp2 = WR_PaladinForever_CrusaderSealOnPlayer()
+        local crusaderSkipConfirm = (mainSeal == crusaderName)
+            and (WR_PaladinForever_SealBuffState() == "unknown")
+        if (not crusaderSealUp2) and not crusaderSkipConfirm then
             -- 切印还没生效：等 2 秒仍没有 → 回 phase 0 重新提示
             if (now - crusaderAt) >= 2.0 then
                 WR_PaladinForever_CrusaderSealPhase = 0
@@ -1638,7 +1657,16 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
             end
             return false
         end
-        if not WR_PaladinForever_WisdomSealOnPlayer() then
+        -- ★★★ 2026-11-20 二十一次修复：常驻圣印本身就是智慧圣印时，「切智慧圣印」
+        --   是空操作（切过去还是同一条），补印由主循环的常驻圣印维持段负责。
+        --   旧逻辑在这里仍要求「光环确认智慧圣印在身上」：战斗中光环是 secret
+        --   读不到 → 点智慧圣印 → 2 秒确认不到 → 回 phase 0 → 再点…… 审判永远
+        --   打不出去（用户实测「审判buff维持不灵敏」同源）。现在只要常驻就是这条
+        --   圣印、且光环是「读不到」（不是权威 missing），直接进入等待审判。
+        local wisdomSealUp = WR_PaladinForever_WisdomSealOnPlayer()
+        local wisdomSealUnreadable = (WR_PaladinForever_SealBuffState() == "unknown")
+        if (not wisdomSealUp)
+           and not (mainSeal == wisdomName and wisdomSealUnreadable) then
             -- 需要切智慧圣印：显式切印放行一次
             if WR_PaladinForever_CanApplySeal()
                and WR_PaladinForever_CanPrompt(wisdomName, 1.5) then
@@ -1667,7 +1695,12 @@ function WR_PaladinForever_WisdomJudgementToggleStep(mainSeal, mainSealSlot)
 
     if phase == 1 then
         local wisdomAt = WR_PaladinForever_WisdomJudgementAt or now
-        if not WR_PaladinForever_WisdomSealOnPlayer() then
+        -- ★★★ 2026-11-20 二十一次修复：常驻=智慧圣印 + 光环读不到 → 不当作「切印没生效」，
+        --   直接走下面的审判提示（圣印由主循环维持，审判就是拿它打的）。
+        local wisdomSealUp2 = WR_PaladinForever_WisdomSealOnPlayer()
+        local wisdomSkipConfirm = (mainSeal == wisdomName)
+            and (WR_PaladinForever_SealBuffState() == "unknown")
+        if (not wisdomSealUp2) and not wisdomSkipConfirm then
             -- 切印还没生效：等 2 秒仍没有 → 回 phase 0 重新提示
             if (now - wisdomAt) >= 2.0 then
                 WR_PaladinForever_WisdomJudgementPhase = 0
