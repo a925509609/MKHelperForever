@@ -58,7 +58,7 @@
 ## Notes: Rotation helper adapted for World of Warcraft: Forever (Classic+).
 ## Notes-zhCN: 面向《魔兽世界：无限》(Forever / Classic+) 的循环助手；含首发副本、种族特长与天赋技能数据层。
 ## Author: miao
-## Version: 1.0-forever.20261121
+## Version: 1.0-forever.20261121.2
 ## IconTexture: Interface\AddOns\MKHelperForever\MKHelperForever.tga
 ## SavedVariablesPerCharacter: PigSet
 ## SavedVariables: MyAddon_SaveData, MKHelperForeverBridgeGrid

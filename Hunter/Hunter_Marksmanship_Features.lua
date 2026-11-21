@@ -452,6 +452,10 @@ function HM.BurstStep()
         return HM.Show("急速射击", 22)
     end
 
+    -- ★★★ 2026-11-21 三十五次修复：统一走 WR_Forever_RacialBurstStep 补 CD 维。
+    if type(WR_Forever_RacialBurstStep) == "function" then
+        return WR_Forever_RacialBurstStep(HM.Show, nil, 181, HM.On("LR_SJL_ZDZZ", true))
+    end
     if HM.On("LR_SJL_ZDZZ", true) then
         local list = HM.GetRacialBursts()
         for i = 1, #list do

@@ -68,6 +68,42 @@ end
 -- ★ 钩 2：种族爆发宏注入
 -- ============================================================
 
+-- ============================================================
+-- ★★★ 2026-11-21 三十四次修复：种族名归一
+-- ------------------------------------------------------------
+-- 两套名字对不上，精确匹配永远落空：
+--   WR_Forever_RaceToken（UnitRace 中文名 → token）产出 "NightElf" / "Scourge" / "Skyborne"，
+--   而 Data/Forever_Racials.lua 里的 race 字段写的是 "Night Elf" / "Undead" / "Skyborne (High Order)"。
+-- 结果暗夜精灵/亡灵/天裔的种族列表恒为空 → 各职业种族爆发步退回按阵营的旧口径 →
+-- 去试自己根本没有的技能 → 色块卡死。这里统一做别名归一，把两边对齐。
+-- ============================================================
+WR_Forever_RaceAlias = WR_Forever_RaceAlias or {
+    ["NightElf"]        = "Night Elf",
+    ["Scourge"]         = "Undead",
+    ["Undead"]          = "Undead",
+    ["Skyborne"]        = "Skyborne",
+    ["Tauren"]          = "Tauren",
+    ["Troll"]           = "Troll",
+    ["Orc"]             = "Orc",
+    ["Human"]           = "Human",
+    ["Dwarf"]           = "Dwarf",
+    ["Gnome"]           = "Gnome",
+}
+
+-- 把任意来源的种族名归一成 Data/Forever_Racials.lua 里的写法（去空格、忽略大小写比对）
+function WR_Forever_NormalizeRaceName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    local alias = WR_Forever_RaceAlias
+    if alias and alias[name] then return alias[name] end
+    -- 大小写 / 空格不敏感匹配（"Night Elf" vs "nightelf"）
+    local function flat(s) return (string.lower(s):gsub("%s+", "")) end
+    local want = flat(name)
+    for k, v in pairs(alias or {}) do
+        if flat(k) == want then return v end
+    end
+    return name
+end
+
 -- 取「当前玩家种族」在无限中的爆发向种族技能（仅返回本种族实际拥有的）
 function WR_Forever_PlayerRacialBursts()
     local out = {}
@@ -76,17 +112,50 @@ function WR_Forever_PlayerRacialBursts()
     local race = WR_Forever_PlayerRace()
     if not race then return out end
 
-    local faction = (UnitFactionGroup and UnitFactionGroup("player")) or "Horde"
-    local side = (faction == "Alliance") and "ALLIANCE" or "HORDE"
-    local list = WR_ForeverRacials[side] or {}
+    -- ★ 归一后再比：RaceToken 的 "NightElf"/"Scourge" → 数据表的 "Night Elf"/"Undead"
+    local raceNorm = race
+    if type(WR_Forever_NormalizeRaceName) == "function" then
+        local okN, v = pcall(WR_Forever_NormalizeRaceName, race)
+        if okN and type(v) == "string" and v ~= "" then raceNorm = v end
+    end
+    local function flat(s) return (string.lower(tostring(s)):gsub("%s+", "")) end
+    local wantFlat = flat(raceNorm)
 
+    -- ★ 两个阵营表都扫：种族唯一，不必先判阵营（也避免 UnitFactionGroup 在
+    --   战场/中立场景返回 nil 时整段失效）
     local override = WR_Forever_RacialSpellNameOverride or {}
-    for _, r in ipairs(list) do
-        local hit = (r.race == race) or (r.isNewRace and race == "Skyborne")
-        if hit then
-            for _, ab in ipairs(r.abilities or {}) do
-                if ab.role == "burst" then
-                    out[#out + 1] = override[ab.en] or ab.zh
+    for _, sideKey in ipairs({ "HORDE", "ALLIANCE" }) do
+        for _, r in ipairs(WR_ForeverRacials[sideKey] or {}) do
+            local rn = r.race or ""
+            local hit = (rn == raceNorm) or (flat(rn) == wantFlat)
+            -- 天裔：数据表分「高阶议会 / 御风者」两支，token 只有一个 Skyborne
+            if not hit and r.isNewRace and wantFlat == "skyborne" then hit = true end
+            if hit then
+                for _, ab in ipairs(r.abilities or {}) do
+                    if ab.role == "burst" then
+                        local name = override[ab.en] or ab.zh
+                        -- ★★★ 2026-11-21 三十四次修复②：「已学会」过滤放在列表源头。
+                        --   各职业的种族爆发步（战士/德鲁伊/猎人/法师/萨满/术士/牧师）
+                        --   都直接吃这个列表；只要这里剔掉玩家没学会的技能，
+                        --   全职业一次性修好，不用逐个职业文件改。
+                        --   判据只有「确认没学会(false)」才剔；读不到(nil)一律保留，
+                        --   与全仓「宁可少判不可误杀」口径一致。
+                        -- ★★★ 2026-11-21 三十五次修复：判据换成 WR_Forever_BurstLearned
+                        --   （按实测 spellID 直查优先，名字口径兜底）。
+                        --   原因：本服种族主动技能在法术书里常带「(种族特长)」后缀，
+                        --   WR_ResolveSpellID 按纯名解析不到 → 名字口径的 SpellLearned
+                        --   会误判「没学会」→ 把巨魔牧师的「狂暴」整条剔掉 →
+                        --   种族爆发永远不亮（比「一直亮」更糟的反向故障）。
+                        local keep = true
+                        if type(WR_Forever_BurstLearned) == "function" then
+                            local okL, learned = pcall(WR_Forever_BurstLearned, name)
+                            if okL and learned == false then keep = false end
+                        elseif type(WR_Forever_SpellLearned) == "function" then
+                            local okL, learned = pcall(WR_Forever_SpellLearned, name)
+                            if okL and learned == false then keep = false end
+                        end
+                        if keep then out[#out + 1] = name end
+                    end
                 end
             end
         end

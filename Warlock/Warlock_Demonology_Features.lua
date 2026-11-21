@@ -374,6 +374,10 @@ end
 -- ============================================================
 function WD.BurstStep()
     if not WD.On("SS_EM_ZDZZ", true) then return false end
+    -- ★★★ 2026-11-21 三十五次修复：统一走 WR_Forever_RacialBurstStep 补 CD 维。
+    if type(WR_Forever_RacialBurstStep) == "function" then
+        return WR_Forever_RacialBurstStep(WD.Show, nil, 8, true)
+    end
     if WR_Forever_PlayerRacialBursts == nil then return false end
     local okB, bursts = pcall(WR_Forever_PlayerRacialBursts)
     if not okB or type(bursts) ~= "table" then return false end

@@ -746,6 +746,12 @@ function MA.BurstStep()
        and MA.CanCast("气定神闲") then
         return MA.Show("气定神闲", 15)
     end
+    -- ★★★ 2026-11-21 三十五次修复：统一走 WR_Forever_RacialBurstStep 补 CD 维。
+    -- 旧实现只问 CanCast（→ WR_SpellUsable），而无限战斗中 GetSpellCooldown 是
+    -- secret → GCD 门恒成立 → 3 分钟大招被当成随时可用 → 用了还一直亮。
+    if type(WR_Forever_RacialBurstStep) == "function" then
+        return WR_Forever_RacialBurstStep(MA.Show, MA.CanCast, 181, MA.On("AF_ZDZZ", true))
+    end
     if MA.On("AF_ZDZZ", true) then
         local list = MA.GetRacialBursts()
         for i = 1, #list do

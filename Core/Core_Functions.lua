@@ -309,6 +309,33 @@ if not WR_AuraEventFrame then
     end)
 end
 
+-- ★★★ 2026-11-21 四十一次修复：光环名去「(等级 N)」后缀（半角/全角、空格可有可无）。
+-- 本服低 rank 光环的 name 可能带等级后缀（截图实证：1级小号的
+-- 「真言术：韧」等级 1 · spellID 1243）。WR_GetAuraInfoCore 的精确匹配
+-- name == AuraName 永远对不上 → 「维持真言术：韧」把已挂着的韧判成没有 →
+-- 每 2 秒重亮 52 槽位反复补 buff。归一只影响字符串比较，不碰 spellID 通道。
+-- ★ 铁律：secret string 的 type() 仍是 "string"，gsub 可能抛错 —— 先过
+--   WR_IsSecretValue，整段再包 pcall（与 WR_Forever_NormalizeSpellKey 同口径）。
+function WR_AuraNameBase(s)
+    if type(s) ~= "string" or s == "" then return nil end
+    if type(WR_IsSecretValue) == "function" then
+        local okS, secret = pcall(WR_IsSecretValue, s)
+        if okS and secret == true then return nil end
+    end
+    local ok, out = pcall(function()
+        -- 多字节全角括号不能进 Lua 字符类，按字面量分次剥（与法术书索引同法）。
+        local b = s:gsub("%s*（等级%s*%d+）%s*$", "")
+        if b == s then b = s:gsub("%s*%(等级%s*%d+%)%s*$", "") end
+        if b == s then b = s:gsub("%s*（等级%d+）%s*$", "") end
+        if b == s then b = s:gsub("%s*%(等级%d+%)%s*$", "") end
+        b = b:gsub("^%s+", ""):gsub("%s+$", "")
+        if b == "" then return s end
+        return b
+    end)
+    if ok and type(out) == "string" and out ~= "" then return out end
+    return nil
+end
+
 local function WR_ScanAurasForUnit(unit)
     local HELPFUL = {}
     local HARMFUL = {}
@@ -879,8 +906,18 @@ local function WR_GetAuraInfoCore(Unit, AuraName, ByMe, NameOrId, SumUp, filter)
                     end
                 end
             else
-                if (NameOrId == nil and (name == AuraName or spellId == AuraName)) or
-                   (NameOrId == "NAME" and name == AuraName) or
+                -- ★ 四十一次修复：名字比较先精确、再按「去等级后缀」归一比较，
+                --   低 rank「真言术：韧(等级 1)」也能命中基础名查询。
+                local nameMatch = false
+                if name == AuraName then
+                    nameMatch = true
+                else
+                    local nb = WR_AuraNameBase(name)
+                    local qb = WR_AuraNameBase(AuraName)
+                    if nb ~= nil and qb ~= nil and nb == qb then nameMatch = true end
+                end
+                if (NameOrId == nil and (nameMatch or spellId == AuraName)) or
+                   (NameOrId == "NAME" and nameMatch) or
                    (NameOrId == "ID" and spellId == AuraName) then
                     isMatch = true
                 end

@@ -1155,15 +1155,77 @@ function WR_Forever_IsNewRaceCombo()
 end
 
 -- 取当前种族的爆发技能名（供 GX.lua 的 ZDZZ/CRZZ 使用）
+-- ★★★ 2026-11-21 三十四次修复：从「按阵营」改为「按种族精确」。
+-- ------------------------------------------------------------
+-- 旧实现按阵营返回：部落恒为 {血性狂怒, 狂暴}，联盟恒为 {艾露恩之光, 尤里卡！}，
+-- 再并上 BOTH（四个全给）。结果**每个角色都会拿到自己没有的种族技能**：
+--   · 亡灵牧师会去试「血性狂怒」「狂暴」；
+--   · 兽人战士会去试「艾露恩之光」「尤里卡！」。
+-- 配合「C_Spell.IsSpellUsable 不判是否学会」（私服还会对解析不出的名字回 true），
+-- 这些根本放不出来的技能被判成可用 → 每 tick 点亮种族爆发色块 → AHK 连按 →
+-- 主循环永远停在爆发步。这是「1级小号牧师卡种族爆发色块」的同源根因。
+--
+-- 现在：优先走 WR_Forever_PlayerRacialBursts（Data/Forever_Racials.lua 里按
+-- race 精确匹配，只返回本种族真实拥有的 burst 技能）；只有拿不到种族信息时
+-- 才退回旧的阵营表兜底，保证极端情况下行为不退化。
 function WR_Forever_GetRacialBursts()
-    local tbl = WR_Forever_RacialSpells
-    if not tbl or not tbl.burst then return {} end
-    local faction = (UnitFactionGroup and UnitFactionGroup("player")) or "Horde"
-    local side = (faction == "Alliance") and "ALLIANCE" or "HORDE"
-    local out = {}
-    for _, s in ipairs(tbl.burst[side] or {}) do out[#out + 1] = s end
-    for _, s in ipairs(tbl.burst.BOTH or {}) do out[#out + 1] = s end
-    return out
+    -- ★ 关键：种族**能解析出来**时就完全信任精确结果，哪怕是空表。
+    --   亡灵/牛头/人类等种族本身没有 burst 向特长，精确结果必然是 {}；
+    --   此时若退回阵营表，就等于又把「血性狂怒/狂暴」塞回去 —— 正是本次要修的坑。
+    --   只有「种族读不到」（UnitRace 失败 / 数据表未加载）才退回阵营兜底。
+    local list = nil
+    if type(WR_Forever_PlayerRacialBursts) == "function" then
+        local okP, precise = pcall(WR_Forever_PlayerRacialBursts)
+        if okP and type(precise) == "table" then
+            local raceOK = false
+            if type(WR_Forever_PlayerRace) == "function" then
+                local okR, race = pcall(WR_Forever_PlayerRace)
+                raceOK = okR and type(race) == "string" and race ~= ""
+            end
+            if raceOK or #precise > 0 then
+                list = precise
+            end
+        end
+    end
+    if list == nil then
+        local tbl = WR_Forever_RacialSpells
+        if not tbl or not tbl.burst then return {} end
+        local faction = (UnitFactionGroup and UnitFactionGroup("player")) or "Horde"
+        local side = (faction == "Alliance") and "ALLIANCE" or "HORDE"
+        list = {}
+        for _, s in ipairs(tbl.burst[side] or {}) do list[#list + 1] = s end
+        for _, s in ipairs(tbl.burst.BOTH or {}) do list[#list + 1] = s end
+    end
+
+    -- ★★★ 2026-11-21 三十五次修复：「种族爆发用了还一直亮」——CD 维在源头收口。
+    -- ------------------------------------------------------------
+    -- 各职业的种族爆发步（战士三系 / 德鲁伊三系 / 猎人三系 / 法师三系 / 萨满两系 /
+    -- 术士三系 / 牧师戒律）都从本函数取列表，然后逐个问 WR_SpellUsable。而
+    -- 无限战斗中 GetSpellCooldown 是 secret → WR_GetGCD 收敛成 0 →
+    -- WR_SpellUsable 的 GCD 门恒成立 → 3 分钟冷却的种族大招（狂暴 spellID 20554）
+    -- 打出去之后仍然被判「可用」→ 每 tick 重亮同一槽位 → AHK 连按 → 用户看到的
+    -- 「使用了种族技能还是一直亮」。
+    -- 这里在**取列表的源头**就按 CD 过滤掉还没好的技能：只要这里剔掉，所有职业
+    -- 一次性修好，不用逐份职业文件改（三十四次修复的「已学会」过滤同理）。
+    -- 注意：**只过滤本函数**。宏注入（Core/Forever_Hooks.lua 的 InjectRacialLines）
+    -- 用的是 WR_Forever_PlayerRacialBursts，那条路在建宏时（登录 / 切天赋）执行，
+    -- 此刻不可能有 CD，不能被这里影响，否则会漏注入 /cast 行。
+    if type(WR_Forever_BurstReady) == "function" then
+        local cdTbl = WR_Forever_RacialBurstCD
+        local defCD = WR_Forever_RACIAL_BURST_DEFAULT_CD or 180
+        local out = {}
+        for i = 1, #list do
+            local name = list[i]
+            if type(name) == "string" and name ~= "" then
+                local cd = (type(cdTbl) == "table" and cdTbl[name]) or defCD
+                local okB, ready = pcall(WR_Forever_BurstReady, name, cd)
+                -- 读不到（pcall 失败）一律保留，宁可多给一个候选也不误杀
+                if not okB or ready == true then out[#out + 1] = name end
+            end
+        end
+        return out
+    end
+    return list
 end
 
 -- ============================================================
@@ -1642,11 +1704,62 @@ function WR_Forever_NotEnoughPower(spell)
     return cur < cost
 end
 
+-- ============================================================
+-- ★★★ 2026-11-21 三十四次修复：「是否已学会」独立判据
+-- ------------------------------------------------------------
+-- 用户口径：「1级小号牧师会卡种族爆发色块」。
+--
+-- 根因：把「此刻能不能放」和「有没有这个技能」混成了一件事。
+--   · 12.x 的 C_Spell.IsSpellUsable(spellID) 只判资源/CD/形态，**不判是否学会**；
+--     私服实现甚至对解析不出的名字直接回 true。
+--   · 旧 WR_IsSpellUsableCompat 在 usable==true 时直接放行，于是「玩家根本
+--     没有的种族技能」（例：亡灵牧师没有 血性狂怒 / 狂暴）被判成可用。
+--   · 种族爆发步随即点亮宏槽 181 → AHK 连按 ALT-CTRL-SHIFT-PAGEDOWN →
+--     宏里三条 /cast 全是没学会的技能，客户端一个都不执行 → 色块每 tick 又亮
+--     → 主循环永远停在爆发步，后面的惩击/治疗一步都轮不到。
+--
+-- 本函数把「已学会」抽成独立判据，供可用性闸与各职业种族爆发步共用：
+--   返回 true  = 确认已学会（法术书能解析出 spellID）
+--   返回 false = 确认没学会（法术书已就绪且解析不到）
+--   返回 nil   = 读不到（法术书尚未就绪 / 名字非法）→ 调用方一律放行
+-- 口径与全仓一致：宁可少判，不可把正常技能误杀。
+-- ============================================================
+function WR_Forever_SpellLearned(spell)
+    if spell == nil then return nil end
+
+    -- ① 已经是 spellID：不再猜，直接认为存在（调用方自己拿到了 ID）
+    if type(spell) == "number" then return true end
+    if type(spell) ~= "string" or spell == "" then return nil end
+
+    -- ② 名字 → spellID。解析成功 = 该技能在当前角色法术书里（或强制/覆盖表里）
+    local okR, sid = WR_Forever_TryCall(WR_ResolveSpellID, spell)
+    if okR and type(sid) == "number" then return true end
+
+    -- ③ 兜底直查：法术书索引可能因遍历不全 / 战斗中未重建而漏项，
+    --   这时直接问客户端「这个技能你会不会」。任一回答 true 就放行。
+    local okP, isPlayer = WR_Forever_TryCall(IsPlayerSpell, spell)
+    if okP and WR_Forever_Bool(isPlayer) == true then return true end
+    if type(C_Spell) == "table" then
+        local okK, known = WR_Forever_TryCall(C_Spell.IsSpellKnown, spell)
+        if okK and WR_Forever_Bool(known) == true then return true end
+    end
+
+    -- ④ 解析失败：只有「法术书已就绪」才敢判「没学会」。
+    --   登录初期法术书为空 / 换天赋瞬间索引被清空，此时列表为空 → 返回 nil 放行，
+    --   避免把整条循环误杀成「一个技能都不亮」。
+    local list = WR_Forever_SpellBookList
+    if type(list) == "table" and #list > 0 then
+        return false
+    end
+    return nil
+end
+
 -- 技能可用性归一：先把名字换成 ID，再逐级尝试；仅当 API 返回 nil（不认参数）时降级。
 -- 明确返回 false 或「缺资源」时一律判死，避免「蓝不够还点亮色块」被 AHK 放大成空按。
 function WR_IsSpellUsableCompat(spell)
     local key = WR_ResolveSpellID(spell) or spell
     if key == nil then return false end
+
     local usable
 
     -- ★ 用 pcall 探测，不用 type() 守卫（见本段顶部说明）
@@ -1675,6 +1788,1041 @@ function WR_IsSpellUsableCompat(spell)
     end
     return usable == true
 end
+
+-- ============================================================
+-- ★★★ 2026-11-21 三十五次修复：「种族爆发色块用了还一直亮」
+-- ------------------------------------------------------------
+-- 用户口径：「牧师一直亮种族爆发色块，使用了种族技能还是一直亮，存在异常」
+--   （截图实证：狂暴 · 种族特长 · 3 分钟冷却 · spellID 20554）
+--
+-- 这次是 **CD 维度**上的洞，与三十四次修复（1 级小号「没学会」）不是同一件事：
+--   ① 无限战斗中 GetSpellCooldown 是 secret → WR_GetGCD 收敛成 0 →
+--      WR_SpellUsable 的 GCD 门 `WR_GetGCD(Spell) <= 0.4` 恒成立；
+--   ② WR_IsSpellUsableCompat 只判「资源 / 客户端可用性 / 形态」。本服私服实现里
+--      IsSpellUsable 对 CD 中的技能也可能回 true，而种族爆发是 3 分钟 CD 的大招 ——
+--      一旦判成「可用」，下一 tick 立刻再点亮同一槽位；
+--   ③ 全仓此前**没有本地施放记账**：技能真打出去了（用户说的「使用了」），
+--      插件却完全不知道 → 每 tick 点亮 → AHK 连按 → 用户看到「一直亮」。
+--
+-- 修法：给大招类提示补一条与圣骑士 WR_PaladinForever_ShowSkillCD 同源的三层
+--   冷却证据链（那套口径已在骑士侧验证过）：
+--     ① 本地施放记账（UNIT_SPELLCAST_SUCCEEDED，经 Core/Forever_APIShim.lua 桥）；
+--     ② 客户端冷却（C_Spell.GetSpellCooldownDuration + EvaluateRemainingDuration
+--        引擎侧求值，不吃 secret；再退 WR_SpellCooldownInfo 的 start+duration）；
+--     ③ 提示保持窗口（点亮后 N 秒内不重亮，防 AHK 漏看一次就整段 CD 不提示）。
+--   三条一律「读不到就放行」，与全仓「宁可少判不可误杀」口径一致。
+-- ============================================================
+
+-- 本服种族爆发技能的实测 spellID（用户截图实证：狂暴 = 20554）。
+-- 用途：法术书索引解析不到带 / 不带「(种族特长)」后缀的名字时，仍能查到冷却。
+-- 只给种族爆发链路用，**不写进 F.SPELL_ID_OVERRIDES** —— 那张表是全局覆盖，
+-- 会把德鲁伊的「狂暴」(Berserk) 也顶成巨魔的种族 ID。
+WR_Forever_RacialBurstSpellIDs = WR_Forever_RacialBurstSpellIDs or {
+    ["狂暴"]     = 20554,   -- 巨魔 · 种族特长（3 分钟 CD / 施法与攻击速度 +10% / 15 秒）
+    ["血性狂怒"] = 20572,   -- 兽人 · 种族特长
+}
+
+-- 技能名归一：去掉「(种族特长)」「（种族特长）」「(等级 N)」这类客户端后缀，
+-- 让「狂暴」与「狂暴(种族特长)」共用同一份记账 / ID 表。
+-- ★ 铁律：secret string 的 type() 仍是 "string"，gsub 也可能抛错 ——
+--   必须先过 WR_IsSecretValue，整段再包 pcall。
+function WR_Forever_NormalizeSpellKey(spell)
+    if type(spell) ~= "string" or spell == "" then return nil end
+    if type(WR_IsSecretValue) == "function" and WR_IsSecretValue(spell) then return nil end
+    local ok, out = pcall(function()
+        local s = spell
+        -- ★ 多字节字符不能进 Lua 字符类（[%(%（] 在 5.1 里会按字节匹配，中文全角括号
+        --   是 3 字节，字符类行为不可靠）→ 半角 / 全角分两次用字面量剥。
+        local stripped = s:gsub("%s*%(%s*种族特长%s*%)%s*$", "")
+        if stripped == s then stripped = s:gsub("%s*（%s*种族特长%s*）%s*$", "") end
+        if stripped == s then stripped = s:gsub("%s*%(%s*等级%s*%d+%s*%)%s*$", "") end
+        if stripped == s then stripped = s:gsub("%s*（%s*等级%s*%d+%s*）%s*$", "") end
+        stripped = stripped:gsub("^%s+", ""):gsub("%s+$", "")
+        if stripped == "" then return s end
+        return stripped
+    end)
+    if ok and type(out) == "string" and out ~= "" then return out end
+    return nil
+end
+
+-- 种族爆发 / 大招的 spellID 解析：先查本服实测表，再走法术书索引。
+-- 独立于 WR_ResolveSpellID 的原因：种族技能名带不带后缀两种写法都可能让
+-- 法术书索引落空，而实测 ID 是确定的（截图给的就是 20554）。
+function WR_Forever_BurstSpellID(spell)
+    if type(spell) == "number" then return spell end
+    if type(spell) ~= "string" or spell == "" then return nil end
+    local base = WR_Forever_NormalizeSpellKey(spell)
+    local tbl = WR_Forever_RacialBurstSpellIDs
+    if base and type(tbl) == "table" and type(tbl[base]) == "number" then
+        return tbl[base]
+    end
+    if type(WR_ResolveSpellID) == "function" then
+        local ok1, v1 = pcall(WR_ResolveSpellID, spell)
+        if ok1 and type(v1) == "number" then return v1 end
+        if base and base ~= spell then
+            local ok2, v2 = pcall(WR_ResolveSpellID, base)
+            if ok2 and type(v2) == "number" then return v2 end
+        end
+    end
+    return nil
+end
+
+-- 0~255 秒标量曲线：EvaluateRemainingDuration 在引擎侧求值，
+-- 避免在 Lua 里对 secret 数字做比较（同圣骑士 curve2550 口径）。
+local function WR_Forever_DurationCurve255()
+    if WR_Forever_DurationCurve255Cache ~= nil then
+        return WR_Forever_DurationCurve255Cache or nil
+    end
+    if type(C_CurveUtil) ~= "table" or type(C_CurveUtil.CreateCurve) ~= "function" then
+        WR_Forever_DurationCurve255Cache = false
+        return nil
+    end
+    local ok, curve = pcall(C_CurveUtil.CreateCurve)
+    if not ok or curve == nil then
+        WR_Forever_DurationCurve255Cache = false
+        return nil
+    end
+    pcall(function()
+        curve:AddPoint(0, 0)
+        curve:AddPoint(255, 255)
+    end)
+    WR_Forever_DurationCurve255Cache = curve
+    return curve
+end
+
+-- 技能冷却剩余秒数。返回 nil = 读不到（调用方必须放行）；0 = 没有冷却。
+-- 两条通道依次尝试，任一给出可信数字即返回。
+function WR_Forever_SpellCooldownLeft(spell)
+    if spell == nil then return nil end
+    local sid = WR_Forever_BurstSpellID(spell)
+
+    -- ① 引擎侧求值（最可靠：不吃 secret）
+    if type(sid) == "number" and type(C_Spell) == "table"
+       and type(C_Spell.GetSpellCooldownDuration) == "function" then
+        local okD, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
+        if okD then
+            if durObj == nil then return 0 end   -- 明确没有冷却
+            local curve = WR_Forever_DurationCurve255()
+            if curve then
+                local okE, res = pcall(function() return durObj:EvaluateRemainingDuration(curve) end)
+                if okE and res ~= nil then
+                    local left = nil
+                    if type(res) == "number" then
+                        local okNum, v = pcall(function() return res + 0 end)
+                        if okNum and type(v) == "number" then left = v end
+                    elseif type(res) == "table" or type(res) == "userdata" then
+                        -- 部分客户端返回 Color：取 B 通道 ×255
+                        local okRGB, _, _, b = pcall(function() return res:GetRGB() end)
+                        if okRGB and type(b) == "number" then
+                            local okScale, v = pcall(function() return b * 255 end)
+                            if okScale and type(v) == "number" then left = v end
+                        end
+                    end
+                    if type(left) == "number" then
+                        if left < 0 then left = 0 end
+                        return left
+                    end
+                end
+            else
+                -- 没有曲线工具（经典客户端无 C_CurveUtil）：对象存在说明确实在冷却，
+                -- 但秒数读不出来 → 不返回占位数字，落到通道②继续取精确值。
+                -- 只有通道②也失败时才用保守正数兜住「正在冷却」这个事实。
+                local okC0, s0, d0 = pcall(WR_SpellCooldownInfo, sid)
+                if okC0 and type(s0) == "number" and type(d0) == "number" and d0 > 0 then
+                    local left0 = (s0 + d0) - GetTime()
+                    if left0 < 0 then left0 = 0 end
+                    return left0
+                end
+                return 1
+            end
+        end
+    end
+
+    -- ② start + duration - now（WR_SpellCooldownInfo 已把 secret 收敛成 0）
+    if type(WR_SpellCooldownInfo) == "function" then
+        local key = sid or spell
+        local okC, start, dur = pcall(WR_SpellCooldownInfo, key)
+        if okC and type(start) == "number" and type(dur) == "number" and dur > 0 then
+            local left = (start + dur) - GetTime()
+            if left < 0 then left = 0 end
+            return left
+        end
+    end
+    return nil
+end
+
+-- 本地施放记账：技能基础名 → 最近一次确认打出的时刻。
+-- 由 Core/Forever_APIShim.lua 的 UNIT_SPELLCAST_SUCCEEDED 写入
+-- （名字可能是 secret，读不到时只记 spellID；两者都读不到就放弃本次记账，
+--   交给客户端冷却通道 —— 绝不因为读不到就猜「没放过」）。
+WR_Forever_CastLog = WR_Forever_CastLog or {}
+WR_Forever_CastLogByID = WR_Forever_CastLogByID or {}
+
+function WR_Forever_NotePlayerCast(spellName, spellID, at)
+    local now = at
+    if type(now) ~= "number" then now = GetTime() end
+    -- ★ 三十八次修复：secret number 的 type() 仍是 "number"，但 > 0 比较会抛错，
+    --   旧写法一抛就把整笔记账（含名字通道）一起丢掉。先收敛再写表。
+    local okID, sid = pcall(function()
+        if type(spellID) ~= "number" then return nil end
+        if type(WR_IsSecretValue) == "function" and WR_IsSecretValue(spellID) then return nil end
+        if spellID <= 0 then return nil end
+        return spellID
+    end)
+    if okID and type(sid) == "number" then
+        WR_Forever_CastLogByID[sid] = now
+    end
+    local base = WR_Forever_NormalizeSpellKey(spellName)
+    if base then
+        WR_Forever_CastLog[base] = now
+        -- 原样也记一份：归一规则若因客户端改名失效，原串仍能命中
+        if type(spellName) == "string" and spellName ~= base then
+            WR_Forever_CastLog[spellName] = now
+        end
+    end
+end
+
+-- 本地记账推出的剩余冷却；没有记录返回 nil（调用方放行）。
+function WR_Forever_CastCooldownLeft(spell, cd)
+    if type(cd) ~= "number" or cd <= 0 then return nil end
+    local now = GetTime()
+    local at = nil
+    local base = WR_Forever_NormalizeSpellKey(spell)
+    if base and WR_Forever_CastLog[base] then at = WR_Forever_CastLog[base] end
+    if at == nil and type(spell) == "string" and WR_Forever_CastLog[spell] then
+        at = WR_Forever_CastLog[spell]
+    end
+    if at == nil then
+        local sid = WR_Forever_BurstSpellID(spell)
+        if type(sid) == "number" and WR_Forever_CastLogByID[sid] then
+            at = WR_Forever_CastLogByID[sid]
+        end
+    end
+    if type(at) ~= "number" then return nil end
+    local left = cd - (now - at)
+    if left < 0 then left = 0 end
+    return left
+end
+
+-- 大招提示保持窗口（秒）：点亮后这段时间内不重复点亮。
+--   太短 → AHK 漏看一次就整段 CD 不再提示；太长 → 同色常亮被 AHK 连按放大。
+WR_Forever_BURST_PROMPT_HOLD = 1.5
+WR_Forever_BurstPromptAt = WR_Forever_BurstPromptAt or {}
+
+-- 重试门（秒）：保持窗口过了之后，要等这么久才允许再亮一次。
+--   <=15 秒的短 CD 技能按保持窗口重试；<=300 秒每 20 秒重试；更长的按完整 CD。
+--   ★ BurstReady ④ 与 NoteBurstPrompt 必须共用本函数 —— 两处口径一旦分叉，
+--     「窗口到期就重新起算」会让色块每 1.5 秒续命一次 → 永久常亮。
+function WR_Forever_BurstRetryGuard(cd)
+    local cdSec = (type(cd) == "number" and cd > 0) and cd or 180
+    local hold = WR_Forever_BURST_PROMPT_HOLD or 1.5
+    if cdSec <= 15 then return hold end
+    if cdSec <= 300 then return math.min(cdSec, 20) end
+    return cdSec
+end
+_G.WR_Forever_BurstRetryGuard = WR_Forever_BurstRetryGuard
+
+-- 记一次「已经点亮过大招提示」，供下一 tick 的保持窗口判断。
+-- ★★★ 必须防重入：BurstReady 在保持窗口内返回 true（继续亮），调用方每 tick 都会
+--   点亮并调本函数；若无条件刷新时间戳，窗口会被无限续期 → 色块永久常亮 ——
+--   正是本次要修的「用了还是一直亮」。所以只在**重试门到期**时才写入：
+--   首次点亮起算 1.5 秒保持，之后 20 秒内不再起算，到点才允许再亮一次。
+-- 参数 cd（可选）：该技能真实冷却，用于算重试门；不给按 180 秒（→ 20 秒门）。
+function WR_Forever_NoteBurstPrompt(spell, cd)
+    local base = WR_Forever_NormalizeSpellKey(spell)
+    if not base then return end
+    local now = GetTime()
+    local at = WR_Forever_BurstPromptAt[base]
+    if type(at) == "number" and (now - at) < WR_Forever_BurstRetryGuard(cd) then return end
+    WR_Forever_BurstPromptAt[base] = now
+end
+
+-- 种族爆发「是否已学会」。返回 true / false / nil（读不到，调用方放行）。
+-- ★ 2026-11-21 三十五次修复：按实测 spellID 直查优先于按名字推断。
+--   本服种族主动技能在法术书里常带「(种族特长)」后缀，WR_ResolveSpellID 按纯名
+--   解析不到 → 名字口径的 SpellLearned 会误判「没学会」→ 巨魔牧师的「狂暴」被
+--   整条剔掉 → 种族爆发永远不亮（比「一直亮」更糟的反向故障）。
+--   实测 ID 是确定证据，先用 ID 问客户端「会不会」：
+--     · IsPlayerSpell(sid) / C_SpellBook.IsSpellKnown(sid) / C_Spell.IsSpellKnown(sid)
+--       任一明确 true → 已学会；全部明确 false → 没学会；
+--     · 全都读不到 → 退回名字口径 SpellLearned，再读不到就 nil 放行。
+function WR_Forever_BurstLearned(spell)
+    if spell == nil then return nil end
+    local base = WR_Forever_NormalizeSpellKey(spell)
+    local tbl = WR_Forever_RacialBurstSpellIDs
+    if base and type(tbl) == "table" and type(tbl[base]) == "number" then
+        -- 实测 ID 命中：这是「玩家自己打出来过、截图核对过 spellID」的证据，
+        -- 优先级高于任何按名字的推断 → 直接判已学会。
+        -- 安全前提：调用方（Hooks 的种族列表 / 各职业种族爆发步）都已经先按
+        -- **种族**过滤过列表，所以这里只会是「本种族真有的技能」。
+        return true
+    end
+    if type(WR_Forever_SpellLearned) == "function" then
+        local okL, learned = pcall(WR_Forever_SpellLearned, spell)
+        if okL then return learned end
+    end
+    return nil
+end
+_G.WR_Forever_BurstLearned = WR_Forever_BurstLearned
+
+-- 大招「此刻该不该点亮」。返回 true = 该亮（调用方点亮并记 NoteBurstPrompt）。
+--   spell ：技能中文名（可带「(种族特长)」后缀）
+--   cd    ：该技能的真实冷却秒数（种族爆发 180）；<=0 表示不按 CD 屏蔽
+--
+-- ★ 语义对齐圣骑士 WR_PaladinForever_ShowSkillCD（那套已在真机验证过）：
+--   色块模型是「亮着 = 现在该按这个键」。点亮后必须**保持一段时间**让 AHK
+--   有足够时间读到并按键（AHK 扫屏 ~60ms 一次，主循环 100ms 一 tick）；
+--   若点亮当 tick 就把保持窗口判死并熄灭，色块会变成「亮 100ms / 灭 1.5s」的
+--   闪烁，AHK 很可能一次都没读到 → 表现为「爆发永远按不出来」。
+--   因此 ③ 保持窗口内返回 **true（继续亮）**，而不是 false。
+function WR_Forever_BurstReady(spell, cd)
+    if spell == nil then return false end
+    local now = GetTime()
+    local cdSec = (type(cd) == "number" and cd > 0) and cd or 0
+    local base = WR_Forever_NormalizeSpellKey(spell)
+    local promptAt = (base and WR_Forever_BurstPromptAt[base]) or nil
+
+    -- ① 已学会硬门：确认没学会 → 不亮（读不到 nil 放行）
+    if type(WR_Forever_BurstLearned) == "function" then
+        local okL, learned = pcall(WR_Forever_BurstLearned, spell)
+        if okL and learned == false then return false end
+    end
+
+    -- ② 真实冷却（本地施放记账优先：最准，且是「用了就立刻灭」的即时通道）
+    if cdSec > 0 then
+        local localLeft = WR_Forever_CastCooldownLeft(spell, cdSec)
+        if type(localLeft) == "number" and localLeft > 0 then return false end
+        local clientLeft = WR_Forever_SpellCooldownLeft(spell)
+        if type(clientLeft) == "number" and clientLeft > 0 then return false end
+    end
+
+    -- ③ 提示保持窗口：刚点亮过 → 继续亮（给 AHK 足够的读屏 + 按键时间）
+    local hold = WR_Forever_BURST_PROMPT_HOLD or 1.5
+    if type(promptAt) == "number" and (now - promptAt) < hold then
+        return true
+    end
+
+    -- ④ 保守兜底：保持窗口过了但「既没记上账、也读不到客户端冷却」。
+    --   这通常是「施放成功事件里名字和 spellID 都是 secret」的场景 ——
+    --   技能其实可能已经打出去了，只是插件不知道。此时按有限次重试而不是
+    --   完整 CD 屏蔽（完整屏蔽会退化成「一次漏记锁死 3 分钟不再提示」）：
+    --   中长 CD 大招最多每 20 秒重试一次，短 CD 技能按保持窗口重试。
+    if type(promptAt) == "number" and cdSec > 0 then
+        if (now - promptAt) < WR_Forever_BurstRetryGuard(cdSec) then return false end
+    end
+
+    -- ⑤ 客户端可用性（资源 / 形态 / 残余 CD 兜底）
+    if type(WR_SpellUsable) == "function" then
+        local okU, usable = pcall(WR_SpellUsable, spell)
+        if okU and usable ~= true then return false end
+    end
+    return true
+end
+_G.WR_Forever_NormalizeSpellKey = WR_Forever_NormalizeSpellKey
+_G.WR_Forever_BurstSpellID = WR_Forever_BurstSpellID
+_G.WR_Forever_SpellCooldownLeft = WR_Forever_SpellCooldownLeft
+_G.WR_Forever_NotePlayerCast = WR_Forever_NotePlayerCast
+_G.WR_Forever_CastCooldownLeft = WR_Forever_CastCooldownLeft
+_G.WR_Forever_NoteBurstPrompt = WR_Forever_NoteBurstPrompt
+_G.WR_Forever_BurstReady = WR_Forever_BurstReady
+
+-- 种族爆发技能的真实冷却（秒）。全职业共用一张表：
+--   · 这里是**真实 CD**，不是 GCD。无限战斗中 GetSpellCooldown 是 secret →
+--     WR_GetGCD 收敛成 0 → WR_SpellUsable 的 GCD 门恒成立，只有这张表能挡住
+--     「3 分钟大招被当成随时可用」。
+--   · 未登记的种族技能按 180 秒保守处理（本作 burst 向种族特长普遍 2~3 分钟）。
+WR_Forever_RacialBurstCD = WR_Forever_RacialBurstCD or {
+    ["狂暴"]       = 180,   -- 巨魔 · 截图实证 3 分钟 / spellID 20554
+    ["血性狂怒"]   = 120,   -- 兽人 · 2 分钟
+    ["狮心"]       = 180,   -- 人类 · 3 分钟
+    ["艾露恩之光"] = 180,   -- 暗夜精灵 · 3 分钟
+    ["尤里卡！"]   = 180,   -- 侏儒 · 3 分钟
+}
+WR_Forever_RACIAL_BURST_DEFAULT_CD = 180
+
+-- 取当前种族「此刻真的可以打」的爆发技能名；没有就返回 nil。
+-- 全职业种族爆发步统一走这里，避免每份职业文件各写一套 CD 判定
+-- （三十四次修复的「按种族精确 + 已学会」已经在源头做了，本函数再补 CD 维）。
+function WR_Forever_RacialBurstReady()
+    local fn = WR_Forever_PlayerRacialBursts or WR_Forever_GetRacialBursts
+    if type(fn) ~= "function" then return nil end
+    local ok, list = pcall(fn)
+    if not ok or type(list) ~= "table" then return nil end
+    local cdTbl = WR_Forever_RacialBurstCD
+    for i = 1, #list do
+        local name = list[i]
+        if type(name) == "string" and name ~= "" then
+            local cd = (type(cdTbl) == "table" and cdTbl[name])
+                       or WR_Forever_RACIAL_BURST_DEFAULT_CD
+            local okR, ready = pcall(WR_Forever_BurstReady, name, cd)
+            if okR and ready == true then return name end
+        end
+    end
+    return nil
+end
+_G.WR_Forever_RacialBurstReady = WR_Forever_RacialBurstReady
+
+-- 熄灭种族爆发色块（槽位 181）。
+-- 色块模型是「亮着就一直按」：本 tick 判定不亮时必须主动熄，否则上一 tick 的
+-- 色块会一直挂着被 AHK 连按 —— 这正是「用了种族技能还是一直亮」的可见现象。
+function WR_Forever_HideRacialBurst(slot)
+    if type(WR_HideSkillColorSlot) ~= "function" then return false end
+    local s = (type(slot) == "number") and slot or 181
+    local ok = pcall(WR_HideSkillColorSlot, "种族爆发", s)
+    return ok
+end
+_G.WR_Forever_HideRacialBurst = WR_Forever_HideRacialBurst
+
+-- ============================================================
+-- ★★★ 2026-11-21 三十七次修复：通用「光环存在性」多通道判定
+-- ------------------------------------------------------------
+-- 用户口径：「牧师上了盾后还会继续亮盾，存在异常」。
+-- 截图实证：玩家身上挂着「虚弱灵魂 · 法术ID 6788 · 无法从真言术：盾中获得益处 ·
+-- 剩余5秒」—— 盾明明刚上过，59 槽位却还在亮。
+--
+-- 根因不在判定式写错，而在**判定通道全部失效却都返回了「不存在」**：
+--   PD.HasShield 只有两条路，都经 WR_GetUnitBuffTime / WR_GetUnitDebuffTime
+--   → WR_GetAuraInfoCore → 帧级光环缓存。三个坑叠在一起：
+--   ① 受限战斗里 C_UnitAuras.GetAuraDataByIndex 抛
+--      "Auras cannot be accessed when secret" → WR_ScanAurasForUnit 整段 pcall
+--      失败 → 缓存保留上一次（往往是 nil）→ 所有按名字查的光环一律「不存在」；
+--   ② 缓存里 aura.name 可能是 secret string，WR_GetAuraInfoCore 的
+--      `name == AuraName` 比较会抛错（它没包 pcall）→ PD.UnitBuffRemain 的
+--      pcall 把整次查询吞成 0 → 又是「不存在」；
+--   ③ 全仓没有「我刚给这个单位上过盾」的本地记账 —— 技能真打出去了，插件不知道。
+--   三条都返回「不存在」→ HasShield=false → 每 tick 重亮 59 槽位 → AHK 连按。
+--
+-- 修法与种族爆发（三十五次修复）同构，但这里做成**增益/减益通用件**，供全仓复用：
+--   ① 免读回 ID 直查：GetPlayerAuraBySpellID / GetUnitAuraBySpellID
+--      （RequiresNonSecretAura 族：只按 ID 问「在不在」，不枚举、不读字段）；
+--   ② 名字族直查：GetPlayerAuraBySpellName / GetUnitAuraBySpellName /
+--      GetAuraDataBySpellName（同族，只按名字问「在不在」）；
+--   ③ 经典 UnitBuff / UnitDebuff(unit, 名字)；
+--   ④ 既有缓存通道（脱战时它最准）。
+--   **只采信肯定证据**：任一通道明确 true → true；全都读不到 → nil（未知）。
+--   绝不把「读不到」当成「没有」—— 那正是本次故障的形态。
+-- ============================================================
+
+-- 问「某条光环此刻在不在」。返回 true / nil（未知），永不返回 false。
+--   unit   ：单位 token
+--   name   ：光环中文名（nil = 只按 ID 查）
+--   ids    ：spellID 数组（nil = 只按名字查）
+--   filter ："HELPFUL" / "HARMFUL"（经典分支与 GetAuraDataBySpellName 用）
+function WR_Forever_AuraPresence(unit, name, ids, filter)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    -- secret 表的 `obj == nil` 本身也可能抛 → 比较也包 pcall
+    local function isUp(obj)
+        local ok, isNil = pcall(function() return obj == nil end)
+        if not ok then return nil end
+        if isNil then return nil end
+        return true
+    end
+    local cu = (type(C_UnitAuras) == "table") and C_UnitAuras or nil
+
+    -- ① 免读回 ID 直查
+    if cu ~= nil and type(ids) == "table" then
+        for i = 1, #ids do
+            local sid = ids[i]
+            if type(sid) == "number" and sid > 0 then
+                if unit == "player" and cu.GetPlayerAuraBySpellID ~= nil then
+                    local ok1, a1 = pcall(cu.GetPlayerAuraBySpellID, sid)
+                    if ok1 and isUp(a1) == true then return true end
+                end
+                if cu.GetUnitAuraBySpellID ~= nil then
+                    local ok2, a2 = pcall(cu.GetUnitAuraBySpellID, unit, sid)
+                    if ok2 and isUp(a2) == true then return true end
+                end
+            end
+        end
+    end
+
+    -- ② 名字族直查
+    if cu ~= nil and type(name) == "string" and name ~= "" then
+        if unit == "player" and cu.GetPlayerAuraBySpellName ~= nil then
+            local ok3, a3 = pcall(cu.GetPlayerAuraBySpellName, name)
+            if ok3 and isUp(a3) == true then return true end
+        end
+        if cu.GetUnitAuraBySpellName ~= nil then
+            local ok4, a4 = pcall(cu.GetUnitAuraBySpellName, unit, name)
+            if ok4 and isUp(a4) == true then return true end
+        end
+        if cu.GetAuraDataBySpellName ~= nil then
+            local ok5, a5 = pcall(cu.GetAuraDataBySpellName, unit, name, filter)
+            if ok5 and isUp(a5) == true then return true end
+        end
+    end
+
+    -- ③ 经典 UnitBuff / UnitDebuff(unit, 名字)（脱战可用；战斗中本服可能返回 nil）
+    local legacy = (filter == "HARMFUL") and UnitDebuff or UnitBuff
+    if type(legacy) == "function" and type(name) == "string" and name ~= "" then
+        local ok6, d = pcall(legacy, unit, name)
+        if ok6 then
+            local okN, isNil = pcall(function() return d == nil end)
+            if okN and not isNil then
+                local t = type(d)
+                if t == "table" or t == "userdata" or t == "string" then return true end
+            end
+        end
+    end
+
+    -- ④ 既有缓存通道（脱战最准；战斗中可能因 secret 恒返回 0）
+    local timeFn = (filter == "HARMFUL") and WR_GetUnitDebuffTime or WR_GetUnitBuffTime
+    if type(timeFn) == "function" and type(name) == "string" and name ~= "" then
+        local ok7, v = pcall(timeFn, unit, name)
+        if ok7 and type(v) == "number" and v > 0 then return true end
+    end
+
+    return nil
+end
+_G.WR_Forever_AuraPresence = WR_Forever_AuraPresence
+
+-- ------------------------------------------------------------
+-- 真言术：盾 / 虚弱灵魂 专用件
+-- ------------------------------------------------------------
+-- 盾的各 rank spellID（经典 17/592/600/3747/6066/10898~10901/25217/25218/48065/48066）。
+-- 本服宏里出现过「真言术：盾(等级 11/12/13)」= 25218 / 48065 / 48066。
+WR_Forever_ShieldSpellIDs = WR_Forever_ShieldSpellIDs or {
+    17, 592, 600, 3747, 6066, 10898, 10899, 10900, 10901,
+    25217, 25218, 48065, 48066,
+}
+-- 虚弱灵魂 6788（截图实证）：盾刚上过的权威证据 —— 盾被打爆后它仍在。
+WR_Forever_WeakenedSoulSpellIDs = WR_Forever_WeakenedSoulSpellIDs or { 6788 }
+-- 盾的持续时间（秒）。虚弱灵魂 15 秒、盾本体 30 秒 → 按较长的一侧兜底，
+-- 宁可少提示一次，也不要因为记账过期而重复上盾（重复上盾是纯浪费蓝 + GCD）。
+WR_Forever_SHIELD_DURATION = 30
+-- 点亮盾后的保持窗口（秒）：这段时间内不重复提示（AHK 扫屏 ~60ms / tick 100ms）。
+WR_Forever_SHIELD_PROMPT_HOLD = 1.5
+-- 点亮后等施放成功的宽限（秒）。超时仍无施放记账 → 认为这次提示没打出去，
+-- 清掉 pending 让循环继续提示（不要因为一次空按就永远不亮）。
+WR_Forever_SHIELD_PENDING_TTL = 5
+
+-- 本地记账：unit → 最近一次「给它点亮过盾」的时刻。
+WR_Forever_ShieldPending = WR_Forever_ShieldPending or {}
+
+-- 取「最近一次盾施放成功」的时刻（APIShim 的本地记账）。
+-- ★★★ 2026-11-21 三十八次修复：必须同时查 spellID 通道。
+--   受限战斗里 UNIT_SPELLCAST_SUCCEEDED 的 spellName 是 secret →
+--   WR_Forever_CastLog（名字键）永远为空；只有 CastLogByID[17] 有值。
+--   旧实现只查名字键 → 盾的记账通道整条失效 → 「上了盾还一直亮」。
+local function WR_Forever_ShieldCastAt()
+    local best = nil
+    local function consider(v)
+        if type(v) == "number" and (best == nil or v > best) then best = v end
+    end
+    if type(WR_Forever_CastLog) == "table" then
+        consider(WR_Forever_CastLog["真言术：盾"])
+    end
+    if type(WR_Forever_CastLogByID) == "table" then
+        for i = 1, #WR_Forever_ShieldSpellIDs do
+            consider(WR_Forever_CastLogByID[WR_Forever_ShieldSpellIDs[i]])
+        end
+    end
+    return best
+end
+
+-- 已确认「盾落在该单位身上」的记账：unit → 施放成功时刻。
+-- 归属两条路（都不依赖事件首参语义）：
+--   ① 提示归属：我们刚给该单位点亮过盾（3 秒内），随后读到施放成功 → 就是它；
+--   ② 焦点归属：宏 59/50/60/61 全是 [@focus] 形态 → 没有提示记录时（手动施放），
+--      盾必然落在当前焦点上。
+WR_Forever_ShieldConfirmed = WR_Forever_ShieldConfirmed or {}
+WR_Forever_ShieldCastSeenAt = WR_Forever_ShieldCastSeenAt or 0
+
+local function WR_Forever_ShieldConsumeCast()
+    local castAt = WR_Forever_ShieldCastAt()
+    if type(castAt) ~= "number" or castAt <= WR_Forever_ShieldCastSeenAt then return end
+    WR_Forever_ShieldCastSeenAt = castAt
+    local pu = WR_Forever_ShieldLastPromptUnit
+    local pat = WR_Forever_ShieldLastPromptAt
+    if type(pu) == "string" and pu ~= "" and type(pat) == "number"
+        and castAt >= (pat - 0.5) and (castAt - pat) <= 3.0 then
+        WR_Forever_ShieldConfirmed[pu] = castAt
+        return
+    end
+    if type(UnitExists) == "function" then
+        local okF, has = pcall(UnitExists, "focus")
+        if okF and has == true then
+            WR_Forever_ShieldConfirmed["focus"] = castAt
+        end
+    end
+end
+
+local function WR_Forever_ShieldConfirmedUp(unit)
+    local now = GetTime()
+    local at = WR_Forever_ShieldConfirmed[unit]
+    if type(at) ~= "number" and unit ~= "focus" then
+        local fa = WR_Forever_ShieldConfirmed["focus"]
+        if type(fa) == "number" and type(UnitIsUnit) == "function" then
+            local okU, same = pcall(UnitIsUnit, "focus", unit)
+            if okU and same == true then at = fa end
+        end
+    end
+    if type(at) ~= "number" then return nil end
+    if (WR_Forever_SHIELD_DURATION - (now - at)) > 0 then return true end
+    WR_Forever_ShieldConfirmed[unit] = nil
+    return nil
+end
+
+-- 点亮盾时调用（由各职业治疗步在 Show 成功之后写）。
+-- ★ 防重入：保持窗口内重复点亮**不续期**，否则窗口被无限续命 → 色块永久常亮
+--   （与 WR_Forever_NoteBurstPrompt 同一口径，见三十五次修复的 T1/T2 用例）。
+-- ★ 归属：施放成功事件只说「玩家放了个盾」，不说是给谁的。所以额外记下
+--   「最近一次被提示的单位」，只有它才能把这次施放认作自己的 —— 否则给 A 上盾
+--   会让 B 也以为「我已经有盾了」，30 秒内都不补（跨单位假阴性）。
+function WR_Forever_NoteShieldPrompt(unit)
+    if type(unit) ~= "string" or unit == "" then return end
+    local now = GetTime()
+    local pend = WR_Forever_ShieldPending[unit]
+    if type(pend) == "number" and (now - pend) < WR_Forever_SHIELD_PROMPT_HOLD then return end
+    WR_Forever_ShieldPending[unit] = now
+    WR_Forever_ShieldLastPromptUnit = unit
+    WR_Forever_ShieldLastPromptAt = now
+end
+_G.WR_Forever_NoteShieldPrompt = WR_Forever_NoteShieldPrompt
+
+-- 该单位此刻「真的有盾吗」。true = 有（不该再提示）/ nil = 没有或读不到。
+-- 判据顺序：盾本体（多通道）→ 虚弱灵魂 → 本地「已确认施放」记账。
+-- ★ 绝不在「读不到」时返回 false —— 那正是「上了盾还一直亮」的形态；
+--   这里返回 nil，调用方按「没有」继续上盾（多上一次远好过色块挂死）。
+function WR_Forever_ShieldUp(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+
+    -- ① 盾本体真的挂着（多通道，只采信肯定证据）
+    if WR_Forever_AuraPresence(unit, "真言术：盾", WR_Forever_ShieldSpellIDs, "HELPFUL") == true then
+        return true
+    end
+    -- ② 虚弱灵魂 = 盾刚上过（盾被打爆后它仍在，仍然不该立刻补）
+    if WR_Forever_AuraPresence(unit, "虚弱灵魂", WR_Forever_WeakenedSoulSpellIDs, "HARMFUL") == true then
+        return true
+    end
+
+    -- ③ 已确认施放记账（spellID 通道 + 提示/焦点归属）。
+    --   受限战斗里光环四通道全读不到时，这是唯一可靠的「盾已上身」证据。
+    WR_Forever_ShieldConsumeCast()
+    if WR_Forever_ShieldConfirmedUp(unit) == true then return true end
+
+    -- ④ 本地记账：给它点亮过盾，且随后确实读到了施放成功
+    local pend = WR_Forever_ShieldPending[unit]
+    if type(pend) == "number" then
+        local now = GetTime()
+        local castAt = WR_Forever_ShieldCastAt()
+        -- ★ 归属校验：施放成功不带单位，只有「最近提示的正是本单位」才认领，
+        --   否则给 A 上盾会让 B 也以为自己有盾 → 30 秒内不补（跨单位假阴性）。
+        local owned = (WR_Forever_ShieldLastPromptUnit == unit)
+        if owned and type(castAt) == "number" and castAt >= (pend - 0.5) then
+            -- 这次提示确实打出去了：盾持续时间内都算「有盾」
+            if (WR_Forever_SHIELD_DURATION - (now - castAt)) > 0 then return true end
+            WR_Forever_ShieldPending[unit] = nil
+        elseif (now - pend) > WR_Forever_SHIELD_PENDING_TTL then
+            -- 点亮后一直没等到施放成功（被拒 / 空按）→ 清账，让循环重新提示
+            WR_Forever_ShieldPending[unit] = nil
+        end
+    end
+
+    return nil
+end
+_G.WR_Forever_ShieldUp = WR_Forever_ShieldUp
+
+-- 刚点亮、还在等 AHK 按键的保持窗口。true = 本 tick 继续亮（但不要重新记账）。
+-- 作用：色块点亮后要留够时间给 AHK 扫屏按键（~60ms 扫一次 / 主循环 100ms 一 tick）；
+--   若点亮当 tick 就判死并熄灭，会变成「亮 100ms / 灭 1.5s」的闪烁，AHK 可能一次都没
+--   读到 → 表现为「盾永远按不出来」（与三十五次修复的 ③ 保持窗口同源）。
+function WR_Forever_ShieldPromptHold(unit)
+    if type(unit) ~= "string" or unit == "" then return false end
+    local pend = WR_Forever_ShieldPending[unit]
+    if type(pend) ~= "number" then return false end
+    local now = GetTime()
+    -- ★★★ 三十八次修复：保持窗口只覆盖「点亮后等 AHK 按键」的 1.5 秒。
+    --   旧实现在施放成功后把窗口延长到整个盾持续时间（30 秒）→ 盾明明上身，
+    --   色块却被本函数强行续亮 30 秒 —— 正是「上了盾还一直亮」的另一半根因。
+    --   「盾已上身 → 不亮」由 WR_Forever_ShieldUp 的确认记账负责，这里不再续期。
+    if (now - pend) < WR_Forever_SHIELD_PROMPT_HOLD then return true end
+    return false
+end
+_G.WR_Forever_ShieldPromptHold = WR_Forever_ShieldPromptHold
+
+-- ------------------------------------------------------------
+-- ★★★ 2026-11-21 四十一次修复：真言术：韧 全 rank 专用件
+-- ------------------------------------------------------------
+-- 用户口径：「牧师维持真言术：韧没兼容低级法术」。
+-- 截图实证：1级小号身上的韧是「真言术：韧 等级1 · spellID 1243」（+4耐力）。
+-- 旧 PD.BuffStep 只走 PD.BuffRemain("真言术：韧") → 光环缓存名字精确匹配：
+--   ① 低 rank 光环名带「(等级 1)」后缀时永远匹配不上 → 判「没韧」→ 反复补；
+--   ② 没有 spellID 族直查通道（盾有 ShieldSpellIDs，韧没有）；
+--   ③ 受限战斗里缓存 secret 失败时也没有本地施放记账兜底；
+--   ④ 坚韧祷言（群体韧）挂着时也应视为「有韧」，不该再单体补。
+-- 修法与盾（三十七/三十八次修复）同构：全 rank ID 表 + WR_Forever_AuraPresence
+-- 多通道（ID 直查 / 名字族 / 经典 UnitBuff / 缓存）+ 本地施放记账 + 保持窗口。
+WR_Forever_FortitudeSpellIDs = WR_Forever_FortitudeSpellIDs or {
+    -- Power Word: Fortitude 单体全 rank（1243 = 等级1，截图实证）
+    1243, 1244, 1245, 2791, 10937, 10938, 25389,
+    -- Prayer of Fortitude 群体韧（挂着它也算有韧，不重复单体补）
+    21562, 21564, 25392,
+}
+
+-- 实际生效的 spellID 族：静态全 rank 表 + **玩家当前真正学会的那个 rank**
+-- （运行时从法术书解析；本服法术 ID 可能与经典表不一致，不能只靠写死的表）。
+-- 注意：表名 WR_Forever_FortitudeSpellIDs 保持不变（外部可能引用），
+--   取「运行时族」的函数另起名，避免表/函数同名互相覆盖。
+-- ★ 运行时 rank 只在法术书索引换表时重解析（否则每 tick 建表 + 反复解析）。
+WR_Forever_FortitudeRuntimeID = nil
+WR_Forever_FortitudeRuntimeIndex = nil
+
+function WR_Forever_FortitudeSpellIDSet()
+    local out = {}
+    for i = 1, #WR_Forever_FortitudeSpellIDs do out[#out + 1] = WR_Forever_FortitudeSpellIDs[i] end
+    if type(WR_ResolveSpellID) == "function" then
+        local idx = WR_Forever_SpellBookIndex
+        if idx ~= WR_Forever_FortitudeRuntimeIndex then
+            WR_Forever_FortitudeRuntimeIndex = idx
+            WR_Forever_FortitudeRuntimeID = nil
+            local ok, sid = pcall(WR_ResolveSpellID, "真言术：韧")
+            if ok and type(sid) == "number" and sid > 0 then
+                WR_Forever_FortitudeRuntimeID = sid
+            end
+        end
+        local sid = WR_Forever_FortitudeRuntimeID
+        if type(sid) == "number" and sid > 0 then
+            local dup = false
+            for i = 1, #out do if out[i] == sid then dup = true end end
+            if not dup then out[#out + 1] = sid end
+        end
+    end
+    return out
+end
+-- 名字族候选：基础名 + 群体版 + 低 rank 常见写法（本服括号风格半角/全角都有先例）
+WR_Forever_FortitudeNames = WR_Forever_FortitudeNames or {
+    "真言术：韧", "坚韧祷言",
+    "真言术：韧(等级 1)", "真言术：韧(等级 2)", "真言术：韧(等级 3)",
+    "真言术：韧(等级 4)", "真言术：韧(等级 5)", "真言术：韧(等级 6)", "真言术：韧(等级 7)",
+    "真言术：韧（等级 1）", "真言术：韧（等级 2）", "真言术：韧（等级 3）",
+    "真言术：韧（等级 4）", "真言术：韧（等级 5）", "真言术：韧（等级 6）", "真言术：韧（等级 7）",
+}
+-- 韧持续 30 分钟；本地记账兜底按 30 分钟（低 rank 时长一致，只加耐力数值不同）。
+WR_Forever_FORT_DURATION = 1800
+-- 点亮后的保持窗口 / 等施放成功宽限（与盾同口径）。
+WR_Forever_FORT_PROMPT_HOLD = 1.5
+WR_Forever_FORT_PENDING_TTL = 5
+WR_Forever_FortPending = WR_Forever_FortPending or {}
+WR_Forever_FortConfirmed = WR_Forever_FortConfirmed or {}
+WR_Forever_FortCastSeenAt = WR_Forever_FortCastSeenAt or 0
+
+local function WR_Forever_FortCastAt()
+    local best = nil
+    local function consider(v)
+        if type(v) == "number" and (best == nil or v > best) then best = v end
+    end
+    if type(WR_Forever_CastLog) == "table" then
+        consider(WR_Forever_CastLog["真言术：韧"])
+        consider(WR_Forever_CastLog["坚韧祷言"])
+    end
+    if type(WR_Forever_CastLogByID) == "table" then
+        local ids = WR_Forever_FortitudeSpellIDSet()
+        for i = 1, #ids do
+            consider(WR_Forever_CastLogByID[ids[i]])
+        end
+    end
+    return best
+end
+
+-- 归属与盾同构：提示归属（3 秒内给该单位点亮过）→ 焦点归属（宏 52 是 [@focus]）。
+local function WR_Forever_FortConsumeCast()
+    local castAt = WR_Forever_FortCastAt()
+    if type(castAt) ~= "number" or castAt <= WR_Forever_FortCastSeenAt then return end
+    WR_Forever_FortCastSeenAt = castAt
+    local pu = WR_Forever_FortLastPromptUnit
+    local pat = WR_Forever_FortLastPromptAt
+    if type(pu) == "string" and pu ~= "" and type(pat) == "number"
+        and castAt >= (pat - 0.5) and (castAt - pat) <= 3.0 then
+        WR_Forever_FortConfirmed[pu] = castAt
+        return
+    end
+    if type(UnitExists) == "function" then
+        local okF, has = pcall(UnitExists, "focus")
+        if okF and has == true then
+            WR_Forever_FortConfirmed["focus"] = castAt
+        end
+    end
+end
+
+local function WR_Forever_FortConfirmedUp(unit)
+    local now = GetTime()
+    local at = WR_Forever_FortConfirmed[unit]
+    if type(at) ~= "number" and unit ~= "focus" then
+        local fa = WR_Forever_FortConfirmed["focus"]
+        if type(fa) == "number" and type(UnitIsUnit) == "function" then
+            local okU, same = pcall(UnitIsUnit, "focus", unit)
+            if okU and same == true then at = fa end
+        end
+    end
+    if type(at) ~= "number" then return nil end
+    if (WR_Forever_FORT_DURATION - (now - at)) > 0 then return true end
+    WR_Forever_FortConfirmed[unit] = nil
+    return nil
+end
+
+-- 点亮韧时调用（BuffStep 在 Show 成功后写）。防重入：保持窗口内不续期。
+function WR_Forever_NoteFortPrompt(unit)
+    if type(unit) ~= "string" or unit == "" then return end
+    local now = GetTime()
+    local pend = WR_Forever_FortPending[unit]
+    if type(pend) == "number" and (now - pend) < WR_Forever_FORT_PROMPT_HOLD then return end
+    WR_Forever_FortPending[unit] = now
+    WR_Forever_FortLastPromptUnit = unit
+    WR_Forever_FortLastPromptAt = now
+end
+_G.WR_Forever_NoteFortPrompt = WR_Forever_NoteFortPrompt
+
+-- 该单位此刻「真的有韧吗」。true = 有（含任意 rank / 群体韧）/ nil = 没有或读不到。
+function WR_Forever_FortitudeUp(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    -- ① 全 rank ID 直查（免读回，RequiresNonSecretAura 族）+ 基础名/群体名多通道
+    if WR_Forever_AuraPresence(unit, "真言术：韧", WR_Forever_FortitudeSpellIDSet(), "HELPFUL") == true then
+        return true
+    end
+    if WR_Forever_AuraPresence(unit, "坚韧祷言", nil, "HELPFUL") == true then
+        return true
+    end
+    -- ② 低 rank 带后缀的名字族直查（ID 通道被秘密旗挡住时的补充）
+    for i = 3, #WR_Forever_FortitudeNames do
+        if WR_Forever_AuraPresence(unit, WR_Forever_FortitudeNames[i], nil, "HELPFUL") == true then
+            return true
+        end
+    end
+    -- ③ 已确认施放记账（spellID 通道 + 提示/焦点归属）
+    WR_Forever_FortConsumeCast()
+    if WR_Forever_FortConfirmedUp(unit) == true then return true end
+    -- ④ 点亮过且随后确实读到施放成功（归属校验，防跨单位假阴性）
+    local pend = WR_Forever_FortPending[unit]
+    if type(pend) == "number" then
+        local now = GetTime()
+        local castAt = WR_Forever_FortCastAt()
+        local owned = (WR_Forever_FortLastPromptUnit == unit)
+        if owned and type(castAt) == "number" and castAt >= (pend - 0.5) then
+            if (WR_Forever_FORT_DURATION - (now - castAt)) > 0 then return true end
+            WR_Forever_FortPending[unit] = nil
+        elseif (now - pend) > WR_Forever_FORT_PENDING_TTL then
+            WR_Forever_FortPending[unit] = nil
+        end
+    end
+    return nil
+end
+_G.WR_Forever_FortitudeUp = WR_Forever_FortitudeUp
+
+-- 刚点亮、还在等 AHK 按键的保持窗口（1.5 秒，不覆盖整个 buff 时长）。
+function WR_Forever_FortPromptHold(unit)
+    if type(unit) ~= "string" or unit == "" then return false end
+    local pend = WR_Forever_FortPending[unit]
+    if type(pend) ~= "number" then return false end
+    if (GetTime() - pend) < WR_Forever_FORT_PROMPT_HOLD then return true end
+    return false
+end
+_G.WR_Forever_FortPromptHold = WR_Forever_FortPromptHold
+
+-- 「这一发韧已经打出去」的轻量判定：只查本地施放记账，**零 API 调用**。
+-- ★ 四十二次修复的落地件：色块点亮后必须在 GCD 转好之前熄灭，
+--   否则外部 AHK（同色常亮就一直按，约 60ms 一次）会在 GCD 一过就再按一次
+--   → 韧被打两下（「连补两下」）。受限战斗里光环四通道全读不到时，
+--   本地记账是唯一能立刻确认「这一发已经出去了」的信号。
+-- 归属：只认「我们刚给该单位点亮过韧、且 3 秒内确实读到施放成功」的那一次，
+--   否则上一次的手动施放会被误认成这一发（跨时假阳性 → 30 分钟不补）。
+function WR_Forever_FortitudeCastLanded(unit)
+    unit = unit or "player"
+    local pat = WR_Forever_FortLastPromptAt
+    if type(pat) ~= "number" then return false end
+    if WR_Forever_FortLastPromptUnit ~= unit then return false end
+    local castAt = WR_Forever_FortCastAt()
+    if type(castAt) ~= "number" then return false end
+    if castAt < (pat - 0.5) then return false end
+    if (castAt - pat) > 3.0 then return false end
+    return true
+end
+_G.WR_Forever_FortitudeCastLanded = WR_Forever_FortitudeCastLanded
+
+-- ============================================================
+-- 通用「自身增益」专用件（维持类增益：心灵之火等）
+-- ------------------------------------------------------------
+-- 与「真言术：盾」「真言术：韧」专用件同构，抽成可复用的通用版：
+--   ① 多通道存在性：ID 直查（运行时解析玩家实际学会的 rank，**不猜 ID**）/
+--      名字族直查 / 经典 UnitBuff / 归一后的缓存通道
+--      （Core_Functions 的 WR_AuraNameBase 已让「真言术：韧(等级 1)」这种
+--        带等级后缀的名字能命中基础名查询）；
+--   ② 本地施放记账：名字在受限战斗里是 secret 时靠 spellID 通道记；
+--   ③ 提示保持窗口：刚点亮时继续亮（等 AHK 按键），防重入不续期
+--      （否则窗口被无限续期 → 色块永久常亮）；
+--   ④ 只采信肯定证据：读不到一律 nil —— 绝不把「读不到」当成「没有」。
+-- 参数：name = 增益中文名；duration = 记账兜底时长（秒）；unit = 目标单位。
+WR_Forever_SELF_PROMPT_HOLD = 1.5
+WR_Forever_SelfBuffExtraIDs = WR_Forever_SelfBuffExtraIDs or {}
+WR_Forever_SelfBuffState = WR_Forever_SelfBuffState or {}
+
+-- 该增益的 spellID 集合：额外登记 + 运行时解析「玩家实际学会的那个 rank」。
+function WR_Forever_SelfBuffSpellIDs(name)
+    local out = {}
+    local extra = WR_Forever_SelfBuffExtraIDs[name]
+    if type(extra) == "table" then
+        for i = 1, #extra do
+            local v = extra[i]
+            if type(v) == "number" and v > 0 then out[#out + 1] = v end
+        end
+    end
+    if type(WR_ResolveSpellID) == "function" then
+        local ok, sid = pcall(WR_ResolveSpellID, name)
+        if ok and type(sid) == "number" and sid > 0 then
+            local dup = false
+            for i = 1, #out do
+                if out[i] == sid then dup = true end
+            end
+            if not dup then out[#out + 1] = sid end
+        end
+    end
+    return out
+end
+
+-- 记一次「已经点亮过这个自身增益」（供保持窗口判断）。
+function WR_Forever_NoteSelfBuffPrompt(name)
+    if type(name) ~= "string" or name == "" then return end
+    local st = WR_Forever_SelfBuffState[name]
+    if not st then st = {}; WR_Forever_SelfBuffState[name] = st end
+    local now = GetTime()
+    if type(st.promptAt) == "number" and (now - st.promptAt) < WR_Forever_SELF_PROMPT_HOLD then return end
+    st.promptAt = now
+end
+_G.WR_Forever_NoteSelfBuffPrompt = WR_Forever_NoteSelfBuffPrompt
+
+-- 刚点亮、还在等 AHK 按键的保持窗口（防重入：窗口内不续期）。
+function WR_Forever_SelfBuffPromptHold(name)
+    if type(name) ~= "string" or name == "" then return false end
+    local st = WR_Forever_SelfBuffState[name]
+    if not st or type(st.promptAt) ~= "number" then return false end
+    return (GetTime() - st.promptAt) < WR_Forever_SELF_PROMPT_HOLD
+end
+_G.WR_Forever_SelfBuffPromptHold = WR_Forever_SelfBuffPromptHold
+
+-- 该单位此刻「真的有这个自身增益吗」。true = 有 / nil = 没有或读不到。
+function WR_Forever_SelfBuffUp(name, duration, unit)
+    if type(name) ~= "string" or name == "" then return nil end
+    unit = unit or "player"
+    local ids = WR_Forever_SelfBuffSpellIDs(name)
+    -- ① 多通道存在性（ID 直查 / 名字族 / 经典 UnitBuff / 归一缓存）
+    if type(WR_Forever_AuraPresence) == "function" then
+        local ok, v = pcall(WR_Forever_AuraPresence, unit, name, (#ids > 0) and ids or nil, "HELPFUL")
+        if ok and v == true then return true end
+    end
+    -- ② 本地施放记账（名字 secret 时靠 spellID 通道）
+    local castAt = nil
+    if type(WR_Forever_CastLog) == "table" then
+        local v = WR_Forever_CastLog[name]
+        if type(v) == "number" then castAt = v end
+    end
+    if type(WR_Forever_CastLogByID) == "table" then
+        for i = 1, #ids do
+            local v = WR_Forever_CastLogByID[ids[i]]
+            if type(v) == "number" and (castAt == nil or v > castAt) then castAt = v end
+        end
+    end
+    if type(castAt) == "number" then
+        local dur = tonumber(duration) or 30
+        if (dur - (GetTime() - castAt)) > 0 then return true end
+    end
+    return nil
+end
+_G.WR_Forever_SelfBuffUp = WR_Forever_SelfBuffUp
+
+-- 「这一发自身增益已经打出去」的轻量判定（只查本地施放记账，零 API 调用）。
+-- 同构于 WR_Forever_FortitudeCastLanded：色块点亮后必须尽快熄灭，
+-- 否则 AHK 会跨过 GCD 连按 → 增益被打两下。
+function WR_Forever_SelfBuffCastLanded(name, unit)
+    if type(name) ~= "string" or name == "" then return false end
+    unit = unit or "player"
+    local st = WR_Forever_SelfBuffState[name]
+    if not st or type(st.promptAt) ~= "number" then return false end
+    local pat = st.promptAt
+    local castAt = nil
+    if type(WR_Forever_CastLog) == "table" then
+        local v = WR_Forever_CastLog[name]
+        if type(v) == "number" then castAt = v end
+    end
+    if castAt == nil and type(WR_Forever_CastLogByID) == "table" then
+        local ids = WR_Forever_SelfBuffSpellIDs(name)
+        for i = 1, #ids do
+            local v = WR_Forever_CastLogByID[ids[i]]
+            if type(v) == "number" and (castAt == nil or v > castAt) then castAt = v end
+        end
+    end
+    if type(castAt) ~= "number" then return false end
+    if castAt < (pat - 0.5) then return false end
+    if (castAt - pat) > 3.0 then return false end
+    return true
+end
+_G.WR_Forever_SelfBuffCastLanded = WR_Forever_SelfBuffCastLanded
+
+-- ============================================================
+-- ★★★ 2026-11-21 三十五次修复：全职业「种族爆发步」统一入口
+-- ------------------------------------------------------------
+-- 之前每个职业各写一套「遍历列表 + WR_SpellUsable」，只有牧师 / 战士三系 /
+-- 德鲁伊野性 / 猎人兽王改到了 CD 维，法师三系 / 猎人射击·生存 / 萨满两系 /
+-- 术士三系 / 德鲁伊平衡·恢复 仍是旧口径 —— 同一个「用了还一直亮」的坑。
+-- 本函数把七道门收成一处，各职业只需传自己的 Show / CanCast：
+--   按种族精确列表 → 已学会 → 本地施放记账 CD → 客户端冷却 →
+--   提示保持窗口 → 客户端可用性，任一门判死都不点亮；
+-- 并且**本步不亮时主动熄灭槽位**，不让上一 tick 的色块挂在那里被 AHK 连按。
+-- want：调用方的面板开关（false 时同样要熄灭残留色块）。
+-- 返回 true = 已点亮（调用方直接 return true）。
+function WR_Forever_RacialBurstStep(showFn, canCastFn, slot, want)
+    local s = slot or 181
+    local function hide()
+        if type(WR_Forever_HideRacialBurst) == "function" then
+            pcall(WR_Forever_HideRacialBurst, s)
+        elseif type(WR_HideSkillColorSlot) == "function" then
+            pcall(WR_HideSkillColorSlot, "种族爆发", s)
+        end
+    end
+    if want == false then hide() return false end
+
+    local hit
+    if type(WR_Forever_RacialBurstReady) == "function" then
+        local okR, v = pcall(WR_Forever_RacialBurstReady)
+        if okR and type(v) == "string" then hit = v end
+    else
+        -- 兼容回退（旧 Core 未加载新函数时仍按原口径工作）
+        local fn = WR_Forever_PlayerRacialBursts or WR_Forever_GetRacialBursts
+        if type(fn) == "function" then
+            local ok, bursts = pcall(fn)
+            if ok and type(bursts) == "table" then
+                for i = 1, #bursts do
+                    local name = bursts[i]
+                    if type(name) == "string" and name ~= "" then
+                        local okc = false
+                        if type(canCastFn) == "function" then
+                            local okp, v2 = pcall(canCastFn, name)
+                            okc = (okp and v2 == true)
+                        elseif type(WR_SpellUsable) == "function" then
+                            local okp, v2 = pcall(WR_SpellUsable, name, true)
+                            okc = (okp and v2 == true)
+                        end
+                        if okc then hit = name break end
+                    end
+                end
+            end
+        end
+    end
+
+    if hit and type(showFn) == "function" then
+        local okS, shown = pcall(showFn, "种族爆发", s)
+        if okS and shown == true then
+            if type(WR_Forever_NoteBurstPrompt) == "function" then
+                local cd = (type(WR_Forever_RacialBurstCD) == "table" and WR_Forever_RacialBurstCD[hit])
+                    or WR_Forever_RACIAL_BURST_DEFAULT_CD or 180
+                pcall(WR_Forever_NoteBurstPrompt, hit, cd)
+            end
+            return true
+        end
+    end
+    hide()
+    return false
+end
+_G.WR_Forever_RacialBurstStep = WR_Forever_RacialBurstStep
 
 -- 法术书变更时使缓存失效（登录完成后重建，避免加载期拿到空法术书）。
 -- 战斗中不重建：重建需遍历数百个法术书槽位并逐个 pcall，会造成可感知的掉帧；

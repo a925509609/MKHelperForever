@@ -25,6 +25,22 @@ function WR_PriestForeverShadow()
     local inBossEncounter = bossFrameActive and (UnitAffectingCombat("player") or UnitAffectingCombat("target"))
     local allowAdd = (PigSet.FANG_ADD_MS ~= 0)
     if not (inBossEncounter or (UnitAffectingCombat("player") and TargetInCombat and allowAdd)) then
+        -- ★★★ 2026-11-21 三十六次修复（与戒律同构）：「脱战了还会亮输出色块」。
+        -- 色块不会因为 return false 就消失（WR_ColorFrame_Show 只在自己被调用时
+        -- 才先隐藏全部），MainLoop 的收尾清扫只管「资源不足」一种情形。
+        -- 这里在脱战早退前主动收掉本专精的战斗专用槽位，避免上一 tick 的色块
+        -- 常亮被 AHK 连按（脱战后还在放技能，一打就又进战斗）。
+        if type(WR_HideSkillColorSlot) == "function" then
+            local combatSlots = {
+                { "暗言术：痛", 14 }, { "吸血鬼之触", 1 }, { "噬灵疫病", 3 },
+                { "心灵震爆", 4 }, { "暗言术：死", 176 }, { "精神鞭笞", 5 },
+                { "暗影魔", 7 }, { "消散", 11 }, { "吸血鬼的拥抱", 10 },
+                { "沉默", 80 }, { "暗影形态", 8 },
+            }
+            for i = 1, #combatSlots do
+                pcall(WR_HideSkillColorSlot, combatSlots[i][1], combatSlots[i][2])
+            end
+        end
         return false
     end
 

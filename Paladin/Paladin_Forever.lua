@@ -5027,6 +5027,29 @@ WR_PaladinForever_CLEANSE_KNOWN_AURA_NAMES = {
     ["食尸鬼腐气"] = "disease",
 }
 
+-- ★★★ 2026-11-21 三十四次修复：光环名「去等级后缀」的本地实现。
+-- ------------------------------------------------------------
+-- 为什么不用 Core_Functions 的 WR_AuraNameBase：它在 Core 层，
+-- Paladin_Forever.lua 在裁剪夹具 / 极端加载顺序下可能先于它加载，
+-- 而这里（名字判型 / 名字发现）必须在任何加载顺序下都能工作。
+-- 规则与 WR_AuraNameBase 完全一致：剥「（等级 N）」/「(等级 N)」，全角半角、空格可有可无。
+-- ★ 铁律：secret string 的 type() 仍是 "string"，gsub 可能抛错 —— 整段包 pcall。
+function WR_PaladinForever_AuraNameBase(s)
+    if type(s) ~= "string" or s == "" then return nil end
+    if WR_PaladinForever_IsSecretValue(s) then return nil end
+    local ok, out = pcall(function()
+        local b = s:gsub("%s*（等级%s*%d+）%s*$", "")
+        if b == s then b = s:gsub("%s*%(等级%s*%d+%)%s*$", "") end
+        if b == s then b = s:gsub("%s*（等级%d+）%s*$", "") end
+        if b == s then b = s:gsub("%s*%(等级%d+%)%s*$", "") end
+        b = b:gsub("^%s+", ""):gsub("%s+$", "")
+        if b == "" then return s end
+        return b
+    end)
+    if ok and type(out) == "string" and out ~= "" then return out end
+    return nil
+end
+_G.WR_PaladinForever_AuraNameBase = WR_PaladinForever_AuraNameBase
 -- 名称 → 类型（只认肯定证据：secret / 空 / 不在表内一律 nil）
 function WR_PaladinForever_KindFromAuraName(name)
     if type(name) ~= "string" then return nil end
@@ -5035,6 +5058,21 @@ function WR_PaladinForever_KindFromAuraName(name)
     if not okTrim or type(s) ~= "string" or s == "" then return nil end
     local kind = WR_PaladinForever_CLEANSE_KNOWN_AURA_NAMES[s]
     if kind ~= nil then return kind end
+    -- ★★★ 2026-11-21 三十四次修复：也认「运行时已发现名字」。
+    --   本服自定义 debuff 名字不在手写白名单里，但名字通常可读（用户截图实证）；
+    --   脱战发现阶段（CleanseNameDiscoveryTick）已经把见过的名字记进已发现表，
+    --   这里直接命中 → 战斗中 ScanUnitDebuffTypes / tooltip 扫描拿到名字即可判型。
+    --   附带再试一次「去等级后缀」的基础名（光环名可能是「毒性唾液(等级 2)」）。
+    local disc = WR_PaladinForever_CLEANSE_DISCOVERED_NAMES
+    if type(disc) == "table" then
+        local k2 = disc[s]
+        if k2 == "poison" or k2 == "disease" or k2 == "magic" then return k2 end
+        local base = WR_PaladinForever_AuraNameBase(s)
+        if type(base) == "string" and base ~= "" and base ~= s then
+            local k3 = disc[base]
+            if k3 == "poison" or k3 == "disease" or k3 == "magic" then return k3 end
+        end
+    end
     return nil
 end
 _G.WR_PaladinForever_KindFromAuraName = WR_PaladinForever_KindFromAuraName
@@ -5871,6 +5909,1345 @@ function WR_PaladinForever_StaticSpellDispelKind(spellId)
 end
 _G.WR_PaladinForever_StaticSpellDispelKind = WR_PaladinForever_StaticSpellDispelKind
 
+-- ============================================================
+-- ★★★ 2026-11-21 四十一次修复：候选集「提示判型」通道
+-- ------------------------------------------------------------
+-- /FH_QJS_DEBUG 真机输出（08:18，战斗中，player 与 target 都中着毒）：
+--   轮询候选=47/剔0/建库中/源=区间扫描/secretAPI=true   建库进度=区间3@0
+-- 解读：
+--   ① 区间扫描把 1..130000 + 1200000..1400000 共 33 万个 ID 走了一整轮，
+--      poison/disease/magic **一条都没收进来**（staticHits=0）→ 候选集只剩
+--      47 条（白名单 + 已发现）→ staticComplete=false → built 永远 false →
+--      轮询只可能给 true/nil、永不给权威 false；
+--   ② 那 47 条里没有用户中的毒 → spellID 轮询全 miss；
+--      名字轮询表 25 条也没有 → 名字族全 miss；
+--   ③ 于是 UnitHasDispel 全链 nil → 受限战斗末尾 return false → 一次都不驱。
+-- 根因：本服 C_Spell.GetSpellDispelType / GetSpellInfo().dispelType 对绝大多数
+--   ID 返回 nil（私服静态表不全），区间扫描等于白跑，候选集覆盖不到真实 debuff。
+-- 修法：静态 API 判不出型时，退回**客户端自己的法术提示**
+--   （C_TooltipInfo.GetSpellByID → 类型行「中毒 / 疾病 / 魔法」）。用户多次
+--   截图里的「毒性唾液 · 法术ID 7125 · 中毒」「冰冻 · 法术ID 15850 · 魔法」
+--   正是这条数据流，它在真机上一直是明文。
+--   判型命中即记进 CLEANSE_DISCOVERED_IDS，免读回的
+--   GetPlayerAuraBySpellID 轮询立刻就能覆盖到它。
+-- 只认肯定证据：提示读不到 / 判不出型 → nil（未知），绝不猜。
+-- ============================================================
+WR_PaladinForever_CLEANSE_TIP_KIND_BUDGET = 150  -- 每帧最多做几次提示判型
+WR_PaladinForever_CLEANSE_TIP_MISS = WR_PaladinForever_CLEANSE_TIP_MISS or {}
+WR_PaladinForever_CLEANSE_TIP_MISS_COUNT = WR_PaladinForever_CLEANSE_TIP_MISS_COUNT or 0
+-- ★★★ 2026-11-21 四十二次修复：miss 表上限 6000 → 60000。
+--   真机诊断「提示判型=试0/中0/拒0/静态产出0」暴露两件事：
+--   ① 提示判型一次都没跑 —— 区间扫描被「落盘死锁」整段跳过（见 CleanseCandStep ①b）；
+--   ② 就算跑起来，6000 条上限也会被「空 ID」瞬间打满 → TIP_FULL → 整个会话
+--      再也不判型 → 真 debuff 永远判不出型。
+--   现在配合「存在性前置筛」（CleanseSpellExists）：空 ID 根本不消耗提示配额。
+WR_PaladinForever_CLEANSE_TIP_MISS_MAX = 20000   -- miss 表上限（打满即清空重来，绝不永久关死）
+WR_PaladinForever_CLEANSE_TIP_MISS_TTL = 600     -- 判不出型的 ID 10 分钟内不再问
+WR_PaladinForever_CLEANSE_TIP_STAT = WR_PaladinForever_CLEANSE_TIP_STAT or { tried = 0, hit = 0 }
+
+-- 单次「按 ID 判型」：返回 kind, usedTip。
+--   kind    = "poison"/"disease"/"magic"/"curse"/"bleed" 或 nil（未知）
+--   usedTip = 本次是否真的走了提示通道（调用方据此做每帧预算）
+-- 与 DispKindBySpellID 的区别：**不写 kind 缓存、不记账**，供建库批量扫描调用
+-- （33 万个 ID 不能把缓存/发现表撑爆；记账由调用方在命中时做）。
+-- ★★★ 2026-11-21 四十二次修复：spellID **存在性前置筛**。
+-- ------------------------------------------------------------
+-- 「ID 不存在」和「ID 存在但静态表没有 dispelType」是两件事，旧实现混为一谈：
+--   区间扫描要问 1..130000 + 1200000..1400000 共 33 万个 ID，其中绝大多数根本
+--   不存在。旧版对每个 ID 都先查静态（nil）→ 再调 C_TooltipInfo.GetSpellByID，
+--   miss 表 6000 条上限几个批次就打满 → TIP_FULL → 整个会话不再判型。
+--   结果：真实 debuff（存在于客户端、只是静态表缺 dispelType）永远轮不到判型。
+-- 现在先用 GetSpellInfo 的名字做存在性筛：
+--   · 有名字 → 存在，继续走提示判型（这才值得花一次 C 调用）；
+--   · 两个接口都能调但都返回 nil → 记为「不存在」，永久跳过（不占提示配额、不占 miss 表）；
+--   · 两个接口都不可用 → nil（未知，照旧走提示通道，绝不因此判无）。
+-- ★ 铁律：GetSpellInfo 在本服若整段不可用（从未成功返回过任何名字），
+--   绝不敢记「不存在」——否则会把整条提示通道静默关死。用 SPELLINFO_OK 兜住。
+WR_PaladinForever_CLEANSE_ABSENT = WR_PaladinForever_CLEANSE_ABSENT or {}
+WR_PaladinForever_CLEANSE_ABSENT_N = WR_PaladinForever_CLEANSE_ABSENT_N or 0
+-- 上限 4 万条：33 万个 ID 全记下来要十几 MB，而区间扫描真正关心的只是
+-- 「本段里哪些存在」，超出后停止记录（判不存在的 ID 回到提示通道的老路，
+-- 由 miss 表兜住），既保住内存也绝不误判。
+-- ★★★ 2026-11-21 四十三次修复：上限 4 万 → 20 万（必须大于整个扫描区间）。
+--   真机 10:09 诊断「不存在=40000」正好打满 —— 这就是本轮的核心死锁：
+--   区间扫描要走完 1..130000 共 13 万个 ID，其中绝大多数根本不存在；
+--   不存在表 4 万条一满，后面的空 ID 就只能返回「未知」→ 逐个真调一次
+--   提示判型 → miss 表 6 万上限瞬间打满 → TIP_FULL → 静态产出永远停在 98 条
+--   → 候选集 146 条 → 用户中的毒不在其中 → spellID 轮询恒 false → 一次都不驱。
+--   上限抬到 20 万（> 13 万扫描区间）后，空 ID 全程走「不存在」快路，
+--   提示判型配额只花在**真实存在**的法术上，判型覆盖才可能真正到位。
+--   13 万条 key 的 Lua 表约 5~8MB，相对「战斗中一次都不驱」的代价完全可接受。
+WR_PaladinForever_CLEANSE_ABSENT_MAX = 200000
+WR_PaladinForever_CLEANSE_SPELLINFO_OK = WR_PaladinForever_CLEANSE_SPELLINFO_OK or false
+
+-- 返回 exists(true/false/nil), name(可读时)
+function WR_PaladinForever_CleanseSpellExists(spellId)
+    local sid = spellId
+    if type(sid) ~= "number" or sid <= 0 then return false end
+    local A = WR_PaladinForever_CLEANSE_ABSENT
+    if A[sid] ~= nil then return false end
+    local nm = nil
+    local canQuery = false
+    if type(C_Spell) == "table" and C_Spell.GetSpellInfo ~= nil then
+        canQuery = true
+        local ok, info = pcall(C_Spell.GetSpellInfo, sid)
+        if ok and (type(info) == "table" or type(info) == "userdata") then
+            local okN, v = pcall(function() return info.name end)
+            if okN and type(v) == "string" and v ~= ""
+                and not WR_PaladinForever_IsSecretValue(v) then
+                nm = v
+            end
+        end
+    end
+    if nm == nil and type(GetSpellInfo) == "function" then
+        canQuery = true
+        local ok2, n2 = pcall(GetSpellInfo, sid)
+        if ok2 and type(n2) == "string" and n2 ~= ""
+            and not WR_PaladinForever_IsSecretValue(n2) then
+            nm = n2
+        end
+    end
+    if nm ~= nil then
+        WR_PaladinForever_CLEANSE_SPELLINFO_OK = true
+        return true, nm
+    end
+    -- 从未成功读到过任何名字 → 接口可能整段不可用，不敢记「不存在」
+    if canQuery and WR_PaladinForever_CLEANSE_SPELLINFO_OK == true then
+        if (WR_PaladinForever_CLEANSE_ABSENT_N or 0) < WR_PaladinForever_CLEANSE_ABSENT_MAX then
+            A[sid] = true
+            WR_PaladinForever_CLEANSE_ABSENT_N = (WR_PaladinForever_CLEANSE_ABSENT_N or 0) + 1
+            return false
+        end
+    end
+    return nil
+end
+_G.WR_PaladinForever_CleanseSpellExists = WR_PaladinForever_CleanseSpellExists
+
+-- ★★★ 2026-11-21 四十三次修复：提示判型只对「真实 debuff 会落到的 ID 段」开放。
+-- ------------------------------------------------------------
+-- 真机 10:09 诊断：提示判型=试60001/中176/拒0/静态产出98、不存在=40000。
+-- 解读：区间扫描把 40001..130000 这段**几乎全空**的 ID 也逐条送进提示通道，
+--   几万次空调用先把「不存在表」4 万上限打满，再把 miss 表 6 万上限打满 →
+--   TIP_FULL → 整个会话不再判型 → 静态产出停在 98 条 → 候选集 146 条 →
+--   用户中的毒不在其中 → spellID 轮询恒 false → 一次都不驱。
+-- 本函数就是那道闸：只放行 1..130000（经典段，截图实证的毒/病/魔法全在这里）
+-- 与 1200000..1400000（无限新增段）。其余 ID 的静态分类照旧先问（①），
+-- 但不再浪费提示配额 —— 它们本来也不可能是 debuff。
+-- ★ 注意：段内的空 ID 由「不存在表」提前挡掉（CleanseSpellExists），
+--   所以「段内」不等于「每条都花提示配额」；两者配合才不会把预算烧空。
+function WR_PaladinForever_CleanseTipWorth(spellId)
+    local sid = spellId
+    if type(sid) ~= "number" then
+        local okN, n = pcall(tonumber, sid)
+        if not okN or type(n) ~= "number" then return false end
+        sid = n
+    end
+    if sid <= 0 then return false end
+    -- 经典段全开（1..130000）：本服真实 debuff 的 ID 分散在整个经典段，
+    -- 只放开 1..40000 会漏掉 40001 以上的自定义 ID。空 ID 由「不存在表」
+    -- 提前挡掉（见 CleanseSpellExists），不会消耗提示配额。
+    if sid <= 130000 then return true end
+    if sid >= 1200000 and sid <= 1400000 then return true end
+    return false
+end
+_G.WR_PaladinForever_CleanseTipWorth = WR_PaladinForever_CleanseTipWorth
+
+function WR_PaladinForever_CleanseKindByIDFast(spellId)
+    local sid = spellId
+    if type(sid) ~= "number" or sid <= 0 then return nil, false end
+    -- ① 静态 API（最快；本服多半返回 nil，但命中的 ID 就不用再问提示）
+    local k = WR_PaladinForever_StaticSpellDispelKind(sid)
+    if k ~= nil then return k, false end
+    -- ★★★ 2026-11-21 四十三次修复：提示判型只对「真实 debuff 会落到的区间」开放。
+    --   1..40000 经典段（截图实证的毒/病/魔法全在这一段：744/13298/5416/7125/
+    --   12541/15850/589）+ 1200000..1400000 无限新增段。
+    --   40001..130000 这一段几乎为空，却会白烧几十万次提示判型 —— 正是真机
+    --   「试60001 / miss 表打满 / 整个会话不再判型」的来源。跳掉它，
+    --   把提示预算全留给真正可能有 debuff 的 ID。
+    if not WR_PaladinForever_CleanseTipWorth(sid) then return nil, false end
+    -- ①b 存在性前置筛：不存在的 ID 直接跳过，不花提示配额、不写 miss 表
+    local exists, spellName = WR_PaladinForever_CleanseSpellExists(sid)
+    if exists == false then return nil, false end
+    -- ② 提示通道（带 miss 缓存，避免同一 ID 每轮重复砸引擎）
+    local now = GetTime()
+    -- ★ 被拒冷却：受限内容里 C_TooltipInfo 可能整段被拒。被拒**不是**「这个 ID
+    --   判不出型」，绝不能记进 miss 表（否则 33 万个 ID 会被永久标死，
+    --   战斗结束后也不会重试）。这里只记一个 3 秒的全局冷却，冷却内整段跳过。
+    local deniedAt = WR_PaladinForever_CLEANSE_TIP_DENIED_AT
+    if type(deniedAt) == "number" and (now - deniedAt) < 3 then return nil, false end
+    -- ★★★ 2026-11-21 四十三次修复：删掉 TIP_FULL 永久关死闸。
+    --   旧版一旦 miss 表打满就把 TIP_FULL 置 true，**整个会话**再不做任何判型；
+    --   真机 10:09「试60001/中176/静态产出98」正是卡死在这里 —— 之后哪怕扫到
+    --   真实 debuff 也不再判型，候选集永远停在 98 条，用户中的毒永远进不来。
+    --   现在改成「打满即换表重来」（见下方），判型能力不会被空 ID 耗尽。
+    local miss = WR_PaladinForever_CLEANSE_TIP_MISS
+    local at = miss[sid]
+    if type(at) == "number" and (now - at) < WR_PaladinForever_CLEANSE_TIP_MISS_TTL then
+        return nil, false
+    end
+    local TI = _G.C_TooltipInfo
+    if type(TI) ~= "table" then return nil, false end
+    local fn = TI.GetSpellByID
+    if fn == nil then return nil, false end
+    local ok, data = pcall(fn, sid)
+    if not ok then
+        WR_PaladinForever_CLEANSE_TIP_DENIED_AT = now
+        WR_PaladinForever_CLEANSE_TIP_DENIED_COUNT =
+            (WR_PaladinForever_CLEANSE_TIP_DENIED_COUNT or 0) + 1
+        return nil, false
+    end
+    if data ~= nil then
+        local kk = WR_PaladinForever_KindFromSpellTooltip(data)
+        if kk ~= nil then
+            miss[sid] = nil
+            WR_PaladinForever_CLEANSE_TIP_STAT.hit = (WR_PaladinForever_CLEANSE_TIP_STAT.hit or 0) + 1
+            -- ★ 四十二次修复：判出型的同时把**名字**也记进已发现表。
+            --   名称族轮询（GetUnitAuraBySpellName）是唯一不依赖 spellID 的通道，
+            --   名字表越大，战斗里越容易命中；而提示判型是当前唯一能自动拿到名字的地方。
+            if type(spellName) == "string" and spellName ~= "" then
+                pcall(WR_PaladinForever_RememberCleansableName, spellName, kk)
+            end
+            return kk, true
+        end
+    end
+    -- 调用成功但判不出型：记 miss（10 分钟后重试），并计入统计
+    WR_PaladinForever_CLEANSE_TIP_STAT.tried = (WR_PaladinForever_CLEANSE_TIP_STAT.tried or 0) + 1
+    -- ★ 铁律：miss 表满之后**必须停止调用引擎**。
+    --   区间扫描要问 33 万个 ID，而绝大多数是空 ID（提示读得到但没有类型行）。
+    --   若表满后仍然每个 ID 都调一次 GetSpellByID，这一趟就是几十万次 C 调用 ——
+    --   直接把建库帧拖成卡顿。表满即视为「本会话不再做提示判型」，
+    --   已判出型的 ID 早已进了候选集，不受影响。
+    -- ★★★ 2026-11-21 四十三次修复：miss 表打满**清空重来**，不再永久关死。
+    --   真机 10:09 诊断「提示判型=试60001/中176/静态产出98」正好卡在 6 万上限：
+    --   从那一刻起 TIP_FULL=true → 整个会话一次都不再判型 → 候选集永远停在
+    --   98 条静态产出上 → 用户中的毒（不在那 98 条里）永远进不来 → 轮询恒 false。
+    --   现在打满就换一张新表重来（内存恒定），判型能力不会因为「前面问了一堆
+    --   空 ID」被永久剥夺。
+    if (WR_PaladinForever_CLEANSE_TIP_MISS_COUNT or 0) >= WR_PaladinForever_CLEANSE_TIP_MISS_MAX then
+        local fresh = {}
+        WR_PaladinForever_CLEANSE_TIP_MISS = fresh
+        WR_PaladinForever_CLEANSE_TIP_MISS_COUNT = 0
+        miss = fresh
+    end
+    if miss[sid] == nil then
+        miss[sid] = now
+        WR_PaladinForever_CLEANSE_TIP_MISS_COUNT = (WR_PaladinForever_CLEANSE_TIP_MISS_COUNT or 0) + 1
+    end
+    return nil, true
+end
+_G.WR_PaladinForever_CleanseKindByIDFast = WR_PaladinForever_CleanseKindByIDFast
+
+-- ============================================================
+-- ★★★ 2026-11-21 三十一次修复：**按 spellID 全集精确轮询**
+--   —— 本服受限战斗里唯一还能给出「精确 true / 精确 false」的通道。
+-- ------------------------------------------------------------
+-- 本轮先把客户端源码逐条核对了一遍（wow-ui-source 12.1.0），结论是
+-- **光环系统内部的一切读回都被封死**，所以此前十几轮「加读通道」注定落空：
+--   · C_UnitAuras.GetAuraDataByIndex / GetAuraSlots / GetUnitAuras /
+--     GetUnitAuraInstanceIDs 全部标 RequiresUnitAuraAccess = true
+--     → 污染插件在受限战斗里一律抛 "Auras cannot be accessed when secret
+--       while tainted by 'MKHelperForever'"（诊断里那三条 ERR 就是它们）。
+--   · AuraContainer 的每枚 AuraButton 创建后挂
+--     Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret
+--     （Blizzard_AuraContainerShared.lua 的
+--      CustomAuraContainerConstants.AccessRestrictionFlags）→ 按钮的
+--     IsShown / GetAtlas / GetVertexColor 在战斗里全被拒
+--     （诊断「EUI可见=false(0/0枚)」即此）。
+--   · 容器尺寸由 CustomAuraContainerFlowLayoutMixin:OnLayoutComplete 用
+--     container:SetSize(secretwrap(width, height)) 写入 → 也是 secret，不能比较。
+--   · 组的 GetAuraGroup 只在 Private 分区，插件侧调不到（「probe判定=nil」）；
+--     公有只有 HasAuraGroup / GetAuraGroupFrame / GetAuraGroupFrameCount，
+--     而后者返回 #ownedFrames（批量预分配的高水位，恒 ≥10），不是当前条数。
+--
+-- 唯一被客户端明确允许在受限战斗里使用的，是 RequiresNonSecretAura 这一族：
+--     · C_UnitAuras.GetPlayerAuraBySpellID(spellID)       （仅 player）
+--     · C_UnitAuras.GetUnitAuraBySpellID(unit, spellID)   （任意单位）
+--   语义（EUI EllesmereUIQoL_Bloodlust.lua 435-441 真机实证原文）：
+--     "GetPlayerAuraBySpellID is RequiresNonSecretAura and returns ZERO VALUES
+--      for a restriction-FLAGGED spell while its aura is up"
+--   即：**没被限制旗标的 ID，战斗中照样精确回答「在 / 不在」**。
+--
+-- 于是本轮把问题反过来问：清洁术能驱散的 debuff 就那些 spellID，逐个问在不在。
+--   ① 建候选集（一次，分摊到多帧，可落盘）：
+--      扫客户端静态法术库，取 dispelType ∈ {Magic, Disease, Poison} 的全部 ID；
+--      再用 C_Secrets.ShouldSpellAuraBeSecret 把「战斗中会被打成 secret」的剔掉
+--      （问它们只会拿到假阴性，必须知道剔了多少 —— 见 authoritative）。
+--   ② 每 tick 轮询候选集：GetUnitAuraBySpellID 命中即精确 true；
+--      一轮扫完零命中 → 精确 false。
+--   这条 false 正是「没中 debuff 不亮」的正解：不再需要任何「有减益就放行」
+--   的降级口径，也不再依赖任何被封死的容器/按钮读回。
+-- ============================================================
+-- ★★★ 2026-11-21 四十二次修复：候选集存档**版本号**。
+--   落盘载荷的字段集合变过（staticHits 是后来才加上的），旧档加载后 staticHits=0
+--   → 被判成「白名单-only」，同时又带着 rangeIndex=#ranges+1 → 区间扫描永不重跑。
+--   用版本号把「旧档」直接判无效，避免跨版本带着死锁状态登录。
+-- ★ 四十三次修复：ver 2 → 3。ver=2 的落盘是「提示判型被不存在表 4 万上限
+--   卡死」时代写下的（staticHits 只有几十），加载后 staticHits>0 会让旧死锁修复
+--   误判为「完整静态结果」而永不再扫 → 必须作废重扫。
+WR_PaladinForever_CLEANSE_CAND_VER = 3
+-- ★ 四十三次修复：两个门槛。
+--   SAVED_MIN ：落盘载荷「静态产出」至少这么多条才允许复用（否则重扫）。
+--               真机中断态产出 98 条，一次真正扫完的经典段应远超这个数。
+--   TRUSTED_MIN：候选集「静态产出」至少这么多条才有资格给出权威 false。
+--               低于它说明判型没覆盖到位，绝不能拿它一票否决引擎通道 ——
+--               那正是「最终=false、一次都不驱」的直接成因。
+WR_PaladinForever_CLEANSE_CAND_SAVED_MIN = 60
+WR_PaladinForever_CLEANSE_CAND_TRUSTED_MIN = 200
+
+WR_PaladinForever_CLEANSE_CAND = WR_PaladinForever_CLEANSE_CAND or {
+    built = false, building = false, cursor = 0, ids = {}, count = 0,
+    flagged = 0, secretApi = false, source = "", at = 0, trusted = false,
+}
+WR_PaladinForever_CLEANSE_CAND_BUDGET = 900   -- 每帧建库条数预算
+WR_PaladinForever_CLEANSE_CAND_MS = 4        -- 每帧建库时间预算（毫秒，硬上限，防卡顿）
+WR_PaladinForever_CLEANSE_POLL_BUDGET = 240   -- 每 tick 轮询条数预算
+WR_PaladinForever_CLEANSE_POLL_MS = 2         -- 每 tick 轮询时间预算（毫秒硬上限）
+-- ★ 四十三次修复：近期命中记录的存活时间（秒）。超时即视为孤儿记录清掉；
+--   每次调用都会**真问一次 API** 复核，所以这个值只影响清理节奏，不影响精度。
+WR_PaladinForever_CLEANSE_HIT_TTL = 3
+WR_PaladinForever_CLEANSE_POLL = WR_PaladinForever_CLEANSE_POLL or {
+    cursor = 1, hitID = nil, hitAt = 0, lastFullSweepAt = 0, sweeps = 0,
+}
+-- ★★★ 2026-11-21 四十二次修复：**命中不推进游标**（见 CleanseIDScan 命中分支）。
+-- ------------------------------------------------------------
+-- 真机诊断形态：轮询游标=1/扫完7257/命中16458，但同一份诊断里
+-- 轮询判定=nil、最终=false —— 命中的那一刻是独立驱动帧（0.12 秒一次）抓到的，
+-- 它把游标推过去了；等主循环的 UnitHasDispel 调过来时（同一 0.03 秒窗口之外）
+-- 游标已经越过那个 ID → 返回 nil → hit() 没被触发 → 色块不亮 → 一次都不驱。
+-- 修法：命中后**游标停在命中的那个 ID 上**（不再 +1）。
+--   下一次调用会重新问同一个 ID：还在 → 继续 true（主循环任何时候问都能拿到）；
+--   已经没了 → 正常推进。全程仍然每次真问 API，不引入任何「记住的 true」，
+--   所以既不会漏掉命中，也不会把已经消失的 debuff 多亮哪怕一帧。
+
+-- 该 spellID 的光环在受限战斗里是否会被打成 secret。
+-- 返回 true=会被打 secret（问它没用）/ false=可读 / nil=接口不存在（未知）。
+function WR_PaladinForever_CleanseAuraSecretFlag(spellId)
+    local S = _G.C_Secrets
+    if type(S) ~= "table" then return nil end
+    local fn = S.ShouldSpellAuraBeSecret
+    if fn == nil then return nil end
+    local ok, sec = pcall(fn, spellId)
+    if not ok then return nil end
+    if sec == true then return true end
+    if sec == false then return false end
+    return nil
+end
+_G.WR_PaladinForever_CleanseAuraSecretFlag = WR_PaladinForever_CleanseAuraSecretFlag
+
+-- 候选集来源（三级，取第一个可用的）：
+--   ① PigSet.MKFSpellScan.spellDB —— 若玩家跑过 /mkfspellscan，直接用它（最快）；
+--   ② PigSet.MKFCleanseCand —— 本通道自己区间扫描后落盘的结果（一次性，跨登录复用）；
+--   ③ 现场区间扫描 —— 后台分摊到多帧，扫完落盘。
+-- 区间（与 /mkfspellscan 的实测结论一致）：1..130000 经典段 + 1200000..1400000 无限新增段。
+-- ★ 四十一次修复：经典段再切成两段（1..30000 先扫）。
+--   本服 debuff 的 spellID 绝大多数落在 1..30000（毒性钉刺 5416 / 毒药 744 /
+--   毒性唾液 7125 / 食尸鬼腐气 12541 / 冰冻 15850 / 暗言术：痛 589 全在这一段），
+--   而 30000..130000 几乎为空。分段后「提示判型」最需要的这一段最先扫完，
+--   几秒内候选集就能覆盖真实 debuff，不必等 33 万个 ID 全走完。
+-- ★★★ 2026-11-21 四十三次修复：扫描区间按「真实 debuff 落点」重划。
+-- ------------------------------------------------------------
+-- 旧表 1..30000 + 30001..130000 + 1200000..1400000 共 33 万个 ID。真机 10:09
+-- 诊断把它的代价写得很清楚：
+--   不存在=40000（上限打满）→ 提示判型=试60001 → miss 表打满 → TIP_FULL
+--   → 整个会话不再判型 → 静态产出只有 98 条 → 候选集 146 条。
+-- 也就是说：33 万个 ID 里真正存在法术的只是极小一部分，其余全在烧「不存在表」
+-- 和「提示判型」的配额，把 1..40000 里真正的毒/病/魔法挤在后面判不到。
+-- 现在只扫 1..40000 —— 所有截图实证的清洁术目标都在这一段：
+--   744 毒药 / 13298 毒药 / 5416 毒性钉刺 / 7125 毒性唾液 / 12541 食尸鬼腐气
+--   / 15850 冰冻 / 589·15654 暗言术：痛 / 1243 真言术：韧（低 rank 光环）。
+-- 这一段 4 万个 ID 一趟扫完只需几十帧；不存在表上限也随之收敛，
+-- 提示判型配额全留给真正存在的法术，判型覆盖才可能真正到位。
+-- 7 位段（1200000+）实测全是玩家自身技能/圣印（如 1311656 愤怒圣印），
+-- 从未产出过一条 debuff 候选，且 20 万个空 ID 会把上述两处配额一次性烧光，
+-- 因此不再纳入区间扫描；本服自定义 debuff 由「白名单 + 运行时发现 + 名称族轮询」覆盖。
+WR_PaladinForever_CLEANSE_CAND_RANGES = {
+    { 1, 40000 },
+    { 40001, 130000 },
+}
+local function WR_PaladinForever_CleanseCandSaved()
+    if type(PigSet) ~= "table" then return nil end
+    local s = PigSet.MKFCleanseCand
+    if type(s) ~= "table" then return nil end
+    -- ★ 四十一次修复：门槛 50 → 20（本服能判出型的可驱散候选本来就只有几十条）
+    if type(s.ids) ~= "table" or #s.ids < 20 then return nil end
+    -- ★★★ 2026-11-21 四十二次修复：只接受**本版本逻辑产出**的完整结果。
+    --   旧档没有 ver / staticHits，加载后会形成「建库中死锁」（见 CleanseCandStep ①b），
+    --   直接判无效并清掉，让区间扫描从头重建一次。
+    if tonumber(s.ver) ~= WR_PaladinForever_CLEANSE_CAND_VER then
+        PigSet.MKFCleanseCand = nil
+        return nil
+    end
+    if (tonumber(s.staticHits) or 0) <= 0 then
+        PigSet.MKFCleanseCand = nil
+        return nil
+    end
+    -- ★★★ 2026-11-21 四十三次修复：静态产出太少的落盘同样作废重扫。
+    --   真机中断态产出 98 条就被写进存档；下次登录 staticHits>0 会让「落盘死锁」
+    --   那套修复误判成「完整静态结果」，于是永不重扫 → 候选集永远缺用户中的毒。
+    --   一次真正扫完的经典段应远超 200 条，低于它一律重扫。
+    if (tonumber(s.staticHits) or 0) < WR_PaladinForever_CLEANSE_CAND_SAVED_MIN then
+        PigSet.MKFCleanseCand = nil
+        return nil
+    end
+    return s
+end
+
+-- 本帧建库预算是否已用尽（条数 + 时间双闸；时间闸用 GetTime 差算，
+-- 因为 33 万 ID 的静态分类在弱机上单帧跑满会明显掉帧）。
+local function WR_PaladinForever_CleanseCandOutOfBudget(startAt, done, budget)
+    if done >= budget then return true end
+    local el = (GetTime() - startAt) * 1000
+    if el >= WR_PaladinForever_CLEANSE_CAND_MS then return true end
+    return false
+end
+
+-- 建库推进（每帧预算，绝不一次性阻塞）。返回 true 表示本轮已建完。
+-- 候选判据只用 C_Spell.GetSpellDispelType / GetSpellInfo().dispelType 这类
+-- **按 spellID 查的静态字段**（与光环是否 secret、是否在战斗完全无关）。
+function WR_PaladinForever_CleanseCandStep()
+    local C = WR_PaladinForever_CLEANSE_CAND
+    if C.built then return true end
+    local budget = WR_PaladinForever_CLEANSE_CAND_BUDGET
+    -- ★ 四十一次修复：本帧已用掉多少次「提示判型」（昂贵，单独限额）
+    local tipDone = 0
+    if C.seen == nil then C.seen = {} end
+
+    local function push(sid, skipFlag)
+        if type(sid) ~= "number" or sid <= 0 then return end
+        if C.seen[sid] then return end
+        C.seen[sid] = true
+        -- ★ 限制旗 ID **仍然进轮询**（不剔除）：
+        --   flagged 的 ID 问 GetPlayerAuraBySpellID 可能拿到 ZERO VALUES，
+        --   那只会造成「假阴性」（该驱不驱），而不是「假阳性」（空放 GCD）。
+        --   两种错误里用户明确更痛的是前者，所以宁可留着它去碰运气命中；
+        --   它只影响 trusted —— 有 flagged 候选时零命中不能当权威「没有」。
+        if skipFlag then
+            local flag = WR_PaladinForever_CleanseAuraSecretFlag(sid)
+            if flag == nil then
+                C.secretApi = false
+            else
+                C.secretApi = true
+                if flag == true then
+                    C.flagged = C.flagged + 1
+                    C.ids[#C.ids + 1] = sid
+                    C.flaggedIDs = C.flaggedIDs or {}
+                    C.flaggedIDs[#C.flaggedIDs + 1] = sid
+                    return
+                end
+            end
+        end
+        C.ids[#C.ids + 1] = sid
+    end
+
+    -- ①a PigSet.MKFSpellScan.spellDB（玩家跑过 /mkfspellscan 时直接用它，零扫描）
+    if not C.loadedSaved and type(PigSet) == "table"
+        and type(PigSet.MKFSpellScan) == "table"
+        and type(PigSet.MKFSpellScan.spellDB) == "table"
+        and #PigSet.MKFSpellScan.spellDB > 100 then
+        local db = PigSet.MKFSpellScan.spellDB
+        local done = 0
+        local t0 = GetTime()
+        while C.cursor < #db
+            and tipDone < WR_PaladinForever_CLEANSE_TIP_KIND_BUDGET
+            and not WR_PaladinForever_CleanseCandOutOfBudget(t0, done, budget) do
+            C.cursor = C.cursor + 1
+            done = done + 1
+            local e = db[C.cursor]
+            if type(e) == "table" and type(e.id) == "number" and e.id > 0 then
+                local k, usedTip = WR_PaladinForever_CleanseKindByIDFast(e.id)
+                if usedTip then tipDone = tipDone + 1 end
+                if k == "poison" or k == "disease" or k == "magic" then
+                    push(e.id, true)
+                    C.staticHits = (C.staticHits or 0) + 1
+                    -- 同时记进「已发现 ID」表：白名单直查通道
+                    -- （PlayerAuraIDHasDispellable）与增量并入也一起覆盖它。
+                    pcall(WR_PaladinForever_RememberCleansableID, e.id, k)
+                end
+            end
+        end
+        if C.cursor < #db then
+            if C.source == "" then C.source = "spellDB" end
+            return false
+        end
+        C.loadedSaved = true
+        C.rangeIndex = #WR_PaladinForever_CLEANSE_CAND_RANGES + 1
+        C.cursor = 0
+        if C.source == "" then C.source = "spellDB" end
+    end
+
+    -- ①b 落盘结果（一次性扫完过就直接复用，零开销）
+    if not C.loadedSaved then
+        C.loadedSaved = true
+        local saved = WR_PaladinForever_CleanseCandSaved()
+        if saved ~= nil then
+            local ids = saved.ids
+            for i = 1, #ids do push(ids[i], false) end
+            C.flagged = tonumber(saved.flagged) or 0
+            C.secretApi = saved.secretApi == true
+            C.staticHits = tonumber(saved.staticHits) or 0
+            C.savedTrusted = saved.trusted == true
+            -- ★★★ 2026-11-21 四十二次修复：**落盘死锁**（本轮的真根因）。
+            --   旧实现无条件把 source 设成「落盘」、rangeIndex 设成 #ranges+1
+            --   （= 声明区间扫描已完成）。可一旦 staticHits 为 0（旧档没这个字段），
+            --   staticComplete 永远 false → built 永远 false，而区间扫描因为
+            --   rangeIndex 越界 + source="落盘" 跳过越界重置 → **永不重跑**。
+            --   后果链：提示判型一次都不跑（试0）→ 候选集永远停在白名单 49 条 →
+            --   用户中的毒不在候选集 → spellID 轮询恒 miss → 名称表也没这个名 →
+            --   全链 nil → 受限战斗末尾 return false → 一次都不驱。
+            --   真机诊断原样：源=落盘 / 建库进度=区间4@1 / 提示判型=试0/静态产出0。
+            if C.staticHits <= 0 then
+                C.rangeIndex = 1
+                C.cursor = 0
+                C.source = ""
+                C.savedStale = true
+            else
+                C.source = "落盘"
+                C.rangeIndex = #WR_PaladinForever_CLEANSE_CAND_RANGES + 1
+                C.cursor = 1
+            end
+        end
+    end
+
+    if C.cursor == nil then C.cursor = 0 end
+    if C.rangeIndex == nil then C.rangeIndex = 1 end
+    -- ★ 四十一次修复：区间表被改短/改长（本次新增分段）时重置进度，
+    --   否则老会话里的 rangeIndex 会越界，区间扫描被整段跳过 → 永不 built。
+    --   ★ 但「落盘 / spellDB 已完成」这两种完成态本来就把 rangeIndex 设成
+    --   #ranges+1（表示区间扫描不必再跑），绝不能把它们重置回起点 ——
+    --   否则每次登录都会清掉落盘候选集，重新扫 33 万个 ID。
+    -- ★★★ 2026-11-21 四十二次修复：判据从「source 是不是落盘/spellDB」改成
+    --   「静态扫描到底有没有产出」。旧判据只要 source 是落盘就永不重置 ——
+    --   于是「落盘但 staticHits=0」的死锁状态跨登录永久保持。
+    --   现在只要 staticHits=0（说明静态判型没产出、候选集不可信），一律从头重扫。
+    local staticOkNow = (tonumber(C.staticHits) or 0) > 0
+    if C.rangeIndex > #WR_PaladinForever_CLEANSE_CAND_RANGES
+        and not staticOkNow then
+        C.rangeIndex = 1
+        C.cursor = 0
+        C.seen = {}
+        C.ids = {}
+        C.count = 0
+        C.staticHits = 0
+        C.source = ""
+    end
+
+    -- ①c ★★★ 四十一次修复：白名单 / 已发现表**先**并入，再开始区间扫描。
+    --   旧实现把这段 merge 放在区间扫描之后，而区间扫描一旦没扫完就 return false，
+    --   merge 永远轮不到执行 —— 真机诊断「轮询候选=47」正是这个顺序造成的：
+    --   静态判型全灭时区间扫描一条都不 push，白名单也还没并进来，候选集被钉在
+    --   几十条上，用户中的毒永远问不到。
+    do
+        local function mergeTable(t)
+            if type(t) ~= "table" then return end
+            for sid, kind in pairs(t) do
+                if type(sid) == "number" and sid > 0
+                    and (kind == "poison" or kind == "disease" or kind == "magic") then
+                    push(sid, true)
+                end
+            end
+        end
+        mergeTable(WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS)
+        mergeTable(WR_PaladinForever_CLEANSE_DISCOVERED_IDS)
+        C.count = #C.ids
+    end
+
+    -- ② 区间扫描（后台分摊）
+    local ranges = WR_PaladinForever_CLEANSE_CAND_RANGES
+    -- ★ 三十四次修复：进入区间扫描就标 source（旧实现只在「本帧没扫完」分支里标，
+    --   一帧扫完的区间会让 source 永远为空 → 最终被当成「白名单」→ 完整静态结果
+    --   反被判成不可信）。
+    if C.source == "" and C.rangeIndex <= #ranges then C.source = "区间扫描" end
+    while C.rangeIndex <= #ranges do
+        local r = ranges[C.rangeIndex]
+        local from, to = r[1], r[2]
+        if C.cursor < from then C.cursor = from end
+        local done = 0
+        local t0 = GetTime()
+        while C.cursor <= to
+            and tipDone < WR_PaladinForever_CLEANSE_TIP_KIND_BUDGET
+            and not WR_PaladinForever_CleanseCandOutOfBudget(t0, done, budget) do
+            local sid = C.cursor
+            C.cursor = C.cursor + 1
+            done = done + 1
+            local k, usedTip = WR_PaladinForever_CleanseKindByIDFast(sid)
+            if usedTip then tipDone = tipDone + 1 end
+            if k == "poison" or k == "disease" or k == "magic" then
+                push(sid, true)
+                C.staticHits = (C.staticHits or 0) + 1
+                pcall(WR_PaladinForever_RememberCleansableID, sid, k)
+            end
+        end
+        if C.cursor <= to then
+            if C.source == "" then C.source = "区间扫描" end
+            return false
+        end
+        C.rangeIndex = C.rangeIndex + 1
+        C.cursor = 0
+    end
+
+    -- ③ 白名单与运行时已发现表并入（本服自定义 debuff 可能不在客户端静态库里）
+    local function mergeTable(t)
+        if type(t) ~= "table" then return end
+        for sid, kind in pairs(t) do
+            if type(sid) == "number"
+                and (kind == "poison" or kind == "disease" or kind == "magic") then
+                push(sid, true)
+            end
+        end
+    end
+    mergeTable(WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS)
+    mergeTable(WR_PaladinForever_CLEANSE_DISCOVERED_IDS)
+
+    C.count = #C.ids
+    C.at = GetTime()
+    if C.source == "" then C.source = "白名单" end
+    -- ★★★ 2026-11-21 三十四次修复：「战斗中中毒了却一次都不驱散」的结构性根因。
+    -- ------------------------------------------------------------
+    -- 旧判据 C.trusted = (count>=50) and secretApi and flagged==0 有一个致命漏洞：
+    -- 本服 C_Spell.GetSpellDispelType / GetSpellInfo 若不可用（私服常见），
+    -- 区间扫描一条都收不进来，候选集就只剩 ③ 段并入的白名单 + 已发现表
+    -- （约 60 条）。这 60 条 > 50 → trusted 成立；它们都是白名单 merge（skipFlag=false）
+    -- → flagged=0；只要 C_Secrets 存在 → secretApi=true。
+    -- 于是「白名单-only 候选集」被判成**权威可信**：一轮扫完零命中 → idScanVeto=true
+    -- → UnitHasDispel 里 `if WR_PaladinForever_AurasRestricted() and not presenceVeto`
+    -- 整段被跳过 → 唯一能按职业判定「我本人能驱散」的引擎通道
+    -- （SecureForEachPresence / ForEachAura，filter="HARMFUL|RAID"）也一起被跳过
+    -- → 最后 `if AurasRestricted() then return false` 判无。
+    -- 用户中的毒只要不在那 60 条白名单里（本服自定义 debuff 全部不在），
+    -- 就**必然**一次都不驱 —— 与「加了多少条免读回通道」完全无关。
+    --
+    -- 修法：候选集只有来自**完整静态扫描**（区间扫描 / spellDB / 上次落盘的完整结果）
+    -- 才有资格给出权威 false；白名单-only 一律不可信，绝不否决引擎通道。
+    -- 数量门槛同时抬到 200（白名单 60 条左右，静态库中毒/疾病/魔法通常数百上千）。
+    -- ★ 静态扫描是否真的产出了数据：C_Spell.GetSpellDispelType / GetSpellInfo
+    --   若不可用（私服常见），区间扫描一条都判不出型 → staticHits = 0。
+    --   这是区分「完整静态库」与「白名单-only」的唯一可靠信号。
+    local staticOk = (tonumber(C.staticHits) or 0) > 0
+    -- ★ 四十一次修复：数量门槛 200 → 30。
+    --   本服静态 API 对绝大多数 ID 返回 nil，真能判出型的「毒/病/魔法」候选本来
+    --   就只有几十条（真机诊断：区间扫描全走完，候选集仅 47 条）。旧门槛 200
+    --   永远达不到 → built 永远 false → 权威 false 永不出现、每 60 秒重建一次。
+    --   「白名单-only」仍被 staticOk（staticHits>0）挡死：白名单 merge 不产生
+    --   staticHits，所以降低数量门槛不会把白名单当权威全集。
+    local staticComplete = staticOk and (C.count >= 30)
+        and ((C.source == "区间扫描") or (C.source == "spellDB") or (C.source == "落盘"))
+    -- trusted 在「完整」之上再要求：能判限制旗、且没有候选被限制旗挡住。
+    -- ★★★ 2026-11-21 四十三次修复：「可信」再加一道静态产出量门槛。
+    --   真机 10:09：候选集 146 条 / 静态产出 98 条 → trusted=true → 一轮扫完零命中
+    --   → idScanVeto=true → 判定链尾部「AurasRestricted 就 return false」
+    --   → 用户中的毒（不在那 98 条里）**必然**一次都不驱。
+    --   静态产出不足 200 条说明判型根本没覆盖到位，此时候选集绝不能一票否决
+    --   引擎通道：宁可多跑几条肯定证据通道，也绝不因为候选集不全而假阴性。
+    C.trusted = staticComplete
+        and (C.secretApi == true) and (C.flagged == 0)
+        and ((tonumber(C.staticHits) or 0) >= WR_PaladinForever_CLEANSE_CAND_TRUSTED_MIN)
+
+    if staticComplete then
+        C.built = true
+        C.building = false
+        C.retryAt = nil
+    else
+        -- ★ 白名单-only：静态库不可用。保持 built=false，让 CleanseIDScan 继续用
+        --   现有候选「渐进覆盖」（它内部对 !built 只给 true/nil，绝不给权威 false），
+        --   同时 60 秒后允许重建（C_Spell 数据有时要等法术书就绪才可用）。
+        C.built = false
+        C.building = false
+        C.retryAt = GetTime() + 60
+    end
+
+    -- 落盘：只在完整静态结果时写。★ 白名单-only 绝不能落盘 ——
+    -- 否则下次登录会以 source="落盘" 复用它，把 60 条白名单重新当成「可信全集」，
+    -- 同一个漏洞会跨登录复现。
+    if staticComplete and C.source ~= "落盘" and type(PigSet) == "table" then
+        pcall(function()
+            PigSet.MKFCleanseCand = {
+                ids = C.ids, flagged = C.flagged,
+                secretApi = C.secretApi, trusted = C.trusted,
+                staticHits = C.staticHits,
+                ver = WR_PaladinForever_CLEANSE_CAND_VER,
+                at = C.at,
+            }
+        end)
+    end
+    return staticComplete
+end
+_G.WR_PaladinForever_CleanseCandStep = WR_PaladinForever_CleanseCandStep
+
+-- 触发建库（惰性；用一个专用帧摊到多帧，建完即 Hide）。
+WR_PaladinForever_CleanseCandDriver = WR_PaladinForever_CleanseCandDriver or nil
+function WR_PaladinForever_CleanseCandKick()
+    local C = WR_PaladinForever_CLEANSE_CAND
+    if C.built or C.building then return end
+    -- ★ 三十四次修复：白名单-only（静态库当时不可用）时允许按 60 秒节流重建，
+    --   否则一次「登录初期 C_Spell 还没就绪」就会把候选集永久钉死在 60 条白名单上。
+    if type(C.retryAt) == "number" and GetTime() < C.retryAt then return end
+    if type(CreateFrame) ~= "function" then return end
+    C.building = true
+    local f = WR_PaladinForever_CleanseCandDriver
+    if f == nil then
+        f = CreateFrame("Frame")
+        WR_PaladinForever_CleanseCandDriver = f
+    end
+    f:SetScript("OnUpdate", function(self)
+        local ok = pcall(WR_PaladinForever_CleanseCandStep)
+        if not ok then
+            WR_PaladinForever_CLEANSE_CAND.building = false
+            self:SetScript("OnUpdate", nil)
+            self:Hide()
+            return
+        end
+        if WR_PaladinForever_CLEANSE_CAND.built then
+            self:SetScript("OnUpdate", nil)
+            self:Hide()
+        end
+    end)
+    f:Show()
+end
+_G.WR_PaladinForever_CleanseCandKick = WR_PaladinForever_CleanseCandKick
+
+-- 把「白名单 / 已发现表」里新增的 ID 增量并入候选集。
+-- 只在计数变化时才真跑（正常情况是一次整数比较）。
+WR_PaladinForever_CleanseCandMergedAt = WR_PaladinForever_CleanseCandMergedAt or -1
+function WR_PaladinForever_CleanseCandMergeNew()
+    local C = WR_PaladinForever_CLEANSE_CAND
+    if C.seen == nil then return end
+    local ver = tonumber(WR_PaladinForever_CLEANSE_DISCOVERED_COUNT) or 0
+    if ver == WR_PaladinForever_CleanseCandMergedAt then return end
+    WR_PaladinForever_CleanseCandMergedAt = ver
+    local function add(t)
+        if type(t) ~= "table" then return end
+        for sid, kind in pairs(t) do
+            if type(sid) == "number" and sid > 0
+                and (kind == "poison" or kind == "disease" or kind == "magic")
+                and not C.seen[sid] then
+                C.seen[sid] = true
+                C.ids[#C.ids + 1] = sid
+            end
+        end
+    end
+    add(WR_PaladinForever_CLEANSE_KNOWN_AURA_IDS)
+    add(WR_PaladinForever_CLEANSE_DISCOVERED_IDS)
+    C.count = #C.ids
+end
+_G.WR_PaladinForever_CleanseCandMergeNew = WR_PaladinForever_CleanseCandMergeNew
+
+-- 候选集里某个 ID 此刻在不在该单位身上。只认「非 nil」，一个字段都不读。
+-- 返回 true=在 / false=不在 / nil=API 缺失或调用被拒（未知）。
+-- ★ 安全要点：返回的 auraData 可能是 secret 表，连 == nil 都不能裸做，
+--   所以比较本身也包在 pcall 里；抛错一律当「未知」，绝不当「不在」。
+local function WR_PaladinForever_CleanseAuraUpOn(unit, spellId)
+    if type(C_UnitAuras) ~= "table" then return nil end
+    -- ★★★ 2026-11-21 四十三次修复：**受限旗 ID 的 nil 是「读不到」，不是「不在」**。
+    --   官方语义（EUI 真机实证）：GetPlayerAuraBySpellID 是 RequiresNonSecretAura，
+    --   对被限制旗标的法术，即使光环正挂着也返回 **ZERO VALUES**。Lua 里 ZERO
+    --   VALUES 赋给单个变量就是 nil，于是下面 isUp(nil) 会返回 false ——
+    --   一个「明明中着毒」的 ID 会被当成「不在」，直接污染轮询结论。
+    --   修法：该 ID 被 ShouldSpellAuraBeSecret 判为受限时，nil 一律当 nil（未知）。
+    local flagged = nil
+    if type(WR_PaladinForever_CleanseAuraSecretFlag) == "function" then
+        flagged = WR_PaladinForever_CleanseAuraSecretFlag(spellId)
+    end
+    local function isUp(aura)
+        local okC, isNil = pcall(function() return aura == nil end)
+        if not okC then return nil end
+        if isNil then
+            if flagged == true then return nil end
+            return false
+        end
+        return true
+    end
+    if unit == "player" then
+        local fn = C_UnitAuras.GetPlayerAuraBySpellID
+        if fn ~= nil then
+            local ok, aura = pcall(fn, spellId)
+            if not ok then return nil end
+            return isUp(aura)
+        end
+    end
+    local fn2 = C_UnitAuras.GetUnitAuraBySpellID
+    if fn2 == nil then return nil end
+    local ok2, aura2 = pcall(fn2, unit, spellId)
+    if not ok2 then return nil end
+    return isUp(aura2)
+end
+
+-- ★ 主通道：轮询候选集（按单位独立游标）。
+-- 返回 true = 精确命中（身上确有清洁术能驱散的减益）
+--      false = 一轮完整扫完，零命中（精确「没有」，仅当候选集可信时权威）
+--      nil  = 候选集还没建好 / 本轮还没扫完 / API 不可用（未知，交回后续通道）
+--
+-- 为什么按单位独立游标：player 与 target 的扫描进度不同步，
+-- 共用游标会让两者互相拖慢，且「刚上的短 debuff」要等对方扫完才轮到自己。
+-- 为什么 UNIT_AURA 时回绕：新减益随时可能在游标后面才加上，回绕一次
+-- 让它在下一 tick 立刻被问到（见 WR_PaladinForever_CleanseIDScanRewind）。
+function WR_PaladinForever_CleanseIDScan(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    local C = WR_PaladinForever_CLEANSE_CAND
+    if not C.built then
+        pcall(WR_PaladinForever_CleanseCandKick)
+        -- ★ 建库期间也按「已收集到的候选」轮询（渐进覆盖）：
+        --   否则建库那几十秒里这条最精确的通道等于不存在。
+        --   此时只可能返回 true（命中）或 nil；权威 false 只在建完后给。
+    end
+    -- ★ 候选集随「已发现 ID」增量刷新：任何通道一旦判出新的可驱散 ID，
+    --   它必须立刻进入候选集，否则这条最精确的通道会在它身上永远给假阴性。
+    pcall(WR_PaladinForever_CleanseCandMergeNew)
+    local n = #C.ids
+    C.count = n
+    if n <= 0 then return nil end
+    local P = WR_PaladinForever_CLEANSE_POLL
+    local st = P[unit]
+    if type(st) ~= "table" then
+        st = { cursor = 1, hitID = nil, hitAt = 0, sweeps = 0, lastSweepAt = 0 }
+        P[unit] = st
+    end
+    local now = GetTime()
+    -- 同 tick 复用：UnitHasDispel 每 tick 会被 player / target / 提示窗口复查
+    -- 各调一次，每次都是一趟 320 次 C 调用。30ms 内直接复用上一次结论，
+    -- 对 2 秒~10 分钟的减益无感；UNIT_AURA 会把游标拨回起点（见 Rewind），
+    -- 所以「刚上的短 debuff」不会被这份缓存压掉。
+    if st.at and (now - st.at) >= 0 and (now - st.at) < 0.03 then
+        return st.v
+    end
+    -- ★★★ 2026-11-21 四十三次修复：「近期命中复核表」取代「命中不推进游标」。
+    -- ------------------------------------------------------------
+    -- 四十二次修复让命中后游标停住，解决了「驱动帧先命中并推过游标，主循环再问
+    -- 时已越过 → nil」的问题；但它带来一个新缺陷：**长 debuff 会把游标永久钉死**。
+    -- 玩家身上挂着一个 10 分钟的毒时，游标永远停在那个 ID 上，之后再中的毒/病/
+    -- 魔法永远轮不到（诊断里「命中6136 但判定=false」就有这一半原因）。
+    -- 现在改成：命中时把 ID 记进 st.hits，游标**正常推进**；每次调用先复核
+    -- st.hits 里最近命中的那个 ID（真问一次 API）：
+    --   · 还在   → 立刻 true（不消耗本轮预算，主循环任何时候问都能拿到）；
+    --   · 已消失 → 删掉记录，继续完整扫描；
+    --   · 读不到 → 保留记录，继续完整扫描（绝不据此判无）。
+    -- 全程每次都是真实 API 调用，不引入任何「记住的 true」，零假阳性。
+    if type(st.hits) ~= "table" then st.hits = {} end
+    do
+        local recheck = nil
+        local ttl = WR_PaladinForever_CLEANSE_HIT_TTL or 3
+        for sid, at in pairs(st.hits) do
+            if type(at) ~= "number" or (now - at) > ttl then
+                st.hits[sid] = nil
+            elseif recheck == nil then
+                recheck = sid
+            end
+        end
+        if recheck ~= nil then
+            local upH = WR_PaladinForever_CleanseAuraUpOn(unit, recheck)
+            if upH == true then
+                st.hitID = recheck
+                st.hitAt = now
+                st.hits[recheck] = now
+                st.at = now
+                st.v = true
+                return true
+            elseif upH == false then
+                st.hits[recheck] = nil
+            end
+        end
+    end
+    local i = st.cursor
+    if type(i) ~= "number" or i < 1 or i > n then i = 1 end
+    local start = i
+    local budget = WR_PaladinForever_CLEANSE_POLL_BUDGET
+    if budget > n then budget = n end
+    local steps, wrapped, denied = 0, false, false
+    local pt0 = GetTime()
+    while steps < budget do
+        if (GetTime() - pt0) * 1000 >= WR_PaladinForever_CLEANSE_POLL_MS then break end
+        local sid = C.ids[i]
+        local up = WR_PaladinForever_CleanseAuraUpOn(unit, sid)
+        if up == nil then
+            -- ★ 四十三次修复：受限旗 ID 的 nil 是「读不到」，**不是** API 被拒。
+            --   它不该把整轮扫描标成 denied（那会让权威 false 永远出不来），
+            --   只当作「这一条问不出结果」跳过即可。真正的 API 拒绝（抛错）
+            --   仍然走 denied 分支。
+            local flg = nil
+            if type(WR_PaladinForever_CleanseAuraSecretFlag) == "function" then
+                flg = WR_PaladinForever_CleanseAuraSecretFlag(sid)
+            end
+            if flg ~= true then denied = true end
+        elseif up == true then
+            -- ★★★ 2026-11-21 四十三次修复：命中记进 st.hits，游标**正常推进**。
+            --   四十二次修复曾让游标停住，代价是长 debuff 会把游标永久钉死；
+            --   现在由函数入口的「近期命中复核」保证主循环任何时候问都能拿到 true，
+            --   游标因此可以放心前进，后面的 ID 不会饿死。
+            st.hits[sid] = now
+            st.cursor = (i >= n) and 1 or (i + 1)
+            st.hitID = sid
+            st.hitAt = now
+            st.at = now
+            st.v = true
+            -- 命中即说明这个 ID 是「清洁术驱得掉」的真实 debuff：
+            -- 记进已发现表，让白名单通道（PlayerAuraIDHasDispellable）也覆盖它。
+            -- 类型取静态分类（候选集就是按它筛进来的），拿不到才退回运行时分类。
+            local kind = WR_PaladinForever_StaticSpellDispelKind(sid)
+            if kind ~= "poison" and kind ~= "disease" and kind ~= "magic" then
+                kind = WR_PaladinForever_DispelKindBySpellID(sid)
+            end
+            if kind == "poison" or kind == "disease" or kind == "magic" then
+                pcall(WR_PaladinForever_RememberCleansableID, sid, kind)
+            end
+            return true
+        end
+        steps = steps + 1
+        i = i + 1
+        if i > n then
+            i = 1
+            wrapped = true
+            break
+        end
+        if i == start then
+            wrapped = true
+            break
+        end
+    end
+    st.cursor = i
+    st.at = now
+    if wrapped then
+        st.lastSweepAt = now
+        st.sweeps = (st.sweeps or 0) + 1
+        if denied then
+            st.v = nil
+            return nil
+        end
+        -- 只有建库完成才给「扫完零命中」的结论；建库中一轮扫完只是
+        -- 「已收集的那部分没有」，绝不能拿去判无。
+        if not C.built then
+            st.v = nil
+            return nil
+        end
+        st.v = false
+        return false
+    end
+    st.v = nil
+    return nil
+end
+_G.WR_PaladinForever_CleanseIDScan = WR_PaladinForever_CleanseIDScan
+
+-- 新减益随时可能落在游标之后：UNIT_AURA 时把该单位的游标拨回起点，
+-- 让「刚上的毒/病/魔法」在下一 tick 就被问到（不靠缓存、不靠容器）。
+function WR_PaladinForever_CleanseIDScanRewind(unit)
+    if type(unit) ~= "string" or unit == "" then return end
+    local P = WR_PaladinForever_CLEANSE_POLL
+    local st = P[unit]
+    if type(st) == "table" then
+        st.cursor = 1
+        st.at = nil          -- 作废同 tick 缓存：新减益必须立刻被重新问到
+        st.v = nil
+    end
+    -- ★ 三十四次修复：名字轮询游标同样回绕，让刚上的减益下一批就被问到
+    --   （名字表分批之后，不回绕的话新减益可能要等一整轮才轮到）。
+    local PN = WR_PaladinForever_CLEANSE_NAME_POLL
+    local sn = type(PN) == "table" and PN[unit] or nil
+    if type(sn) == "table" then
+        sn.cursor = 1
+        sn.at = nil
+        sn.v = nil
+    end
+end
+_G.WR_PaladinForever_CleanseIDScanRewind = WR_PaladinForever_CleanseIDScanRewind
+
+-- ============================================================
+-- ★★★ 2026-11-21 三十三次修复：名称族精确轮询 + 轮询独立驱动
+-- ------------------------------------------------------------
+-- 用户口径（反复强调）：「只要能实现骑士清洁术在战斗中正确的驱散魔法，疾病，中毒即可」。
+--
+-- 三十一次修复把主通道改成「按 spellID 全集轮询 GetUnitAuraBySpellID」，
+-- 语义是对的，但有两个**结构性漏洞**会让它在真机上继续哑火：
+--   ① 候选集靠扫静态库建（区间 1..130000 + 1200000..1400000），
+--      本服自定义 debuff 若不在扫描区间、或客户端没有
+--      C_Spell.GetSpellDispelType / C_Spell.GetSpellInfo，
+--      候选集就覆盖不到它 —— 轮询再好也问不到那个 ID。
+--   ② 轮询只在 WR_PaladinForever_CleanseStep 走到 tryUnit 时才推进。
+--      而防骑主循环里 正义之怒 / 清洁术保护窗口 / 圣印窗口（1.0 秒重亮）/
+--      鼠标指向保护 等分支每 tick 都会提前 return true → CleanseStep 根本
+--      不被调用 → 游标原地不动 → 一轮永远扫不完 → 轮询恒 nil → 永不驱散。
+--      这条与 API 权限无关，是「加了通道还是没反应」的直接原因之一。
+--
+-- 本轮修法（两条都不依赖任何被封死的光环读回）：
+--   ① 名称族轮询：GetAuraDataBySpellName / GetUnitAuraBySpellName 与
+--      GetUnitAuraBySpellID 同属 RequiresNonSecretAura 族（只按「名字」
+--      问「在不在」，不枚举光环、不读任何字段）。白名单名字表只有几十条，
+--      0.25 秒问一遍开销可忽略；本服 debuff 名字在截图里一直是明文，
+--      所以这条通道对「候选集漏掉的 ID」是有效兜底。
+--   ② 独立驱动：专用 OnUpdate 帧，按固定节流推进
+--      「名字族（player/target）」+「spellID 游标（round-robin 一个友好单位）」，
+--      **完全不经过主循环分支**。这样无论循环怎么 return true，
+--      一轮扫描都能在固定时间内走完，轮询才有机会给出 true。
+--   两条都只认肯定证据：读不到一律 nil，绝不判无。
+-- ============================================================
+WR_PaladinForever_CLEANSE_NAME_POLL = WR_PaladinForever_CLEANSE_NAME_POLL or {}
+WR_PaladinForever_CLEANSE_NAME_POLL_MS = 0.25     -- 名字族节流（秒）
+WR_PaladinForever_CLEANSE_POLL_DRIVE_MS = 0.12    -- 独立驱动节流（秒）
+WR_PaladinForever_CLEANSE_POLL_NAMES = nil
+WR_PaladinForever_CLEANSE_POLL_NAMES_VER = -1
+
+-- ★★★ 2026-11-21 三十四次修复：名字族轮询表不再只等于「手写白名单」。
+-- ------------------------------------------------------------
+-- 旧表只从 CLEANSE_KNOWN_AURA_NAMES 取（几十条手写名）。本服自定义 debuff
+-- 名字几乎都不在表里 → 名字族轮询对它们恒 miss，而受限战斗里又读不到
+-- auraData 字段 → 整条链只剩「白名单 spellID 直查」，同样 miss → 判无。
+-- 现在表 = 白名单名字 ∪ **运行时已发现名字**（见 CleanseNameDiscovery）：
+-- 只要在非受限上下文（脱战 / 非首领战 / 非 PVP）读到过一次真实 HARMFUL 光环的
+-- 名字并判定为毒/病/魔法，就记进已发现表；战斗中按名字问「在不在」即可命中，
+-- 不需要事先知道 spellID，也不需要枚举光环。
+-- 表按发现计数失效重建（ver 变化即重建），保证新发现立刻可用。
+local function WR_PaladinForever_CleansePollNames()
+    local ver = tonumber(WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT) or 0
+    local cached = WR_PaladinForever_CLEANSE_POLL_NAMES
+    if type(cached) == "table" and #cached > 0
+        and WR_PaladinForever_CLEANSE_POLL_NAMES_VER == ver then
+        return cached
+    end
+    local out, seen = {}, {}
+    local function add(nm)
+        if type(nm) ~= "string" or nm == "" then return end
+        if type(WR_PaladinForever_IsSecretValue) == "function"
+            and WR_PaladinForever_IsSecretValue(nm) then return end
+        if seen[nm] then return end
+        seen[nm] = true
+        out[#out + 1] = nm
+    end
+    local src = WR_PaladinForever_CLEANSE_KNOWN_AURA_NAMES
+    if type(src) == "table" then
+        for nm, kind in pairs(src) do
+            if kind == "poison" or kind == "disease" or kind == "magic" then
+                add(nm)
+            end
+        end
+    end
+    local discovered = WR_PaladinForever_CLEANSE_DISCOVERED_NAMES
+    if type(discovered) == "table" then
+        for nm, kind in pairs(discovered) do
+            if kind == "poison" or kind == "disease" or kind == "magic" then
+                add(nm)
+            end
+        end
+    end
+    table.sort(out)
+    WR_PaladinForever_CLEANSE_POLL_NAMES = out
+    WR_PaladinForever_CLEANSE_POLL_NAMES_VER = ver
+    return out
+end
+_G.WR_PaladinForever_CleansePollNames = WR_PaladinForever_CleansePollNames
+
+-- 按名字问「这个 debuff 此刻在不在」。只回答 true / nil。
+--   true = 名字确实挂着（肯定证据）
+--   nil  = 读不到（API 缺失、被拒、或明确不在）—— 一律当未知，绝不判无
+-- ★ 安全要点：返回的 auraData 可能是 secret 表，连 == nil 都不能裸做，
+--   所以比较本身也包在 pcall 里；抛错一律当「未知」。
+local function WR_PaladinForever_CleanseAuraUpByName(unit, name)
+    if type(name) ~= "string" or name == "" then return nil end
+    local cu = (type(C_UnitAuras) == "table") and C_UnitAuras or nil
+    local function isUp(aura)
+        local okC, isNil = pcall(function() return aura == nil end)
+        if not okC then return nil end
+        if isNil then return nil end
+        return true
+    end
+    if cu ~= nil then
+        if unit == "player" then
+            local fnP = cu.GetPlayerAuraBySpellName or cu.GetAuraDataBySpellName
+            if fnP ~= nil then
+                local ok, aura = pcall(fnP, name)
+                if ok then
+                    local v = isUp(aura)
+                    if v == true then return true end
+                end
+            end
+        end
+        local fnU = cu.GetUnitAuraBySpellName or cu.GetAuraDataBySpellName
+        if fnU ~= nil then
+            local ok2, aura2 = pcall(fnU, unit, name)
+            if ok2 then
+                local v2 = isUp(aura2)
+                if v2 == true then return true end
+            end
+        end
+    end
+    -- 经典 UnitDebuff(unit, 名字)：脱战可用（战斗中本服走兼容包装，返回 nil）。
+    -- 只采信「返回了 aura 对象」这一种肯定形态，nil / 占位值一律当未知。
+    if type(UnitDebuff) == "function" then
+        local ok3, d = pcall(UnitDebuff, unit, name)
+        if ok3 then
+            local okN, isNil = pcall(function() return d == nil end)
+            if okN and not isNil then
+                local t = type(d)
+                if t == "table" or t == "userdata" then return true end
+            end
+        end
+    end
+    return nil
+end
+_G.WR_PaladinForever_CleanseAuraUpByName = WR_PaladinForever_CleanseAuraUpByName
+
+-- ============================================================
+-- ★★★ 2026-11-21 三十四次修复：**debuff 名字自动发现**
+-- ------------------------------------------------------------
+-- 为什么需要：本服自定义 debuff 的 spellID 不在客户端静态库可判型的范围内、
+-- 也不在手写白名单里；而受限战斗里 auraData 的 name / spellId / dispelName
+-- 全被 secret 挡住，插件没有任何办法「在战斗中第一次见它」就认出来。
+-- 但**名字**在非受限上下文（脱战 / 非首领战 / 非挑战 / 非 PVP）是可读的，
+-- 而 auraData.spellId 在那里同样可读 —— 于是：
+--   ① 脱战（AurasRestricted() == false）遍历 player/target/focus/mouseover 的
+--      HARMFUL 光环，读 name + spellId + dispelName；
+--   ② 用静态分类 / dispelName / 名字白名单三条证据判型，只认毒/病/魔法；
+--   ③ 名字记进 CLEANSE_DISCOVERED_NAMES，ID 记进 CLEANSE_DISCOVERED_IDS；
+--   ④ 下一场战斗里，名字族轮询（RequiresNonSecretAura，不受 secret 限制）
+--      按名字问「在不在」即可命中 → 精确点亮清洁术。
+-- 这条路是「见一次就永久认识」，不需要用户每次截图报 ID。
+-- 只认肯定证据：类型判不出来就不记，绝不猜。
+-- ============================================================
+WR_PaladinForever_CLEANSE_DISCOVERED_NAMES = WR_PaladinForever_CLEANSE_DISCOVERED_NAMES or {}
+WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT = WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT or 0
+WR_PaladinForever_CLEANSE_DISCOVERED_NAME_MAX = 400
+WR_PaladinForever_CLEANSE_NAME_SCAN_AT = WR_PaladinForever_CLEANSE_NAME_SCAN_AT or 0
+WR_PaladinForever_CLEANSE_NAME_SCAN_MS = 1.0   -- 发现扫描节流（秒）
+
+function WR_PaladinForever_RememberCleansableName(name, kind)
+    if type(name) ~= "string" or name == "" then return end
+    if kind ~= "poison" and kind ~= "disease" and kind ~= "magic" then return end
+    if type(WR_PaladinForever_IsSecretValue) == "function"
+        and WR_PaladinForever_IsSecretValue(name) then return end
+    local t = WR_PaladinForever_CLEANSE_DISCOVERED_NAMES
+    if t[name] ~= nil then return end
+    if WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT >= WR_PaladinForever_CLEANSE_DISCOVERED_NAME_MAX then return end
+    -- 光环名可能带「(等级 N)」后缀：同时记基础名，战斗中两种写法都能问到。
+    t[name] = kind
+    WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT = WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT + 1
+    local base = WR_PaladinForever_AuraNameBase(name)
+    if type(base) == "string" and base ~= "" and base ~= name and t[base] == nil then
+        t[base] = kind
+        WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT = WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT + 1
+    end
+end
+_G.WR_PaladinForever_RememberCleansableName = WR_PaladinForever_RememberCleansableName
+
+-- 扫一个单位的 HARMFUL 光环，把能判型的名字记进已发现表。
+-- 只在非受限上下文调用（调用方负责判定）；读不到 / 判不出型一律跳过。
+function WR_PaladinForever_CleanseDiscoverNames(unit)
+    if type(unit) ~= "string" or unit == "" then return 0 end
+    if type(C_UnitAuras) ~= "table" or C_UnitAuras.GetAuraDataByIndex == nil then return 0 end
+    local found = 0
+    for i = 1, 40 do
+        local ok, data = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HARMFUL")
+        if not ok or data == nil then break end
+        local okN, nm = pcall(function() return data.name end)
+        if okN and type(nm) == "string" and nm ~= ""
+            and not WR_PaladinForever_IsSecretValue(nm) then
+            local kind = WR_PaladinForever_KindFromAuraName(nm)
+            if kind == nil then
+                local okS, sid = pcall(function() return data.spellId end)
+                if okS and type(sid) == "number" and sid > 0
+                    and not WR_PaladinForever_IsSecretValue(sid) then
+                    kind = WR_PaladinForever_StaticSpellDispelKind(sid)
+                    if kind == nil then
+                        kind = WR_PaladinForever_DispelKindBySpellID(sid)
+                    end
+                end
+            end
+            if kind == nil then
+                local okD, dt = pcall(function() return data.dispelName end)
+                if okD and dt ~= nil and not WR_PaladinForever_IsSecretValue(dt) then
+                    kind = WR_PaladinForever_NormalizeDispelType(dt)
+                end
+            end
+            if kind == "poison" or kind == "disease" or kind == "magic" then
+                local before = WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT
+                WR_PaladinForever_RememberCleansableName(nm, kind)
+                if WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT > before then
+                    found = found + 1
+                end
+                local okS2, sid2 = pcall(function() return data.spellId end)
+                if okS2 and type(sid2) == "number" and sid2 > 0
+                    and not WR_PaladinForever_IsSecretValue(sid2) then
+                    pcall(WR_PaladinForever_RememberCleansableID, sid2, kind)
+                end
+            end
+        end
+    end
+    return found
+end
+_G.WR_PaladinForever_CleanseDiscoverNames = WR_PaladinForever_CleanseDiscoverNames
+
+-- 发现扫描的调度入口：只在**非受限**上下文跑（战斗中读不到任何字段，白跑）。
+-- 自带 1 秒节流；只在清洁术功能开启时跑；任何异常都静默。
+function WR_PaladinForever_CleanseNameDiscoveryTick()
+    -- 开关判定内联：WR_PaladinForever_CleanseFeatureOn 是后置 local function，
+    -- 本段在它之前定义，直接引用会解析成全局 nil（调用即抛错）。
+    if type(PigSet) ~= "table" then return end
+    local mode = tonumber(PigSet.FH_QJS)
+    local on = (mode ~= nil and mode >= 1 and mode <= 4)
+        or (PigSet.FH_QJS_Player ~= false) or (PigSet.FH_QJS_Target ~= false)
+    if not on then return end
+    -- 受限上下文（战斗 / 首领战 / 挑战 / PVP）里所有字段都是 secret，扫描无意义
+    if WR_PaladinForever_AurasRestricted() then return end
+    local now = GetTime()
+    if (now - (WR_PaladinForever_CLEANSE_NAME_SCAN_AT or 0)) < WR_PaladinForever_CLEANSE_NAME_SCAN_MS then return end
+    WR_PaladinForever_CLEANSE_NAME_SCAN_AT = now
+    local units = WR_PaladinForever_CLEANSE_POLL_DRIVE_UNITS
+    if type(units) ~= "table" then return end
+    for i = 1, #units do
+        local u = units[i]
+        local okE, exists = pcall(UnitExists, u)
+        if okE and exists == true then
+            pcall(WR_PaladinForever_CleanseDiscoverNames, u)
+        end
+    end
+end
+_G.WR_PaladinForever_CleanseNameDiscoveryTick = WR_PaladinForever_CleanseNameDiscoveryTick
+
+-- ★ 名称族轮询：按游标**分批**遍历名字表，命中即 true（并记下命中名字供诊断）。
+-- 返回 true = 精确命中 / nil = 本轮没有命中或读不到（永不返回 false）。
+--
+-- ★★★ 2026-11-21 三十四次修复：改成分批游标。名字表扩到「白名单 ∪ 已发现名字」
+-- 之后最多 400 条，若每 0.25 秒把 400 条 × 2 单位全问一遍就是 1600 次 C 调用/秒，
+-- 明显浪费。现在每次只推进 WR_PaladinForever_CLEANSE_NAME_POLL_BUDGET 条
+-- （默认 80），一轮约 5 批 × 0.25 秒 ≈ 1.2 秒扫完 —— 对 2 秒级短 debuff 够快，
+-- 对长 debuff 完全无感；UNIT_AURA 时游标回绕（见 CleanseIDScanRewind 同款逻辑），
+-- 让刚上的减益下一批就被问到。
+WR_PaladinForever_CLEANSE_NAME_POLL_BUDGET = 80
+
+function WR_PaladinForever_CleanseNamePoll(unit)
+    if type(unit) ~= "string" or unit == "" then return nil end
+    local names = WR_PaladinForever_CleansePollNames()
+    local n = #names
+    if n == 0 then return nil end
+    local now = GetTime()
+    local P = WR_PaladinForever_CLEANSE_NAME_POLL
+    local st = P[unit]
+    if type(st) ~= "table" then
+        st = { at = 0, hitName = nil, hitAt = 0, sweeps = 0, v = nil, cursor = 1 }
+        P[unit] = st
+    end
+    if type(st.cursor) ~= "number" or st.cursor < 1 or st.cursor > n then st.cursor = 1 end
+    -- 命中后的 0.25 秒内复用结论（避免同帧被 UnitHasDispel / 提示窗口各问一遍）
+    if st.v == true and type(st.hitAt) == "number"
+        and (now - st.hitAt) >= 0
+        and (now - st.hitAt) < WR_PaladinForever_CLEANSE_NAME_POLL_MS then
+        return true
+    end
+    if type(st.at) == "number" and (now - st.at) >= 0
+        and (now - st.at) < WR_PaladinForever_CLEANSE_NAME_POLL_MS then
+        return nil
+    end
+    st.at = now
+    st.v = nil
+    local budget = WR_PaladinForever_CLEANSE_NAME_POLL_BUDGET or 80
+    if budget > n then budget = n end
+    local i = st.cursor
+    local steps = 0
+    local wrapped = false
+    while steps < budget do
+        local nm = names[i]
+        local up = WR_PaladinForever_CleanseAuraUpByName(unit, nm)
+        if up == true then
+            st.cursor = (i >= n) and 1 or (i + 1)
+            st.v = true
+            st.hitName = nm
+            st.hitAt = now
+            st.sweeps = (st.sweeps or 0) + 1
+            return true
+        end
+        steps = steps + 1
+        i = i + 1
+        if i > n then
+            i = 1
+            wrapped = true
+            break
+        end
+    end
+    st.cursor = i
+    if wrapped then st.sweeps = (st.sweeps or 0) + 1 end
+    return nil
+end
+_G.WR_PaladinForever_CleanseNamePoll = WR_PaladinForever_CleanseNamePoll
+
+-- 独立驱动：每 0.08 秒推进一次，**不经过主循环任何分支**。
+--   · 名字族：player + target 各问一遍（几十次 C 调用，0.25 秒节流兜住）；
+--   · spellID 游标：每帧只推进一个「存在且友好」的单位（round-robin），
+--     预算沿用 WR_PaladinForever_CLEANSE_POLL_BUDGET。
+-- 只在「清洁术功能开着 + 战斗中或光环受限」时运行，脱战/关闭时零开销。
+WR_PaladinForever_CLEANSE_POLL_DRIVE_AT = WR_PaladinForever_CLEANSE_POLL_DRIVE_AT or 0
+WR_PaladinForever_CLEANSE_POLL_DRIVE_IDX = WR_PaladinForever_CLEANSE_POLL_DRIVE_IDX or 0
+WR_PaladinForever_CLEANSE_POLL_DRIVE_UNITS = {
+    "player", "target", "focus", "mouseover",
+    "party1", "party2", "party3", "party4",
+}
+
+-- 清洁术功能是否开着（与 CleanseStep 的读取口径一致：nil 视为开）。
+local function WR_PaladinForever_CleanseFeatureOn()
+    if type(PigSet) ~= "table" then return false end
+    local mode = tonumber(PigSet.FH_QJS)
+    if mode ~= nil and mode >= 1 and mode <= 4 then return true end
+    if PigSet.FH_QJS_Player ~= false then return true end
+    if PigSet.FH_QJS_Target ~= false then return true end
+    return false
+end
+
+function WR_PaladinForever_CleansePollTick()
+    if not WR_PaladinForever_CleanseFeatureOn() then return end
+    -- 只在「战斗中」或「光环受限」时才需要这条通道（脱战走既有精确通道）
+    local okC, combat = pcall(UnitAffectingCombat, "player")
+    if not ((okC and combat == true) or WR_PaladinForever_AurasRestricted()) then return end
+    local now = GetTime()
+    if (now - (WR_PaladinForever_CLEANSE_POLL_DRIVE_AT or 0)) < WR_PaladinForever_CLEANSE_POLL_DRIVE_MS then
+        return
+    end
+    WR_PaladinForever_CLEANSE_POLL_DRIVE_AT = now
+
+    -- ① 名字族（player / target）：开销极小，每轮都问
+    pcall(WR_PaladinForever_CleanseNamePoll, "player")
+    pcall(WR_PaladinForever_CleanseNamePoll, "target")
+
+    -- ② spellID 游标：**player 每轮必扫**（自己身上中毒/疾病/魔法是最高频场景），
+    --    其余单位（target / focus / mouseover / party1-4）每轮轮转一个。
+    --    这样 player 的 320 条候选约 0.1~0.2 秒就能扫完一轮 —— 2 秒级的短
+    --    debuff（冰冻 15850 等）也来得及点亮。
+    local function driveUnit(u)
+        local okE, exists = pcall(UnitExists, u)
+        if not (okE and exists == true) then return end
+        local okF, friendly = pcall(WR_PaladinForever_UnitIsFriendly, u)
+        if not (okF and friendly == true) then return end
+        pcall(WR_PaladinForever_CleanseIDScan, u)
+    end
+    driveUnit("player")
+
+    local units = WR_PaladinForever_CLEANSE_POLL_DRIVE_UNITS
+    local n = #units
+    for _ = 1, n do
+        local i = ((WR_PaladinForever_CLEANSE_POLL_DRIVE_IDX or 0) % n) + 1
+        WR_PaladinForever_CLEANSE_POLL_DRIVE_IDX = i
+        local u = units[i]
+        if u ~= "player" then
+            driveUnit(u)
+            return
+        end
+    end
+end
+_G.WR_PaladinForever_CleansePollTick = WR_PaladinForever_CleansePollTick
+
+-- 驱动帧：整个会话只建一次，OnUpdate 里全包 pcall，绝不向外抛。
+if type(CreateFrame) == "function" then
+    local drv = WR_PaladinForever_CleansePollDriverFrame
+    if drv == nil then
+        local okF, f = pcall(CreateFrame, "Frame")
+        if okF and f ~= nil then
+            WR_PaladinForever_CleansePollDriverFrame = f
+            if type(f.SetScript) == "function" then
+                pcall(f.SetScript, f, "OnUpdate", function()
+                    pcall(WR_PaladinForever_CleansePollTick)
+                    -- ★ 三十四次修复：脱战（非受限）时顺手把「见过的 debuff 名字」记下来，
+                    --   下一场战斗名字族轮询就能按名字命中（自带 1 秒节流，战斗中直接返回）。
+                    pcall(WR_PaladinForever_CleanseNameDiscoveryTick)
+                end)
+            end
+            if type(f.Show) == "function" then pcall(f.Show, f) end
+        end
+    end
+end
+
 -- ★★★ 2026-11-19 七次修复：运行时「已发现可驱散 ID」记忆表。
 --   战斗中 auraData.spellId 是 secret，唯一能用的免读回通道是
 --   C_UnitAuras.GetPlayerAuraBySpellID(sid) 逐 ID 直查 —— 但它只遍历白名单，
@@ -6552,6 +7929,8 @@ if type(CreateFrame) == "function" then
     wrCleanseProbeEvents:RegisterEvent("PLAYER_LOGIN")
     wrCleanseProbeEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
     wrCleanseProbeEvents:SetScript("OnEvent", function()
+        -- ★★★ 2026-11-21 三十一次修复：登录即开始建 spellID 候选集（摊到多帧）。
+        pcall(WR_PaladinForever_CleanseCandKick)
         local units = { "player", "target", "focus", "mouseover", "party1", "party2", "party3", "party4" }
         for i = 1, #units do
             pcall(WR_PaladinForever_CleanseProbeEnsure, units[i])
@@ -7207,6 +8586,8 @@ wrAuraEventFrame:SetScript("OnEvent", function(_, _, unit, updateInfo)
     local now = GetTime()
     WR_PaladinForever_AuraEventAt[unit] = now
     WR_PaladinForever_AuraEventSeq[unit] = (WR_PaladinForever_AuraEventSeq[unit] or 0) + 1
+    -- ★★★ 2026-11-21 三十一次修复：新减益落在轮询游标之后也必须在下一 tick 被问到。
+    pcall(WR_PaladinForever_CleanseIDScanRewind, unit)
     local verdict, shape = WR_PaladinForever_ClassifyUnitAuraPayload(updateInfo)
     WR_PaladinForever_AuraPayloadLast[unit] = { v = verdict, shape = shape, at = now }
     WR_PaladinForever_AuraUpdateInfoLast[unit] = updateInfo
@@ -7505,6 +8886,33 @@ function WR_PaladinForever_UnitHasDispel(unit)
         return true
     end
 
+    -- ★★★ 2026-11-21 三十一次修复：**按 spellID 全集精确轮询**（主通道）。
+    --   本服受限战斗里唯一既精确又不受封死的通道：候选集 = 客户端静态库里
+    --   dispelType ∈ {Magic,Disease,Poison} 的全部 ID（已剔除会被打 secret 的），
+    --   逐个用 C_UnitAuras.GetPlayerAuraBySpellID / GetUnitAuraBySpellID 问在不在。
+    --   命中 → 精确 true；一轮扫完零命中且候选集可信 → 精确 false（直接熄灭）。
+    --   详见 WR_PaladinForever_CleanseIDScan 头部注释。
+    --   命中即精确 true。零命中**只置否决标记、不立刻 return**：候选集理论上
+    --   可能漏掉本服自定义 debuff（静态库里没有的 ID），而后面那些「有肯定证据
+    --   才 true」的通道（白名单 / 类型名 / tooltip）命中就说明候选集没覆盖到，
+    --   以肯定证据为准 —— 宁可多驱一次，也绝不因为候选集不全而假阴性。
+    -- ★★★ 2026-11-21 三十三次修复：**名称族轮询**（GetUnitAuraBySpellName 族）。
+    --   与 spellID 轮询同属 RequiresNonSecretAura：只按「名字」问「在不在」，
+    --   不枚举光环、不读任何字段。它补的是候选集的漏：本服自定义 debuff 若不在
+    --   静态库扫描区间内，spellID 轮询永远问不到它，而名字白名单里已经记着。
+    --   只采信 true；nil（不在 / 读不到）一律不判无。
+    local okNM, nmHit = pcall(WR_PaladinForever_CleanseNamePoll, unit)
+    if okNM and nmHit == true then return hit() end
+
+    local okIDS, idsV = pcall(WR_PaladinForever_CleanseIDScan, unit)
+    local idScanVeto = false
+    if okIDS then
+        if idsV == true then return hit() end
+        if idsV == false and WR_PaladinForever_CLEANSE_CAND.trusted == true then
+            idScanVeto = true
+        end
+    end
+
     -- ★★★ 2026-11-17：引擎级「玩家本人可驱散」探测器（见上方函数说明）。
     local engineProbe = WR_PaladinForever_CleanseProbeHasDispellable(unit)
     if engineProbe == true then return hit() end
@@ -7551,7 +8959,11 @@ function WR_PaladinForever_UnitHasDispel(unit)
     local okPresence, presence = pcall(WR_PaladinForever_CleanseProbeHarmfulPresence, unit)
     if not okPresence then presence = nil end
     if presence == true then return hit() end
-    local presenceVeto = (presence == false)
+    -- ★★★ 2026-11-21 三十一次修复：两种否决合并。
+    --   presenceVeto = 引擎「我本人能驱散」组明确答 0（本服从不填帧，基本不触发）；
+    --   idScanVeto   = spellID 全集一轮扫完零命中且候选集可信（本轮真正的权威否）。
+    --   任一为真 → 下面的「有任意减益就放行」降级段整段跳过。
+    local presenceVeto = (presence == false) or idScanVeto == true
     -- ★★★ 2026-11-18 三次修复②：已知 debuff ID 存在性直查（不依赖探测容器，
     --   容器装配失败/受限战斗下也能命中；非 nil 即存在，nil 当未知绝不判无）。
     --   PlayerAuraIDHasDispellable 内部只扫玩家自身光环 → 保持 player only。
@@ -7806,6 +9218,62 @@ function WR_PaladinForever_CleanseDebugReport()
             if dbg.meFrames ~= nil then
                 parts[#parts + 1] = "可驱散组=" .. tostring(dbg.meFrames)
             end
+        end
+        -- ★★★ 2026-11-21 三十一次修复：spellID 轮询通道状态。
+        --   候选集 / 剔除数 / 可信与否 / 本 tick 结果 / 游标位置 —— 一眼看出
+        --   到底是「没建好」「被剔光了」还是「扫完确实没有」。
+        do
+            local C = WR_PaladinForever_CLEANSE_CAND
+            parts[#parts + 1] = "轮询候选=" .. tostring(C.count)
+                .. "/剔" .. tostring(C.flagged)
+                .. "/" .. (C.built and (C.trusted and "可信" or "不完整") or "建库中")
+                .. "/源=" .. tostring(C.source == "" and "?" or C.source)
+                .. "/secretAPI=" .. tostring(C.secretApi)
+            if not C.built then
+                parts[#parts + 1] = "建库进度=区间" .. tostring(C.rangeIndex or 1)
+                    .. "@" .. tostring(C.cursor or 0)
+            end
+            local okI2, iv = pcall(WR_PaladinForever_CleanseIDScan, unit)
+            parts[#parts + 1] = "轮询判定=" .. WR_PaladinForever_DbgFmt(okI2, iv)
+            local st = WR_PaladinForever_CLEANSE_POLL[unit]
+            if type(st) == "table" then
+                parts[#parts + 1] = "轮询游标=" .. tostring(st.cursor)
+                    .. "/扫完" .. tostring(st.sweeps or 0)
+                    .. (st.hitID and ("/命中" .. tostring(st.hitID)) or "")
+            end
+
+            -- ★★★ 2026-11-21 三十三次修复：名称族轮询状态（补候选集漏 ID 的通道）
+            local okNMP, nmv = pcall(WR_PaladinForever_CleanseNamePoll, unit)
+            parts[#parts + 1] = "名称轮询=" .. WR_PaladinForever_DbgFmt(okNMP, nmv)
+            local nmst = WR_PaladinForever_CLEANSE_NAME_POLL[unit]
+            if type(nmst) == "table" then
+                parts[#parts + 1] = "名称轮询状态=扫" .. tostring(nmst.sweeps or 0)
+                    .. "次" .. (nmst.hitName and ("/命中" .. tostring(nmst.hitName)) or "")
+            end
+            local names = WR_PaladinForever_CleansePollNames()
+            parts[#parts + 1] = "名称候选=" .. tostring(#names)
+                .. "/驱动帧=" .. tostring(WR_PaladinForever_CleansePollDriverFrame ~= nil)
+            -- ★ 三十四次修复：发现通道状态（脱战读到的自定义 debuff 名字/ID）。
+            --   真机上若这里长期是 0，说明脱战也没读到任何 HARMFUL 光环名字 ——
+            --   那就是更上游的问题（EU/Frames 全被拒），不是名字轮询本身。
+            local ts = WR_PaladinForever_CLEANSE_TIP_STAT or {}
+            parts[#parts + 1] = "提示判型=试" .. tostring(ts.tried or 0)
+                .. "/中" .. tostring(ts.hit or 0)
+                .. "/拒" .. tostring(WR_PaladinForever_CLEANSE_TIP_DENIED_COUNT or 0)
+                .. "/静态产出" .. tostring(C.staticHits or 0)
+            -- ★ 四十二次修复：存在性前置筛 + 存档状态，用来区分三种「候选集长不大」：
+            --   不存在N 大 = 区间扫到的多是空 ID（正常）；
+            --   存档=过期 = 旧档被判无效、正在重建（正常，等几秒）；
+            --   提示判型 试0 且 不存在N=0 = 建库帧根本没跑（另有问题）。
+            do
+                local absentN = 0
+                for _ in pairs(WR_PaladinForever_CLEANSE_ABSENT or {}) do absentN = absentN + 1 end
+                parts[#parts + 1] = "不存在=" .. tostring(absentN)
+                    .. "/存档=" .. (C.savedStale and "过期" or (C.source == "落盘" and "有效" or "-"))
+            end
+            parts[#parts + 1] = "已发现名字=" .. tostring(WR_PaladinForever_CLEANSE_DISCOVERED_NAME_COUNT or 0)
+                .. "/已发现ID=" .. tostring(WR_PaladinForever_CLEANSE_DISCOVERED_COUNT or 0)
+                .. "/上次发现扫描=" .. string.format("%.1f", tonumber(WR_PaladinForever_CLEANSE_NAME_SCAN_AT) or 0)
         end
         local okP, probeHit = pcall(WR_PaladinForever_CleanseProbeHasDispellable, unit)
         parts[#parts + 1] = "probe判定=" .. WR_PaladinForever_DbgFmt(okP, probeHit)

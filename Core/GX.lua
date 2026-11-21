@@ -3,7 +3,7 @@
 -- ==========================================
 
 -- 当前版本号（用于显示和哈希校验）
-local CurrentVersion = "2026-11-19"
+local CurrentVersion = "2026-11-21"
 
 -- 销售标识（防盗版标记）
 local _GxSaleTag = "9"
@@ -15,6 +15,562 @@ local FontSize = 16
 -- 更新日志正文（按时间倒序排列）
 -- ==========================================
 local UpdateContent = [[
+【防骑】2026-11-21（清洁术战斗中不驱散：判型配额死锁 —— 空 ID 烧光判型预算）
+- 用户口径：「防骑战斗中依旧没有使用清洁术驱散这个中毒」。
+- 真机 /FH_QJS_DEBUG 实证（10:09，战斗中，player/target 都中着毒）：
+    轮询候选=146/剔0/可信/源=区间扫描/secretAPI=true
+    轮询判定=false  轮询游标=1/扫完4713/命中6136
+    提示判型=试60001/中176/拒0/静态产出98   不存在=40000/存档=-
+    名称轮询=nil  名称候选=58  已发现名字=39/已发现ID=103  最终=false
+- 根因（四条配额死锁，与「通道不够」完全无关 —— 通道已经够用，是判型预算被空 ID 烧光）：
+  ① **不存在表 4 万上限打满**（诊断「不存在=40000」）：区间扫描要走完 1..130000，
+     其中绝大多数 ID 根本不存在；表一满，后面的空 ID 全部返回「未知」→ 每条都要
+     真调一次 C_TooltipInfo → 把判型预算烧空。
+  ② **miss 表 6 万上限打满 → TIP_FULL=true**（诊断「试60001」）：从那一刻起**整个会话**
+     一次都不再判型，静态产出永远停在 98 条，之后哪怕扫到真 debuff 也不再判型。
+  ③ **可信门槛只看数量不看产出**：98 条静态产出 + 146 条候选 → trusted=true →
+     一轮扫完零命中 → idScanVeto → 判定链尾部「AurasRestricted 就 return false」
+     → 用户中的毒（不在那 98 条里）**必然**一次都不驱。
+  ④ **受限旗 ID 的 nil 被当成「不在」**：GetPlayerAuraBySpellID 对被限制旗标的法术
+     即使光环挂着也返回 ZERO VALUES（Lua 里就是 nil）；旧代码 isUp(nil)=false，
+     于是「明明中着毒」的 ID 被当成「不在」，还顺带把整轮扫描标成 denied。
+- 修法（Paladin/Paladin_Forever.lua）：
+  ① 新增 WR_PaladinForever_CleanseTipWorth：提示判型只对「真实 debuff 会落到的 ID 段」
+     开放（1..130000 经典段 + 1200000..1400000 无限新增段），段外一律不花提示配额。
+  ② 不存在表上限 4 万 → 20 万（> 13 万扫描区间）：整段扫完也不会打满，空 ID 全程走
+     「不存在」快路，判型配额只花在**真实存在**的法术上。
+  ③ miss 表打满改为**清空重来**（内存恒定），并删除 TIP_FULL 永久关死闸 ——
+     判型能力不会再被一堆空 ID 永久剥夺。
+  ④ 候选集新增两道门槛：CLEANSE_CAND_SAVED_MIN（落盘静态产出不足即作废重扫）、
+     CLEANSE_CAND_TRUSTED_MIN（静态产出不足 200 条时**不得**给权威 false，
+     绝不因候选集不全而一票否决引擎通道）。存档版本号 ver 2 → 3，旧档一律作废。
+  ⑤ 受限旗 ID 的 nil 一律当「未知」（不再判「不在」），且不再把整轮扫描标 denied。
+  ⑥ 轮询命中改用「近期命中复核表」st.hits 取代「命中停游标」：命中时游标正常推进，
+     函数入口先复核最近命中的 ID（真问一次 API），既保证主循环任何时候问都能拿到
+     true，又不会让长 debuff 把游标永久钉死（诊断「命中6136 但判定=false」的另一半）。
+- 验证：新增夹具 .workbuddy/test_paladin_cleanse_tip_quota.py（46 项全通过）；
+  清洁术家族夹具全通过；全量 Lua 语法 215 文件 0 错。
+
+【防骑】2026-11-21（清洁术战斗中不驱散：候选集落盘死锁 + 命中被游标吞掉）
+- 用户口径：「防骑战斗中依旧没有使用清洁术驱散这个中毒」。
+- 真机 /FH_QJS_DEBUG 实证（09:44，战斗中，player/target 都中着毒）：
+    轮询候选=49/剔0/建库中/源=落盘/secretAPI=true   建库进度=区间4@1
+    提示判型=试0/中0/拒0/静态产出0
+    轮询游标=1/扫完7257/命中16458   轮询判定=nil   名称轮询=nil   最终=false
+- 根因（两条结构性漏洞，与「通道不够」无关）：
+  ① **落盘死锁**：候选集存档（PigSet.MKFCleanseCand）里没有 staticHits 字段（旧版本写的），
+     加载后 staticHits=0 → staticComplete 恒 false → built 永远 false；
+     而加载分支无条件把 source 设成「落盘」、rangeIndex 设成 #ranges+1（声明区间扫描已完成），
+     越界重置又按 source 判断而跳过 → **区间扫描与提示判型永不重跑**。
+     于是候选集永远钉在白名单 49 条，用户中的毒不在其中 → spellID 轮询恒 miss
+     → 名称表也没有这个名 → 全链 nil → 受限战斗末尾 return false → 一次都不驱。
+     诊断里「源=落盘 / 建库进度=区间4@1 / 提示判型=试0 / 静态产出0」就是死锁的原样。
+  ② **命中被游标吞掉**：命中后旧实现执行 st.cursor = i + 1。而命中往往是独立驱动帧
+     （0.12 秒一次）抓到的，等主循环的 UnitHasDispel 在 0.03 秒同 tick 缓存之外问过来时，
+     游标已经越过那个 ID → 返回 nil → hit() 没被触发 → 色块不亮。
+     诊断「扫完7257次/命中16458」却「轮询判定=nil、最终=false」正是这个形态。
+- 修法（Paladin/Paladin_Forever.lua）：
+  ① 候选集存档加版本号 CLEANSE_CAND_VER=2；加载时 ver 不符 / staticHits<=0 一律判无效并清档，
+     让区间扫描从头重建一次（跨版本不再带着死锁状态登录）。
+  ② 越界重置的判据从「source 是不是落盘/spellDB」改成「staticHits 是否 >0」——
+     静态判型没产出就说明候选集不可信，必须重扫，不再被 source 挡住。
+  ③ 加载分支：staticHits<=0 时不再声明「已完成」，rangeIndex 归 1、source 清空。
+  ④ 新增「存在性前置筛」WR_PaladinForever_CleanseSpellExists：先用 GetSpellInfo 的名字判
+     这个 spellID 到底存不存在。不存在的直接跳过，**不消耗提示配额、不写 miss 表**；
+     两个接口都调过且都没名字才敢记「不存在」；接口从未成功返回过名字时一律 nil（绝不记不存在）。
+     配合 miss 表上限 6000 → 60000，提示判型不会再被空 ID 瞬间打满后整会话关闭。
+  ⑤ 提示判型命中时，把客户端给出的**法术名**一并记进已发现名字表，
+     名称族轮询（GetUnitAuraBySpellName）随之扩大 —— 这是唯一不依赖 spellID 的通道。
+  ⑥ 命中后**游标停在命中的那个 ID 上**，不再 +1：debuff 还在就继续命中（任何时候问都能拿到
+     true），debuff 没了下一次自然 miss 并推进。全程仍然每次真问 API，不引入「记住的 true」，
+     零假阳性。
+  ⑦ 诊断新增「不存在=N / 存档=过期|有效|-」两项，用来区分「建库没跑」「旧档重建中」与「确实没有」。
+- 验证：新增夹具 .workbuddy/test_paladin_cleanse_cand_lock.py（35 项全通过，覆盖旧档判无效、
+  staticHits=0 重扫、本版本落盘正常复用、存在性筛三种分支、提示判型记名字、命中不推进游标、
+  毒消失后不再返回 true）；清洁术家族 + 圣骑士家族夹具全通过；全量 Lua 语法 216 文件 0 失败。
+
+【防骑】2026-11-21（清洁术战斗中不驱散：候选集建不起来 —— 静态判型全灭 + 白名单并入太晚）
+- 用户口径：「防骑战斗中依旧没有使用清洁术驱散这个中毒」。
+- 真机 /FH_QJS_DEBUG 实证（战斗中，player/target 都中着毒）：
+    轮询候选=47/剔0/建库中/源=区间扫描/secretAPI=true   建库进度=区间3@0
+    轮询判定=nil   名称轮询=nil   名称候选=25   最终=false
+- 根因（三条叠在一起，与「通道不够」无关，是**候选集根本建不起来**）：
+  ① 本服 C_Spell.GetSpellDispelType / GetSpellInfo().dispelType 对绝大多数 ID
+     返回 nil（私服静态表不全）→ 区间扫描 33 万个 ID 全走完，poison/disease/magic
+     **一条都判不出来**（staticHits=0）→ 候选集只剩白名单几十条 →
+     staticComplete 恒 false → built 永远 false → spellID 轮询只可能给 true/nil，
+     永远不会命中用户中的毒。
+  ② 白名单 / 已发现表的 merge 被放在区间扫描**之后**，而区间扫描一旦没扫完就
+     return false —— merge 永远轮不到执行，候选集被钉在 47 条上。
+  ③ 数量门槛 200 在「静态判型全灭」时永远达不到 → 每 60 秒重建一次，白烧 CPU。
+- 修法（Paladin/Paladin_Forever.lua）：
+  ① 新增「提示判型」通道 WR_PaladinForever_CleanseKindByIDFast：
+     静态 API 判不出型时，退回客户端自己的法术提示（C_TooltipInfo.GetSpellByID
+     → 类型行「中毒 / 疾病 / 魔法」）。用户多次截图里的「毒性唾液 · 7125 · 中毒」
+     「冰冻 · 15850 · 魔法」正是这条数据流，真机一直是明文。判型命中即记进
+     已发现 ID 表，免读回的 GetPlayerAuraBySpellID 轮询立刻覆盖它。
+     被拒只记 3 秒全局冷却（绝不把被拒写成「该 ID 判不出型」，否则 33 万个 ID
+     会被永久标死）；判不出型记 10 分钟 miss，防重复砸引擎。
+  ② 白名单 / 已发现表改到区间扫描**之前**并入，候选集首帧就有几十条可问。
+  ③ 数量门槛 200 → 30（staticHits>0 仍是硬前提，白名单-only 依旧不可信）；
+     落盘复用门槛 50 → 20。
+  ④ 区间分段：1..30000 先扫（本服 debuff 的 ID 绝大多数落在这一段：
+     5416 / 744 / 7125 / 12541 / 15850 / 589 全在里面），几秒内即可覆盖。
+  ⑤ 区间表变更时重置进度，但「落盘 / spellDB」完成态不被重置清掉。
+  ⑥ 诊断补「提示判型=试/中/拒/静态产出」四项。
+- 验证：新增夹具 .workbuddy/test_paladin_cleanse_cand_tip.py（PASS=33 / FAIL=0）；
+  清洁术家族 30 个夹具全通过；圣骑士家族夹具全通过；全量 Lua 语法 215 文件 0 错。
+
+- 用户口径：「防骑战斗中依旧没有使用清洁术驱散这个中毒」。
+- 根因（这次不是「通道不够」，而是**权威否定被误用**，把唯一还能判定的引擎通道一起掐掉了）：
+  候选集靠区间扫描建（WR_PaladinForever_CleanseCandStep）。本服 C_Spell.GetSpellDispelType /
+  GetSpellInfo 若不可用（私服常见），扫描一条都判不出型 → 候选集只剩「白名单 + 已发现表」
+  约 60 条。旧判据 trusted = (count>=50) and secretApi and flagged==0 对这 60 条**成立**：
+  白名单 merge 用 skipFlag=false → flagged=0；只要 C_Secrets 存在 → secretApi=true。
+  于是「白名单-only」被判成权威可信 → 一轮扫完零命中 → idScanVeto=true →
+  UnitHasDispel 里 `if AurasRestricted() and not presenceVeto` 整段被跳过 →
+  唯一能按职业判定「我本人能驱散」的引擎通道（SecureForEachPresence / ForEachAura，
+  filter="HARMFUL|RAID"）也一起被跳过 → 最后 `if AurasRestricted() then return false` 判无。
+  用户中的毒只要不在那 60 条白名单里（本服自定义 debuff 全部不在）就**必然**一次都不驱，
+  与「又加了多少条免读回通道」完全无关 —— 这就是反复修复都无效的原因。
+- 修法①（候选集可信判据，Paladin/Paladin_Forever.lua）：
+  · 新增 C.staticHits 计数：区间扫描 / spellDB 里真正判出 poison/disease/magic 的条数；
+    staticHits == 0 = 静态库判不出型 = 白名单-only，这是唯一可靠的区分信号。
+  · staticComplete = staticHits>0 且 count>=200 且 source ∈ {区间扫描, spellDB, 落盘}；
+    只有 staticComplete 才置 built=true，才允许 trusted；否则 built=false、trusted=false，
+    候选集退化为「渐进覆盖」（CleanseIDScan 对 !built 只给 true/nil，**绝不给权威 false**）。
+  · 白名单-only **不落盘**：否则下次登录以 source="落盘" 复用它，同一个漏洞跨登录复现。
+  · 白名单-only 设 retryAt = now+60，CleanseCandKick 允许 60 秒后重建
+    （登录初期 C_Spell 未就绪时能自愈，不再永久钉死在 60 条白名单上）。
+  · 顺带修 source 标记：旧实现只在「本帧没扫完」分支里写 source="区间扫描"，
+    一帧扫完的区间会让 source 永远为空 → 完整静态结果反被当成「白名单」。
+- 修法②（debuff 名字自动发现，见下）：补上「白名单外的自定义 debuff 怎么被认识」。
+- 修法③（名字轮询分批）：名字表扩到「白名单 ∪ 已发现名字」（上限 400）后，
+  每 0.25 秒把 400 条 × 2 单位全问一遍是 1600 次 C 调用/秒 → 改为游标分批
+  （CLEANSE_NAME_POLL_BUDGET=80，一轮约 1.2 秒扫完）；UNIT_AURA 时名字游标同步回绕。
+
+【防骑】2026-11-21（清洁术 debuff 名字自动发现：见一次就永久认识）
+- 背景：本服自定义 debuff 的 spellID 不在客户端静态库可判型的范围内、也不在手写白名单里；
+  而受限战斗里 auraData 的 name / spellId / dispelName 全被 secret 挡住，
+  插件没有任何办法「在战斗中第一次见它」就认出来。
+- 但**名字**在非受限上下文（脱战 / 非首领战 / 非挑战 / 非 PVP）是可读的，
+  auraData.spellId 在那里同样可读 —— 于是新增 WR_PaladinForever_CleanseNameDiscoveryTick：
+  ① 只在 AurasRestricted() == false 时跑（战斗中字段全 secret，白跑），自带 1 秒节流；
+  ② 遍历 player/target/focus/mouseover 的 HARMFUL 光环，读 name + spellId + dispelName；
+  ③ 用「名字白名单 → 静态分类 → 运行时分类 → dispelName」四条证据判型，只认毒/病/魔法；
+  ④ 名字记进 CLEANSE_DISCOVERED_NAMES（同时记「去等级后缀」的基础名），
+     ID 记进 CLEANSE_DISCOVERED_IDS；
+  ⑤ 下一场战斗里名字族轮询（RequiresNonSecretAura，不受 secret 限制）按名字问「在不在」
+     即可命中 → 精确点亮清洁术。
+- WR_PaladinForever_KindFromAuraName 也认「已发现名字」（含去等级后缀的基础名）：
+  战斗中若名字可读（用户截图实证名字通常是明文），ScanUnitDebuffTypes / tooltip 扫描
+  拿到名字即可判型，不再依赖 spellID 白名单。
+- 新增本地 WR_PaladinForever_AuraNameBase（去「（等级 N）」/「(等级 N)」，全角半角、空格可有可无）：
+  不用 Core 的 WR_AuraNameBase —— 它在 Core 层，裁剪夹具 / 极端加载顺序下可能后加载。
+- 诊断（/FH_QJS_DEBUG）新增「已发现名字=N/已发现ID=N/上次发现扫描=t」：
+  真机上若长期为 0，说明脱战也读不到任何 HARMFUL 光环名字，是更上游的问题。
+- 验证：新增夹具 .workbuddy/test_paladin_cleanse_auth_negation.py（S1-S5、T1-T11 全通过）；
+  test_paladin_cleanse_id_scan.py 断言按新口径更新（非完整候选集只给 nil）；
+  清洁术家族 29 个夹具 0 失败、圣骑士家族 0 失败、全量 Lua 语法 216 文件 0 失败。
+
+【牧师】2026-11-21（韧 / 心灵之火「连补两下」：色块跨过 GCD 被 AHK 连按）
+- 用户口径：「牧师韧消失了，为什么补的时候会连补两下」。
+- 现象链（色块模型）：亮着 = 现在该按这个键；外部 AHK 每 ~60ms 扫一次，同色常亮就一直按。
+  韧消失后插件点亮 52 → AHK 第一次按键成功补上韧；但「已生效 → 主动熄灭 52」这条判定
+  被压在 **2 秒节流之后**（PD.BuffStep 顶部），色块要一直挂到 2 秒后才被收掉，
+  而 GCD 只有 1.5 秒 → GCD 一转 AHK 的下一次扫描就又按一次 → 韧被打了两下。
+- 修法（Priest/Priest_Forever_Discipline.lua）：
+  ① 新增 PD.SelfBuffSettle()：**每 tick**（自带 0.25 秒节流，战斗/脱战都跑，
+     且排在 2 秒节流**之前**）判定「韧 / 心灵之火是否已生效」：
+     多通道 ID 直查 + 名字族 + 经典 UnitBuff + 本地施放记账，已生效 → **立刻熄灭 52 / 31**；
+     开关关 → 同样立刻熄灭。2 秒节流从此**只约束点亮**，不再约束熄灭。
+  ② 点亮窗口硬上限 1.0 秒（**必须小于 GCD 1.5 秒**）：点亮后无论 AHK 按没按到，
+     1.0 秒后一律熄色块 —— 色块绝不跨过 GCD，AHK 就没有第二次成功按键的机会。
+     这是「记账通道也读不到施放成功」（受限战斗 / 名字与 ID 都是 secret）时的兜底。
+  ③ 重试闩锁 2.5 秒：这一发没打出去也不立刻重亮，等 GCD 完全转好再提示，
+     避免「GCD 一过就补第二下」的另一半形态。
+  ④ 焦点优先：宏 52 是 [@focus] 真言术：韧，焦点没到位时**只亮设焦点色块（192）**，
+     下一 tick 焦点到位了才亮 52 —— 不再在同一 tick 里既设焦点又亮 52
+     （否则这一发会打在别人身上：白烧蓝 + 把韧刷到错人身上）。
+  ⑤ 心灵之火（31）同构收口，判定统一走 PD.SelfBuffUp（通用自身增益件）。
+  ⑥ Core/Forever_Compat.lua 新增 WR_Forever_FortitudeCastLanded /
+     WR_Forever_SelfBuffCastLanded：**零 API 调用**的「这一发已经打出去了」判定
+     （只查本地施放记账 + 提示归属窗口），供收口路径最快熄色块；
+     另加 WR_Forever_FortitudeSpellIDSet()：静态全 rank 表 + 运行时解析玩家
+     真正学会的那个 rank（本服法术 ID 可能与经典表不一致，不能只靠写死的表）。
+
+【牧师】2026-11-21（维持真言术：韧兼容低级法术：全 rank ID 族 + 光环名归一 + 群体坚韧祷言）
+- 用户口径：「牧师还有维持真言术韧没兼容低级法术」。
+- 截图实证：1 级小号身上的韧是「真言术：韧 等级 1 · spellID 1243」（+4 耐力）。
+- 根因：判「有没有韧」只走 PD.BuffRemain("真言术：韧") → 帧级光环缓存的名字精确
+  比较（name == AuraName）：本服低 rank 光环名带等级后缀（「真言术：韧(等级 1)」），
+  基础名永远匹配不上 → 判「没韧」→ 每 2 秒重亮 52 → AHK 反复补韧；同时没有按
+  spellID 族（1243/1244/1245/2791/10937/10938/25389 + 群体坚韧祷言 21562）判定，
+  群体韧挂着时也会再单体补一次。
+- 修法：
+  ① Core/Core_Functions.lua 新增 WR_AuraNameBase：剥掉光环名的「(等级 N)」「（等级 N）」
+     后缀并做全角/半角归一；WR_GetAuraInfoCore 的字符串比较改走归一比较（ID 通道
+     不变）→ 低 rank 光环名也能命中基础名查询。
+  ② Core/Forever_Compat.lua 新增「真言术：韧 / 坚韧祷言 全 rank 专用件」：ID 族
+     （1243/1244/1245/2791/10937/10938/25389 + 群体 21562）、多通道存在性判定
+     （免读回 ID 直查 / 名字族直查 / 经典 UnitBuff / 既有缓存通道）、本地施放记账、
+     提示保持窗口（防重入，避免窗口被无限续期 → 永久常亮）。
+  ③ Priest/Priest_Forever_Discipline.lua 的 BuffStep 韧分支改走多通道判定：已挂韧
+     （任意 rank）或群体坚韧祷言 → 不点亮并主动熄灭 52；开关关 / 技能不可用 → 同样
+     主动熄灭，不再挂屏被 AHK 连按。
+  ④ 同构收口「心灵之火」（31 槽，同一行里的另一个维持类增益）：旧写法同样是
+     PD.BuffRemain 精确名字（低 rank 漏判）且「已经挂着 / 开关关 / 不可用」时
+     都不熄灭 → 残留色块挂屏被 AHK 连按。
+     Core/Forever_Compat.lua 新增通用「自身增益」专用件
+     WR_Forever_SelfBuffUp / WR_Forever_NoteSelfBuffPrompt /
+     WR_Forever_SelfBuffPromptHold：多通道存在性 + 本地施放记账（spellID 通道，
+     名字 secret 也能记）+ 提示保持窗口（防重入）+ 运行时解析玩家实际学会的 rank
+     （不写死 ID）。心灵之火分支改走该专用件，判定「已经挂着 / 开关关 / 不可用」
+     都主动熄灭 31。
+- 验证：test_priest_fortitude_lowrank.py 41/41 通过（低/高 rank ID 直查、群体韧、
+  半角/全角后缀名、secret 守卫不崩、本地记账过期、保持窗口防重入、BuffStep
+  点亮/熄灭回归、WR_AuraNameBase 归一用例、通用自身增益专用件与心灵之火分支）；
+  全量 Lua 语法 216 文件 0 失败；
+  全量夹具 180 个，仅 4 个既有失败（法师冰法 x3 / 术士 x1），这 4 个的失败条数在
+  git stash 前后完全一致（1 / 2 / 13 / 29），与本次改动无关。
+
+【牧师】2026-11-21（种族技能加限制：目标必须是怪物才释放）
+- 用户口径：「牧师种族技能能添加限制，当目标是怪物的时候才释放吗」。
+- 实现（Priest/Priest_Forever_Discipline.lua）：
+  ① 新增 PD.TargetIsMonster()：目标存在 + 存活 + 可攻击（UnitCanAttack）
+     + 非玩家（UnitIsPlayer=false，PVP 敌对玩家不算怪物）
+     + 非玩家控制单位（UnitPlayerControlled=false，猎人宠物/被精神控制的
+     玩家不算怪物；API 缺失时跳过这一环）。任何一环读不到都按「不是怪物」
+     处理 —— 宁可不放，符合限制口径。
+  ② PD.BurstStep 的种族爆发分支加此硬门：目标不是怪物 → 不点亮 181，
+     并走本步尾部主动熄灭（残留色块不挂屏）。与既有 已学会/本地记账 CD/
+     客户端冷却/提示保持窗口 门叠加，只加严不放宽。
+  ③ 面板「种族爆发」tooltip 同步注明「仅当目标是怪物时释放」。
+- 验证：test_priest_racial_burst_gate.py（B3~B7：玩家/无目标/已死/不可攻击/
+  宠物 → 全部不点亮）、test_priest_racial_burst_cd.py（B3 玩家目标不点亮
+  且熄灭 181；B1/B2 怪物目标回归）。
+
+【牧师】2026-11-21（真言术：盾严格受滑块控制：迁移重跑改写滑块值 + 禁用/脱战不熄色块）
+- 用户口径：「真言术盾使用要严格受滑块控制」。
+- 根因：
+  ① 旧档迁移只有会话内存旗标 PD.Migrated，每次登录/重载都重跑 —— 盾滑块
+     合法值 5/10/15/20（%）被当成旧档位改写成 50/91/96/0：设 10% 下次登录变 91%
+     （几乎满血就补盾）、设 20% 变 0（被禁用），循环阈值与面板滑块显示对不上；
+     治疗模式 2↔4 也每次登录来回翻转（同源）。
+  ② 滑块拉到 0 后 ShieldStep 只 return false 不熄灭 —— 上一 tick 亮的 59 挂着
+     被 AHK 连按，表现为「关了滑块还在上盾」。
+  ③ 防ADD=是 + 脱战时主循环早退，ShieldStep 不执行，战斗最后一 tick 的盾色块
+     无人收掉，脱战后仍在补盾。
+- 修法（Priest/Priest_Forever_Discipline.lua）：
+  ① 迁移改用存档旗标 JL_MIG_V2，历史上只执行一次；且盾值 1~20 中属于新滑块
+     合法步进值（5 的倍数）的一律按用户百分比对待，不再改写；真正的旧档位
+     （7→70 等非步进值）仍迁移一次；
+  ② ShieldStep：滑块=0 → 主动熄灭 59；阈值钳制 0~100（存档异常值不把满血判低血）；
+     候选每 tick 按当前滑块值重新过滤，调低滑块后保持窗口不续亮高于阈值的目标；
+  ③ 主循环开头：滑块=0 → 无条件熄灭 59（任何早退门之前）；防ADD=是 + 脱战 →
+     在 BuffStep 之前熄灭 59（BuffStep 命中会早退，排后面轮不到）。
+- 面板（Priest_Menu.lua）：盾滑块 tooltip 更新为「严格低于设定值（等于不补）；
+  值每次登录保持不变；0=不使用且立即熄灭已亮色块」。
+- 验证：test_priest_shield_aura_multichannel.py 46/46 通过（新增 E1~E8：
+  禁用熄灭 / 阈值边界等于不亮 / 调低不续亮 / 异常值钳制 / 迁移只跑一次 /
+  旧档位仍迁移 / 脱战两条早退路径都熄灭）；牧师家族夹具回归通过；全量 Lua 语法 0 失败。
+
+【牧师】2026-11-21（上了盾还一直亮盾·二修：记账只认名字不认 ID + 事件桥丢非自施 + 保持窗口反向续亮）
+- 用户口径：「牧师上了盾后，还是依旧会亮盾的色块」。截图实证：真言术：盾 · SpellID 17 ·
+  IconID 135940 · 4 秒冷却 —— 盾确实打出去了，59 槽位仍常亮。
+- 根因（三十七次修复补了「盾存在性」多通道，但受限战斗里光环四通道全读不到，
+  唯一可靠的本地记账通道自己又有三个洞，叠在一起仍是「上了盾还一直亮」）：
+  ① 记账只认名字不认 ID：UNIT_SPELLCAST_SUCCEEDED 的 spellName 在受限战斗里是 secret →
+     WR_Forever_CastLog（名字键）永远为空；WR_Forever_ShieldCastAt 只查名字键，
+     从不查唯一有值的 WR_Forever_CastLogByID[17] → 盾的记账通道整条失效；
+  ② 事件桥丢非自施：Core/Forever_APIShim.lua 把整笔记账关在 unit == "player" 门里，
+     而本事件首参是「施放落点单位」——宏 59 是 [@focus] 真言术：盾，落在 party1/target
+     上时 unit ~= "player"，整笔丢弃 → 给队友上盾永远记不上账；
+  ③ 保持窗口反向续亮：WR_Forever_ShieldPromptHold 在施放成功后把窗口延长到整个盾
+     持续时间（30 秒）→ 盾明明上身，色块却被强行续亮 30 秒；
+  ④ secret number 的 type() 仍是 "number"，NotePlayerCast 里 spellID > 0 比较一抛错，
+     整笔记账（含名字通道）一起被 pcall 丢掉。
+- 修法：
+  ① WR_Forever_ShieldCastAt 同时查名字键与全部 13 个 rank 的 CastLogByID（取最新）；
+  ② 事件桥记账移出 unit == "player" 门（LastPlayerCast 语义保持不变），落点无关都记账；
+  ③ 新增「已确认施放」记账 WR_Forever_ShieldConfirmed：提示归属（3 秒内点亮过该单位）
+     优先，无提示记录时按 [@focus] 宏形态归属当前焦点（手动施放也认）；
+     WR_Forever_ShieldUp 在光环通道之后先查确认记账 → 盾上身即不亮；
+  ④ 保持窗口只覆盖「点亮后等 AHK 按键」的 1.5 秒，施放成功后不再续期；
+  ⑤ NotePlayerCast 的 spellID 先过 WR_IsSecretValue + pcall 收敛再写表。
+- 验证：盾夹具 29/29（新增 D1-D6：名字 secret 只靠 ID 记账、secret 守卫不丢账、
+  焦点归属/跨单位不假阳、保持窗口不续期、ShieldStep 盾上身后不点亮且主动熄灭 59、
+  事件桥落点非 player 也记账）；全量 Lua 语法 216 文件 0 失败；牧师家族夹具 0 失败。
+
+【牧师】2026-11-21（上了盾还一直亮盾：补「盾存在性」维 —— 多通道免读回直查 + 本地施放记账）
+- 用户口径：「牧师上了盾后还会继续亮盾，存在异常」。
+  截图实证：玩家身上挂着「虚弱灵魂 · 法术ID 6788 · 无法从真言术：盾中获得益处 · 剩余5秒」，
+  盾明明刚上过，59 槽位却还在亮。
+- 根因（与三十四/三十五/三十六次修复的「没学会」「CD 中」「脱战」都不是同一件事，
+  这次是 **盾有没有真的上身** 这一维）：PD.HasShield 只有两条路，都经
+  WR_GetUnitBuffTime / WR_GetUnitDebuffTime → WR_GetAuraInfoCore → 帧级光环缓存。
+  三个坑叠在一起，全部返回「不存在」：
+  ① 受限战斗里 C_UnitAuras.GetAuraDataByIndex 抛「Auras cannot be accessed when
+     secret」→ WR_ScanAurasForUnit 整段 pcall 失败 → 缓存保留上一次（往往是 nil）；
+  ② 缓存里 aura.name 可能是 secret string，WR_GetAuraInfoCore 的 `name == AuraName`
+     比较会抛错（它没包 pcall）→ PD.UnitBuffRemain 的 pcall 把整次查询吞成 0；
+  ③ 全仓没有「我刚给这个单位上过盾」的本地记账 —— 技能真打出去了，插件不知道。
+  三条都返回「不存在」→ HasShield=false → 每 tick 重亮 59 槽位 → AHK 连按。
+- 修法（Core/Forever_Compat.lua，做成**增益/减益通用件**，全仓可复用）：
+  ① 新增 WR_Forever_AuraPresence(unit, name, ids, filter)：四类通道依次问「在不在」——
+     免读回 ID 直查（GetPlayerAuraBySpellID / GetUnitAuraBySpellID）、
+     名字族直查（GetPlayerAuraBySpellName / GetUnitAuraBySpellName / GetAuraDataBySpellName）、
+     经典 UnitBuff / UnitDebuff(unit, 名字)、既有缓存通道。
+     **只采信肯定证据**：任一明确 true → true；全都读不到 → nil（未知），
+     绝不把「读不到」当成「没有」—— 那正是本次故障的形态；
+  ② 新增 WR_Forever_ShieldUp(unit)：盾本体（13 个 rank ID）→ 虚弱灵魂 6788 →
+     本地「已确认施放」记账，三层依次判；
+  ③ 新增 WR_Forever_NoteShieldPrompt / WR_Forever_ShieldPromptHold：
+     点亮后记一笔并留 1.5 秒保持窗口（给 AHK 扫屏按键的时间），
+     **保持窗口内重复点亮不续期**（防重入，否则窗口被无限续命 → 色块永久常亮）；
+     施放成功 30 秒内算「有盾」，5 秒还没等到施放就清账（空按不会锁死）。
+- 修法（Priest/Priest_Forever_Discipline.lua）：
+  ① PD.HasShield 改走 PD.ShieldUp → WR_Forever_ShieldUp（读不到一律按「没有」继续上盾，
+     宁可多上一次，也不让色块挂死被 AHK 连按）；
+  ② 新增 PD.ShieldStep()：候选 = 低于拉条阈值 **且此刻没盾** 的人里血最少的那个。
+     旧实现把盾当普通 HealStep（选最低血的人 → 有盾就整步跳过），只要「最低血的那个人」
+     已经有盾，别人缺盾也不补，而 AHK 读到 59 常亮时打的是焦点，往往把盾重复套在
+     同一个人身上（白烧蓝 + GCD）；
+  ③ 本 tick 不该亮（没候选 / 不可用 / 点亮失败）→ **主动熄灭 59**；
+  ④ 主循环盾步改为 PD.ShieldStep()。
+- 新增离线夹具 .workbuddy/test_priest_shield_aura_multichannel.py（A1-A8 / B1-B5 / C1-C5，20 项全过）：
+  多通道命中、secret 抛错不崩、读不到回 nil、保持窗口防重入、跨单位归属
+  （给 party1 上盾不会让 party2 也以为自己有盾）、ShieldStep 选人/熄灭。
+
+【牧师】2026-11-21（脱战了还亮惩击色块：补「脱战熄灭」维 —— 输出/爆发槽位必须主动收）
+- 用户口径：「牧师脱战了还会亮惩击色块，放ADD是选的是，存在异常」。
+- 根因（与三十四/三十五次修复的「没学会」「CD 中」都不是同一件事，这次是
+  **脱战维度**上的洞）：
+  ① 色块模型是「亮着 = 该按这个键」，而 WR_ColorFrame_Show 只在**自己**被调用
+     的那一刻先隐藏全部再点亮一个 —— 本 tick 一个色块都没点亮时，上一 tick 的
+     色块不会自己消失；
+  ② MainLoop 的收尾清扫 WR_SoD_SweepPowerBlocked 只处理「资源不足」一种情形
+     （Core/SoD_Runes.lua 注释写明：CD 中 / 无目标 / 脱战各有自己的机制，
+     不在总闸层擅自扩大改动面）；
+  ③ 而戒律循环的脱战分支原本是「补完 BUFF 就 return false」，从不熄灭任何槽位
+     → 战斗最后一 tick 亮的 196 惩击常亮不灭 → AHK 读到同色继续按
+     CTRL-NUMPADMINUS（/cast 惩击）→ 脱战后真的把惩击打出去，一打又进战斗。
+- 修法（Priest_Forever_Discipline.lua）：
+  ① 新增 PD.Hide(spell, slot)：走 Core 的 WR_HideSkillColorSlot（与总闸同一实现），
+     兜底按槽位直接熄灭两侧色块 + 文本；
+  ② 新增 PD.CombatOnlySlots / PD.HideCombatOnly()：196 惩击 / 87 暗言术：灭 /
+     197 黑暗献祭 / 181 种族爆发 —— 只在战斗中才有意义的槽位，脱战统一收掉；
+  ③ 主循环把「脱战熄灭」排在 PD.StopGate **之前**：坐下喝水 / 施法中 StopGate
+     会早退，排在后面这些状态下残留色块同样收不掉；
+  ④ PD.OffenseStep 补脱战门 + 每条早退路径（无目标 / 目标已死 / 不可攻击 /
+     超射程 / 点亮失败）主动 bail() 熄灭自己的槽位 —— 这是「惩击」这一类输出
+     色块不再挂屏的正面保证，而不是指望别的步骤顺手覆盖；
+  ⑤ 治疗 / BUFF / 驱散类槽位不在熄灭集合内：那些在脱战时本来就可能需要提示。
+- 同构修复（Priest_Forever_Shadow.lua）：暗影牧的战斗进入门同样是「不满足就
+  return false」，一样会把上一 tick 的输出色块留在屏幕上。现于该早退路径统一
+  熄灭 11 个战斗专用槽位（痛/触/疫病/震爆/死/鞭笞/暗影魔/消散/拥抱/沉默/暗影形态）。
+- 验证：新增 .workbuddy/test_priest_out_of_combat_colorblock.py，18 项全过
+  （脱战不亮 + 主动熄灭 + 战斗中仍正常点亮 + 无目标/超射程/不可攻击三条早退
+  熄灭 + StopGate 早退仍熄灭 + 脱战仍能补 BUFF + 暗影牧同构）；
+  牧师家族与种族爆发三套夹具回归通过，全量 216 个 Lua 文件语法 0 失败。
+
+【种族爆发】2026-11-21（用了还一直亮：补 CD 维 —— 本地施放记账 + 客户端冷却 + 提示保持窗口）
+- 用户口径：「牧师一直亮种族爆发色块，使用了种族技能还是一直亮，存在异常」。
+  截图实证：狂暴 · 种族特长 · 3 分钟冷却 · spellID 20554。
+- 根因（与三十四次修复的「没学会」不是同一件事，这次是 **CD 维度**上的洞）：
+  ① 无限战斗中 GetSpellCooldown 是 secret → WR_GetGCD 收敛成 0 →
+     WR_SpellUsable 的 GCD 门 `WR_GetGCD(Spell) <= 0.4` 恒成立；
+  ② WR_IsSpellUsableCompat 只判资源 / 客户端可用性 / 形态，本服私服实现对 CD 中
+     的技能也可能回 true；
+  ③ 全仓此前**没有任何本地施放记账** —— 技能真打出去了，插件完全不知道，
+     下一 tick 立刻再点亮同一槽位 181 → AHK 连按 → 用户看到「一直亮」。
+- 修复①（Core/Forever_Compat.lua）：新增种族爆发专用冷却证据链。
+  · WR_Forever_NormalizeSpellKey：剥「(种族特长)」/「（种族特长）」/「(等级 N)」
+    后缀，半角全角分两次字面量剥（多字节不能进 Lua 字符类）；secret 名字返回 nil。
+  · WR_Forever_RacialBurstSpellIDs：本服实测 ID 表（狂暴 20554 / 血性狂怒 20572）。
+    **不写进 SPELL_ID_OVERRIDES** —— 那张表是全局覆盖，会把德鲁伊的「狂暴」
+    (Berserk) 也顶成巨魔的种族 ID。
+  · WR_Forever_SpellCooldownLeft：C_Spell.GetSpellCooldownDuration +
+    EvaluateRemainingDuration 引擎侧求值（不吃 secret）→ 退 WR_SpellCooldownInfo
+    的 start+duration → 无曲线工具时落到通道②取精确值，只有都失败才用 1 秒兜底。
+  · WR_Forever_NotePlayerCast / WR_Forever_CastCooldownLeft：本地施放记账
+    （按归一名字 + spellID 双键，名字是 secret 时只靠 ID 记账，都读不到就放弃）。
+  · WR_Forever_BurstReady：已学会 → 本地记账 CD → 客户端冷却 → 提示保持窗口
+    → 客户端可用性。**保持窗口内返回 true（继续亮）**，不是 false ——
+    点亮当 tick 就判死会变成「亮 100ms / 灭 1.5s」的闪烁，AHK 很可能一次都没读到。
+    窗口过后按有限次重试（<=15 秒按保持窗口、<=300 秒每 20 秒、更长按完整 CD），
+    避免「一次漏记锁死 3 分钟不再提示」。
+  · WR_Forever_RacialBurstCD：全职业共用真实 CD 表（狂暴/狮心/艾露恩之光/尤里卡！
+    180 秒、血性狂怒 120 秒），未登记按 180 秒保守处理。
+  · WR_Forever_RacialBurstReady / WR_Forever_HideRacialBurst：共享的「取一个真能打
+    的技能名」与「熄灭 181」入口。
+- 修复②（Core/Forever_APIShim.lua）：UNIT_SPELLCAST_SUCCEEDED 接本地记账。
+  这是唯一的施法成功入口，在这里统一记一笔即可覆盖全职业；名字是 secret 时
+  归一函数内部已过 WR_IsSecretValue 并包 pcall，读不到就只靠 spellID。
+- 修复③（Core/Forever_Compat.lua 的 WR_Forever_GetRacialBursts）：
+  在**取列表的源头**按 CD 过滤。各职业的种族爆发步（战士三系 / 德鲁伊三系 /
+  猎人三系 / 法师三系 / 萨满两系 / 术士三系 / 牧师戒律）都吃这个列表，
+  在源头剔掉还没好的技能即可全职业一次性修好（与三十四次修复的「已学会」过滤同源）。
+  **只过滤本函数**：宏注入（Forever_Hooks 的 InjectRacialLines）用的是
+  WR_Forever_PlayerRacialBursts，那条路在建宏期（登录 / 切天赋）执行，
+  此刻不可能有 CD，不能被影响，否则会漏注入 /cast 行。
+- 修复④（Core/Forever_Compat.lua + Forever_Hooks.lua）：抽出 WR_Forever_BurstLearned
+  作为「已学会」判据，实测 spellID 命中即直接判已学会。
+  原因：本服种族主动技能在法术书里常带「(种族特长)」后缀，WR_ResolveSpellID 按纯名
+  解析不到 → 名字口径的 SpellLearned 误判「没学会」→ 把巨魔牧师的「狂暴」整条剔掉 →
+  种族爆发永远不亮（比「一直亮」更糟的反向故障）。实测 ID 是「自己打出来过、截图核对
+  过 spellID」的确定证据，优先于任何按名字的推断；安全前提是调用方都已先按**种族**
+  过滤过列表，所以只会是本种族真有的技能。Hooks 的源头过滤与 BurstReady 共用此判据。
+- 修复⑤（各职业种族爆发步）：牧师 / 战士三系 / 德鲁伊野性 / 猎人兽王 统一改走
+  WR_Forever_RacialBurstReady，并在本步判定「不亮」时**主动熄灭 181 槽位**。
+  色块模型是「亮着就一直按」，只 return false 不熄灭的话上一 tick 的色块会一直
+  挂着被 AHK 连按 —— 正是用户看到的「用了还是一直亮」。
+- 修复⑥（Core/Forever_Compat.lua 新增 WR_Forever_RacialBurstStep）：把「七道门」
+  收成一个全职业共用入口 —— 按种族精确列表 → 已学会 → 本地施放记账 CD →
+  客户端冷却 → 提示保持窗口 → 客户端可用性 → 点亮后记提示时间戳；
+  本步不亮（含面板开关关闭、Show 失败）一律主动熄灭槽位。
+  上一轮只改到牧师 / 战士三系 / 德鲁伊野性 / 猎人兽王，**法师三系、猎人射击·生存、
+  萨满两系、术士三系、德鲁伊平衡·恢复仍是旧的「只问 WR_SpellUsable」口径** ——
+  同一个「用了还一直亮」的坑，这次一次性收口：
+  · Mage_Frost/Fire/Arcane_Features.lua（槽位 181）
+  · Hunter_Marksmanship/Survival_Features.lua（槽位 181）
+  · Shaman_Enhancement/Restoration_Features.lua（槽位 181）
+  · Warlock_Affliction/Demonology/Destruction_Features.lua（槽位 8）
+  · Druid_Balance/Restoration_Features.lua（槽位 181）
+  旧实现全部保留为「Core 未加载新函数」时的兼容回退分支。
+- 验证：新增 test_racial_burst_step_unified.py（U1-U6，12 条全绿：CD 中不亮且熄灭 /
+  CD 好了点亮并记账 / 开关关不亮且熄灭 / Show 失败熄灭 / 旧 Core 回退 /
+  术士槽位 8）；test_priest_racial_burst_cd.py 27 条、test_priest_racial_burst_gate.py
+  15 条仍全绿；全量 216 个 Lua 文件语法 0 失败。
+
+【牧师】2026-11-21（戒律面板爆发只留「种族爆发」：三槽位图标 + 六个按钮全部删除）
+- 用户口径：「牧师面板中爆发按钮，只留第一个爆发按钮，其他删除，连带的其他 6 个按钮也删除」。
+- 面板（Priest/Priest_Menu.lua）：
+  · 爆发分组只保留「种族爆发」（JL_BF_RACE，默认开）；
+  · 删除图标「槽位1 / 槽位2 / 槽位3」（JL_BF_S1~S3，含右键循环选技能）；
+  · 删除按钮「爆发槽位1 / 2 / 3（设置）」「爆发全开（全部打开）」「爆发全关（全部关闭）」
+    「爆发切换（切换）」共 6 个。
+- 循环（Priest/Priest_Forever_Discipline.lua）：
+  · PD.BurstStep 删掉三槽位分支，只剩种族爆发一条路径（按种族取列表 + 已学会硬门，
+    全都没学会则本步跳过，不卡主循环）；
+  · PD.BurstSlotValue / PD.BurstSetAll / PD.CycleBurstSlot / PD.BurstChoices 一并下线；
+  · 旧档迁移：清掉残留的 JL_BF_S1~S3 与 JL_BF_SLOT1~3（只执行一次），只保留 JL_BF_RACE。
+- 功能层（Priest/Priest_Forever_Discipline_Features.lua）：
+  · 删除 WR_PriestDisciplineBurstAllOn/AllOff/Toggle 与 BurstSlot1/2/3 六个按钮函数；
+  · 删除已无对应面板项的斜杠命令 /mkhdiscburst 与 /mkhdiscslot；
+  · /mkhdisc 诊断输出只保留 JL_BF_RACE。
+- 验证：test_priest_discipline_image_sync.py（A7 断言三槽位已下线，PASS=63 FAIL=0）、
+  test_priest_discipline_features_load.py（T6 断言按钮函数与命令已下线，0/6 失败）、
+  test_priest_racial_burst_gate.py（R1-R9/L1-L3/B1-B2 全过）。
+
+【牧师】2026-11-21（1 级小号卡种族爆发色块：种族列表改为按种族精确 + 已学会硬门）
+- 用户口径：「1级小号牧师会卡种族爆发色块」。
+- 根因（两个坑叠在一起，且不只在牧师身上）：
+  ① Core/Forever_Compat.lua 的 WR_Forever_GetRacialBursts 按**阵营**返回 ——
+     部落恒为 {血性狂怒, 狂暴}、联盟恒为 {艾露恩之光, 尤里卡！}，再并上 BOTH
+     （四个全给）。于是每个角色都会拿到自己没有的种族技能：亡灵牧师去试
+     「血性狂怒」「狂暴」，兽人战士去试「艾露恩之光」「尤里卡！」。
+  ② 12.x 的 C_Spell.IsSpellUsable(spellID) 只判资源/CD/形态，**不判是否学会**
+     （私服还会对解析不出的名字直接回 true），旧 WR_IsSpellUsableCompat 拿到
+     usable==true 就放行 → 「玩家根本没有的技能」被判成可用。
+  结果：种族爆发步每 tick 点亮宏槽 181，而宏体三条 /cast 全是没学会的技能，
+  客户端一条都不执行 → 色块不灭 → AHK 连按 → 主循环永远停在爆发步，
+  后面的惩击/治疗一步都轮不到。
+- 修复①（Core/Forever_Hooks.lua）：种族名归一 + 按种族精确取列表。
+  WR_Forever_RaceToken 产出 "NightElf"/"Scourge"，数据表写的是
+  "Night Elf"/"Undead"，两套名字对不上导致精确匹配恒落空；新增
+  WR_Forever_RaceAlias / WR_Forever_NormalizeRaceName 做别名归一（大小写与空格
+  不敏感），并改为两个阵营表都扫（不再依赖 UnitFactionGroup）。天裔的两个分支
+  （高阶议会 / 御风者）统一按 Skyborne 命中。
+- 修复②（Core/Forever_Hooks.lua）：列表源头过滤「没学会」。
+  各职业的种族爆发步（战士 / 德鲁伊 / 猎人 / 法师 / 萨满 / 术士 / 牧师）都直接
+  吃这个列表，在源头剔掉没学会的技能即可全职业一次修好。判据只剔「确认没学会
+  (false)」，读不到 (nil) 一律保留。
+- 修复③（Core/Forever_Compat.lua）：新增 WR_Forever_SpellLearned(spell) ——
+  「有没有这个技能」的独立判据。返回 true = 已学会（法术书解析出 spellID，
+  或 IsPlayerSpell / C_Spell.IsSpellKnown 直查命中）；false = 确认没学会
+  （法术书已就绪且解析不到）；nil = 读不到（登录初期法术书为空 / 换天赋瞬间
+  索引被清）→ 调用方一律放行，避免把整条循环误杀成「一个技能都不亮」。
+- 修复④（Core/Forever_Compat.lua）：WR_Forever_GetRacialBursts 改为优先走
+  按种族精确的 WR_Forever_PlayerRacialBursts；且**种族能解析出来时就完全信任
+  精确结果**（哪怕是空表）—— 亡灵/牛头/人类本身没有 burst 向特长，此时若退回
+  阵营表就等于又把「血性狂怒/狂暴」塞回去。只有种族读不到才退回阵营兜底。
+- 修复⑤（Priest/Priest_Forever_Discipline.lua）：新增 PD.Learned(spell) 薄封装，
+  并把「确认没学会」并入 PD.CanCast —— 从此牧师所有施法判定（治疗链、驱散、
+  输出、插入、三个爆发槽位、种族爆发）都同时具备「有没有这个技能」与
+  「此刻能不能放」两维；读不到（nil）不拦。种族爆发步改为优先按种族取列表，
+  全都没学会则本步直接跳过，不再卡住主循环。
+- 兼容：WR_Forever_SpellLearned 只做「是否拥有」判断，不改变任何技能的冷却、
+  资源、形态判定；WR_SoD_NotEnoughPower / WR_ColorFrame_ShowSkill 的既有语义
+  完全不动（曾试过在色块总闸加这道门，会误杀「种族爆发」这类描述型伪技能名，
+  已回退，只在真实技能名所在的位置判）。
+- 验证：新增 .workbuddy/test_priest_racial_burst_gate.py（R1-R9 / L1-L3 / B1-B2
+  共 14 项全绿：亡灵/人类空列表、兽人只给血性狂怒、巨魔只给狂暴、暗夜精灵归一
+  命中艾露恩之光、种族读不到才退回阵营、源头过滤与放行、已学会三态、牧师爆发步
+  不点亮/点亮）；全量 Lua 语法 216 文件 FAIL=0；牧师与圣骑士家族夹具回归全绿。
+
+【防骑】2026-11-21（清洁术战斗驱散：名称族轮询 + 轮询独立驱动，两条结构性漏洞堵上）
+- 用户口径：「只要能实现骑士清洁术在战斗中正确的驱散魔法，疾病，中毒即可」。
+- 三十一次修复的 spellID 全集轮询语义是对的，但有两个与 API 权限无关的漏洞，
+  会让它在真机上继续哑火：
+  · 候选集靠扫静态库建（区间 1..130000 + 1200000..1400000）。本服自定义 debuff
+    若不在区间内、或客户端没有 C_Spell.GetSpellDispelType / GetSpellInfo，
+    候选集就覆盖不到它 → 轮询再好也问不到那个 ID。
+  · 轮询只在 CleanseStep 的 tryUnit 里推进。而防骑主循环里 鼠标指向保护 /
+    圣印窗口（1.0 秒重亮）/ 正义之怒 / 审判与神圣打击色块 都会每 tick 提前
+    return true → CleanseStep 不被调用 → 游标原地不动 → 一轮永远扫不完 →
+    轮询恒 nil → 永不驱散。
+- 修复①（名称族轮询）：GetAuraDataBySpellName / GetUnitAuraBySpellName 与
+  GetUnitAuraBySpellID 同属 RequiresNonSecretAura 族 —— 只按「名字」问「在不在」，
+  不枚举光环、不读任何字段。白名单名字表只有几十条，0.25 秒问一遍开销可忽略；
+  本服 debuff 名字在截图里一直是明文。它正好补上「候选集漏 ID」的漏。
+- 修复②（轮询独立驱动）：专用 OnUpdate 帧按 0.12 秒节流推进
+  「名字族（player/target）」+「spellID 游标（player 每轮必扫，其余单位轮转一个）」，
+  完全不经过主循环分支；只在「清洁术功能开着 + 战斗中或光环受限」时运行，
+  脱战零开销。这样无论循环怎么 return true，一轮扫描都能在固定时间内走完，
+  2 秒级的短 debuff（冰冻 15850 等）也来得及点亮。
+- 语义不变：两条通道都只认肯定证据，读不到一律 nil，绝不判无；
+  诅咒 / 流血仍由白名单与名字表排除（名字表只收毒 / 病 / 魔法）。
+- 诊断 /FH_QJS_DEBUG 新增「名称轮询=命中名/扫描次数」。
+
+
+【防骑】2026-11-21（清洁术「战斗中精准驱散」最终解法：按 spellID 全集精确轮询）
+- 用户口径：「这么多次修复都无法实现在战斗中精准驱散」。
+- 本轮先把客户端源码逐条核对完（wow-ui-source 12.1.0），确认**光环系统内部的一切读回
+  在受限战斗里都被封死**，所以此前十几轮「加读通道」注定落空：
+  · C_UnitAuras.GetAuraDataByIndex / GetAuraSlots / GetUnitAuras /
+    GetUnitAuraInstanceIDs 全部标 RequiresUnitAuraAccess = true
+    → 污染插件在受限战斗里一律抛「Auras cannot be accessed when secret while
+      tainted by 'MKHelperForever'」（诊断里那三条 ERR 就是它们）。
+  · 每枚 AuraButton 创建后挂 DenyTaintedAccessWhenAurasAreSecret
+    （CustomAuraContainerConstants.AccessRestrictionFlags）→ IsShown / GetAtlas /
+    GetVertexColor 在战斗里全被拒（诊断「EUI可见=false(0/0枚)」即此）。
+  · 容器尺寸由 CustomAuraContainerFlowLayoutMixin:OnLayoutComplete 用
+    SetSize(secretwrap(w,h)) 写入 → 也是 secret，不能比较。
+  · 组的 GetAuraGroup 只在 Private 分区，插件侧调不到（「probe判定=nil」）；
+    公有 GetAuraGroupFrameCount 返回 #ownedFrames（批量预分配高水位，恒 ≥10），
+    不是当前条数 —— 所以「数组内帧数」这条路从原理上就不成立。
+- 唯一被客户端明确允许的是 RequiresNonSecretAura 族：
+    C_UnitAuras.GetPlayerAuraBySpellID(spellID) / GetUnitAuraBySpellID(unit, spellID)
+  EUI 生产代码原文实证（EllesmereUIQoL_Bloodlust.lua 435-441）：
+    "GetPlayerAuraBySpellID is RequiresNonSecretAura and returns ZERO VALUES for a
+     restriction-FLAGGED spell while its aura is up"
+  即：**没被限制旗的 ID，战斗中照样精确回答「在 / 不在」**。
+- 于是把问题反过来问：清洁术能驱散的 debuff 就那些 spellID，逐个问在不在。
+  · 候选集（一次性，后台分摊建库、可落盘）：扫客户端静态法术库，取
+    dispelType ∈ {Magic, Disease, Poison} 的全部 ID；限制旗 ID 仍保留轮询
+    （问它只会假阴性，不会假阳性），只用于判定候选集是否「可信」。
+  · 每 tick 轮询 320 个 ID，按单位独立游标，30ms 同 tick 缓存；
+    UNIT_AURA 时游标回绕，刚上的短 debuff 下一 tick 就被问到。
+  · 命中 → 精确 true（并把这个 ID 记进已发现表）；
+    一轮扫完零命中且候选集可信 → 精确 false（直接熄灭）。
+- 这条 false 是「没中 debuff 不亮」的正解：不再需要任何「有减益就放行」的降级口径，
+  也不再依赖任何被封死的容器/按钮读回。受限战斗内外同一套语义。
+- 诊断 /FH_QJS_DEBUG 新增：轮询候选=数量/剔N/可信/源/secretAPI、建库进度、
+  轮询判定、轮询游标（含命中 ID）。
+- 夹具：新增 test_paladin_cleanse_id_scan.py（S1-S5 静态、D1-D3 建库、
+  P1-P7 轮询语义），清洁术全家族 25 个夹具全绿。
+
 
 【防骑】2026-11-21（撤销「战斗盲驱」：不要盲驱散，读不到就判无）
 - 用户口径（原话）：「不要盲驱散」。

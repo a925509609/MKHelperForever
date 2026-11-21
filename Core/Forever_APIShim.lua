@@ -154,7 +154,21 @@ WR_Forever_Bridge:SetScript("OnEvent", function(self, event, ...)
             WR_Forever_LastPlayerCast.spellID = spellID or 0
             WR_Forever_LastPlayerCast.spellName = spellName or ""
             WR_Forever_LastPlayerCast.time = GetTime()
+            -- ★★★ 2026-11-21 三十五次修复：大招本地施放记账。
+            --   「种族爆发色块用了还一直亮」的根因之一是**没人记账**：技能真打出去了，
+            --   插件不知道 → 下一 tick 又点亮同一个槽位 → AHK 连按 → 一直亮。
+            --   这里在唯一的施法成功入口统一记一笔，供 WR_Forever_BurstReady 判 CD。
+            --   名字在受限战斗里可能是 secret → 归一函数内部已过 WR_IsSecretValue 并包
+            --   pcall，读不到就只靠 spellID 记账，两者都读不到则放弃本次（绝不猜）。
             WR_Forever_FireSynthetic("SPELL_CAST_SUCCESS", "player", "player", spellID, spellName)
+        end
+        -- ★★★ 2026-11-21 三十八次修复：施放记账不再限定 unit == "player"。
+        --   本事件首参是「施放落点单位」：宏 59 是 [@focus] 真言术：盾，落在
+        --   party1/target 上时 unit ~= "player"，旧代码把整笔记账丢弃 →
+        --   盾的本地记账永远为空 → 「上了盾还一直亮」。
+        --   记账只关心「玩家放出了这个法术」，与落点无关；LastPlayerCast 语义保持不变。
+        if type(WR_Forever_NotePlayerCast) == "function" then
+            pcall(WR_Forever_NotePlayerCast, spellName, spellID, GetTime())
         end
     elseif event == "UNIT_SPELLCAST_START" then
         local unit, _, spellID, spellName = ...

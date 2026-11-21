@@ -2317,6 +2317,16 @@ function WR_PaladinForeverProt()
     --   （驱散是战斗中的即时救场，优先级高于补圣印）。
     if WR_PaladinForever_RefreshCleansePrompt() then return true end
 
+    -- ★★★ 2026-11-21 三十三次修复：清洁术轮询独立驱动。
+    --   本循环下面还有一串「每 tick 提前 return true」的分支（鼠标指向保护、
+    --   圣印窗口、正义之怒、审判/神圣打击色块…），旧实现里清洁术的 spellID
+    --   轮询只在 CleanseStep 的 tryUnit 里推进 → 那些分支一抢，游标就不动，
+    --   一轮永远扫不完 → 战斗中永不驱散。这里用专用 OnUpdate 帧按固定节流推进，
+    --   与主循环分支完全解耦（函数内部自带开关/战斗/节流判定，脱战零开销）。
+    if type(WR_PaladinForever_CleansePollTick) == "function" then
+        pcall(WR_PaladinForever_CleansePollTick)
+    end
+
     -- ★★ 2026-11-09 第十一次修正：圣印提示保护窗口。
     --   圣印色块亮起后的保护窗口内（WR_PaladinForever_SEAL_PROMPT_HOLD，
     --   2026-11-14 由 0.3 秒提高到 1.0 秒），本函数会每 tick 重亮同一个圣印并直接返回，

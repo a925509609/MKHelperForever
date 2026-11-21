@@ -410,9 +410,18 @@ function WF.ExecuteWanted()
     return hp <= threshold / 100
 end
 
--- 种族爆发：读当前种族的爆发技能列表，任意一个可用就提示（宏 181）。
+-- 种族爆发：读当前种族的爆发技能列表，任意一个「真的能打」就提示（宏 181）。
+-- ★★★ 2026-11-21 三十五次修复：补 CD 维。旧实现只问 WR_SpellUsable，
+--   而无限战斗中 GetSpellCooldown 是 secret → WR_GetGCD 收敛成 0 → GCD 门恒成立
+--   → 3 分钟大招（狂暴 20554）被当成随时可用 → 用了还一直亮。
+--   现统一走 WR_Forever_RacialBurstReady（已学会 + 本地记账 CD + 客户端冷却 +
+--   提示保持窗口 + 客户端可用性）。
 function WF.RacialBurstWanted()
     if not WF.On("KN_ZDZZ", true) then return false end
+    if type(WR_Forever_RacialBurstReady) == "function" then
+        local okR, hit = pcall(WR_Forever_RacialBurstReady)
+        return okR and type(hit) == "string"
+    end
     if type(WR_Forever_GetRacialBursts) ~= "function" then return false end
     local ok, list = pcall(WR_Forever_GetRacialBursts)
     if not ok or type(list) ~= "table" then return false end

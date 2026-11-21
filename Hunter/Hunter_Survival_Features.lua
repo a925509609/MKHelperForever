@@ -442,6 +442,10 @@ function HS.BurstStep()
         return HS.Show("急速射击", 22)
     end
 
+    -- ★★★ 2026-11-21 三十五次修复：统一走 WR_Forever_RacialBurstStep 补 CD 维。
+    if type(WR_Forever_RacialBurstStep) == "function" then
+        return WR_Forever_RacialBurstStep(HS.Show, nil, 181, HS.On("LR_SCL_ZDZZ", true))
+    end
     if HS.On("LR_SCL_ZDZZ", true) then
         local list = HS.GetRacialBursts()
         for i = 1, #list do

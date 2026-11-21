@@ -743,6 +743,26 @@ function WF.BurstStep()
         end
     end
     if not WF.On("YD_ZDZZ", true) then return false end
+    -- ★★★ 2026-11-21 三十五次修复：统一走 WR_Forever_RacialBurstReady 补 CD 维。
+    --   旧实现只问 WR_SpellUsable（GCD 门在战斗中恒成立）→ 种族大招用了还一直亮。
+    if type(WR_Forever_RacialBurstReady) == "function" then
+        local okR, hit = pcall(WR_Forever_RacialBurstReady)
+        if okR and type(hit) == "string" then
+            if WF.Show("种族爆发", 181) then
+                if type(WR_Forever_NoteBurstPrompt) == "function" then
+                    pcall(WR_Forever_NoteBurstPrompt, hit,
+                         (type(WR_Forever_RacialBurstCD) == "table"
+                          and WR_Forever_RacialBurstCD[hit])
+                         or WR_Forever_RACIAL_BURST_DEFAULT_CD or 180)
+                end
+                return true
+            end
+        end
+        if type(WR_Forever_HideRacialBurst) == "function" then
+            pcall(WR_Forever_HideRacialBurst, 181)
+        end
+        return false
+    end
     local fn = WR_Forever_GetRacialBursts or WR_Forever_PlayerRacialBursts
     if type(fn) ~= "function" then return false end
     local okB, bursts = pcall(fn)

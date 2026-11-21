@@ -48,7 +48,7 @@ Priest_Menu = {
             -- ===== 拉条（截图默认值） =====
             { text = "|cffFFFFFF喝红药|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30, tooltipText = "血量低于设定值时喝|cff00adf0治疗药水|r。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_HXY" },
             { text = "|cffFFFFFF黑暗献祭|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 30, tooltipText = "自身血量高于设定值时使用|cff00adf0黑暗献祭|r（亡灵牧师种族技能，15 秒扣血换法力；法力高于80%时不用）。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_HZ" },
-            { text = "|cffFFFFFF真言术：盾|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 80, tooltipText = "友方血量低于设定值时补|cff00adf0真言术：盾|r（有虚弱灵魂时跳过）。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_ZYSD" },
+            { text = "|cffFFFFFF真言术：盾|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 80, tooltipText = "友方血量|cffaaffaa严格低于设定值|r时补|cff00adf0真言术：盾|r（等于设定值不补）。\n\n|cffaaffaa跳过条件（任一成立就不补）|r：目标已有盾，或身上有|cff00adf0虚弱灵魂|r（15 秒内无法再从盾获益）。\n判定走多通道（免读回 ID 直查 / 名字族直查 / 经典 UnitBuff / 光环缓存 + 本地施放记账），战斗中读不到光环也不会误判成「没盾」而反复提示。\n\n本值|cffaaffaa每次登录/重载都保持不变|r，不会被旧档迁移改写。\n\n|cffff5040值为0：不使用（已亮着的盾色块也会立即熄灭）。|r", saveVariable = "JL_ZYSD" },
             { text = "|cffFFFFFF苦修|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 70, tooltipText = "有人血量低于设定值时使用|cff00adf0苦修|r。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_KX" },
             { text = "|cffFFFFFF联结治疗|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 70, tooltipText = "有人血量低于设定值时使用|cff00adf0联结治疗|r（同时治疗自己和目标）。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_LJZL" },
             { text = "|cffFFFFFF快速治疗|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 50, tooltipText = "有人血量低于设定值时使用|cff00adf0快速治疗|r。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_KSZL" },
@@ -56,30 +56,20 @@ Priest_Menu = {
             { text = "|cffFFFFFF治疗术|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 75, tooltipText = "有人血量低于设定值时使用|cff00adf0治疗术|r。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_ZLSHU" },
             { text = "|cffFFFFFF次级治疗术|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 75, tooltipText = "有人血量低于设定值时使用|cff00adf0次级治疗术|r。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_CJZLS" },
             { text = "|cffFFFFFF恢复|r", isSlider = true, minValue = 0, maxValue = 100, valueStep = 5, defaultVal = 90, tooltipText = "有人血量低于设定值且没有|cff00adf0恢复|r时使用。\n|cffff5040值为0：不使用。|r", saveVariable = "JL_HF" },
-            -- ===== 爆发按钮 =====
-            { text = "|cffFFFFFF爆发槽位1|r", isButton = true, buttonText = "设置", buttonWidth = 90, labelWidth = 95, tooltipText = "点击循环选择：未设置 → 能量灌注 → 神圣新星 → 心灵专注 → 血性狂怒 → 狂暴 → 狮心", onClick = "WR_PriestDisciplineBurstSlot1" },
-            { text = "|cffFFFFFF爆发槽位2|r", isButton = true, buttonText = "设置", buttonWidth = 90, labelWidth = 95, tooltipText = "点击循环选择：未设置 → 能量灌注 → 神圣新星 → 心灵专注 → 血性狂怒 → 狂暴 → 狮心", onClick = "WR_PriestDisciplineBurstSlot2" },
-            { text = "|cffFFFFFF爆发槽位3|r", isButton = true, buttonText = "设置", buttonWidth = 90, labelWidth = 95, tooltipText = "点击循环选择：未设置 → 能量灌注 → 神圣新星 → 心灵专注 → 血性狂怒 → 狂暴 → 狮心", onClick = "WR_PriestDisciplineBurstSlot3" },
-            { text = "|cffFFFFFF爆发全开|r", isButton = true, buttonText = "全部打开", buttonWidth = 90, labelWidth = 95, tooltipText = "一键打开三个爆发槽位", onClick = "WR_PriestDisciplineBurstAllOn" },
-            { text = "|cffFFFFFF爆发全关|r", isButton = true, buttonText = "全部关闭", buttonWidth = 90, labelWidth = 95, tooltipText = "一键关闭三个爆发槽位", onClick = "WR_PriestDisciplineBurstAllOff" },
-            { text = "|cffFFFFFF爆发切换|r", isButton = true, buttonText = "切换", buttonWidth = 90, labelWidth = 95, tooltipText = "三个槽位开着就全关，全关就全开", onClick = "WR_PriestDisciplineBurstToggle" },
         },
         CB = {
             -- ===== 功能 =====
             { row = 1, column = 1, IconID = 135894, text = "|cffFFFFFF驱散|r", tooltipText = "自动驱散：自己/队友中|cff00adf0魔法|r→驱散魔法；中|cff00adf0疾病|r→驱除疾病。\n与上方「驱散」下拉的禁用/总闸共同生效。", saveVariable = "JL_QS_ON", section = "功能", defaultState = true },
             { row = 1, column = 2, IconID = 136149, text = "|cffFFFFFF暗言术：灭|r", tooltipText = "目标可攻击时使用|cff00adf0暗言术：灭|r（默认关闭，避免反伤）", saveVariable = "JL_AYSHM", section = "功能", defaultState = false },
-            { row = 1, column = 3, IconID = 135987, text = "|cffFFFFFF真言术：韧|r", tooltipText = "维持自己身上的|cff00adf0真言术：韧|r", saveVariable = "JL_ZYSR", section = "功能", defaultState = true },
-            { row = 1, column = 4, IconID = 135926, text = "|cffFFFFFF心灵之火|r", tooltipText = "维持自己身上的|cff00adf0心灵之火|r", saveVariable = "JL_XLHZ", section = "功能", defaultState = true },
+            { row = 1, column = 3, IconID = 135987, text = "|cffFFFFFF真言术：韧|r", tooltipText = "维持自己身上的|cff00adf0真言术：韧|r\n|cffaaffaa自动兼容各等级真言术：韧与群体坚韧祷言|r（已挂着就不重复补）。", saveVariable = "JL_ZYSR", section = "功能", defaultState = true },
+            { row = 1, column = 4, IconID = 135926, text = "|cffFFFFFF心灵之火|r", tooltipText = "维持自己身上的|cff00adf0心灵之火|r\n|cffaaffaa已挂着就不重复补|r（多通道判定 + 施放记账，兼容低等级写法）。", saveVariable = "JL_XLHZ", section = "功能", defaultState = true },
             { row = 1, column = 5, IconID = "Interface\\Icons\\Spell_Holy_HolySmite", text = "|cffFFFFFF惩击|r", tooltipText = "没有治疗目标时对当前目标使用|cff00adf0惩击|r填充输出", saveVariable = "JL_CJ", section = "功能", defaultState = true },
             -- ===== 插入（一次性，放完自关） =====
             { row = 2, column = 1, IconID = 135932, text = "|cffFFFFFF灌注|r", tooltipText = "插入|cff00adf0能量灌注|r（一次性，放完自关）", saveVariable = "JL_CRGNZ", section = "插入", defaultState = false },
             { row = 2, column = 2, IconID = 135981, text = "|cffFFFFFF新星|r", tooltipText = "插入|cff00adf0神圣新星|r（一次性，放完自关）", saveVariable = "JL_CRXX", section = "插入", defaultState = false },
             { row = 2, column = 3, IconID = 135943, text = "|cffFFFFFF治疗祷言|r", tooltipText = "插入|cff00adf0治疗祷言|r（一次性，放完自关）", saveVariable = "JL_CRZLDY", section = "插入", defaultState = false },
             -- ===== 爆发 =====
-            { row = 3, column = 1, IconID = 135727, text = "|cffFFFFFF种族爆发|r", tooltipText = "自动使用|cff00adf0种族爆发|r技能", saveVariable = "JL_BF_RACE", section = "爆发", defaultState = true },
-            { row = 3, column = 2, IconID = "Interface\\Icons\\INV_Misc_QuestionMark", text = "|cffFFFFFF槽位1|r", tooltipText = "爆发槽位1（右键循环选择技能）", saveVariable = "JL_BF_S1", section = "爆发", defaultState = false, onRightClick = function() if WR_PriestDisciplineBurstSlot1 then WR_PriestDisciplineBurstSlot1() end end },
-            { row = 3, column = 3, IconID = "Interface\\Icons\\INV_Misc_QuestionMark", text = "|cffFFFFFF槽位2|r", tooltipText = "爆发槽位2（右键循环选择技能）", saveVariable = "JL_BF_S2", section = "爆发", defaultState = false, onRightClick = function() if WR_PriestDisciplineBurstSlot2 then WR_PriestDisciplineBurstSlot2() end end },
-            { row = 3, column = 4, IconID = "Interface\\Icons\\INV_Misc_QuestionMark", text = "|cffFFFFFF槽位3|r", tooltipText = "爆发槽位3（右键循环选择技能）", saveVariable = "JL_BF_S3", section = "爆发", defaultState = false, onRightClick = function() if WR_PriestDisciplineBurstSlot3 then WR_PriestDisciplineBurstSlot3() end end },
+            { row = 3, column = 1, IconID = 135727, text = "|cffFFFFFF种族爆发|r", tooltipText = "自动使用|cff00adf0种族爆发|r技能\n|cffaaffaa仅当目标是怪物时释放|r（敌对、存活、非玩家及其宠物）。", saveVariable = "JL_BF_RACE", section = "爆发", defaultState = true },
         },
     },
     ["神圣"] = {

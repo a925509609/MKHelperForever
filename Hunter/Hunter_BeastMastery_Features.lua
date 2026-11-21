@@ -454,6 +454,26 @@ function HB.BurstStep()
     end
 
     if HB.On("LR_SWL_ZDZZ", true) then
+        -- ★★★ 2026-11-21 三十五次修复：统一走 WR_Forever_RacialBurstReady 补 CD 维
+        if type(WR_Forever_RacialBurstReady) == "function" then
+            local okR, hit = pcall(WR_Forever_RacialBurstReady)
+            if okR and type(hit) == "string" then
+                if HB.Show("种族爆发", 181) then
+                    if type(WR_Forever_NoteBurstPrompt) == "function" then
+                        pcall(WR_Forever_NoteBurstPrompt, hit,
+                             (type(WR_Forever_RacialBurstCD) == "table"
+                              and WR_Forever_RacialBurstCD[hit])
+                             or WR_Forever_RACIAL_BURST_DEFAULT_CD or 180)
+                    end
+                    return true
+                end
+                return false
+            end
+            if type(WR_Forever_HideRacialBurst) == "function" then
+                pcall(WR_Forever_HideRacialBurst, 181)
+            end
+            return false
+        end
         local list = HB.GetRacialBursts()
         for i = 1, #list do
             local name = list[i]
